@@ -25,6 +25,7 @@ export class Sequencer {
     this.live = live;
     this.c = compiled(def);
     this.loop = def.loop !== false;
+    this.swing = (def.swing ?? 0) * 6; // ticks to delay off-beat 16ths by
     this.t0 = t0 - from; // context time of song position 0
     this.startAt = t0;
     this.stopped = false;
@@ -110,7 +111,7 @@ export class Sequencer {
         }
         const ev = evs[st.i];
         const base = st.phase === 'intro' ? this.t0 : this.t0 + introSec + st.pass * loopSec;
-        const at = base + ev.tick * spt;
+        const at = base + (ev.tick + (ev.tick % 12 === 6 ? this.swing : 0)) * spt;
         if (at >= until) break;
         st.i++;
         if (at < this.startAt - 1e-6) continue; // seeking past it
