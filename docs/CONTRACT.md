@@ -56,6 +56,14 @@ Fields: `type team owner col row x y z dir t hit hitIds data element`.
 - `z` is the height in pixels.
 - `t` is the frame count.
 - `data.progress` is 0..1 for telegraphs.
+- Engine-owned `data` keys (don't reuse them for something else):
+  - `target {col,row}` (lob),
+  - `delay`, `landed`, `landing [[c,r]]` (drop),
+  - `cells [[c,r]]` (zone),
+  - `hidden` (mine).
+- Content callbacks (`cells`, `onPanel`, `onHit`, ...) may draw from `b.rng`. The engine calls each one
+  exactly when the effect happens, never speculatively, because an extra call shifts the seeded
+  sequence.
 
 ### Events (`b.emit(type, data)`, drained by the view each frame)
 | type | payload | meaning |
