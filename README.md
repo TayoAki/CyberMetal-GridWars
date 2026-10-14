@@ -1,0 +1,136 @@
+# CyberMetal GridWars
+
+A fights-only, real-time grid battler for the browser: a clean-room recreation of the **battle system of
+Mega Man Battle Network 3**, with no overworld and no story. You get straight into battles: 6x3 grid
+duels against viruses and boss navis, a chip folder, the Custom Screen, and Program Advance–style fusions.
+
+Every character, sprite, sound and tune is original. The *rules* are rebuilt from the game itself: chip
+damage, codes, MB, elements and rarity, virus/boss HP and elements, and the starter-folder shape were read
+from the owner's own BN3 ROM. None of the ROM's bytes ship in this repo.
+
+## Play
+
+- **No install:** run `npm run build`, then open `dist/cybermetal-gridwars.html` in any modern browser.
+  It's one self-contained file and works offline from `file://`.
+- **Dev server:** `npm run serve`, then open http://127.0.0.1:8123/. It serves plain ES modules, so there
+  is no build step.
+
+### Controls
+| | Keyboard | Gamepad | Touch |
+|---|---|---|---|
+| Move | Arrows / WASD | D-pad / stick | D-pad |
+| Buster (hold to charge) | Z or J | B / X | B |
+| Use chip / confirm | X or K | A / Y | A |
+| Open Custom Screen (gauge full) | Q / E / Shift | LB / RB / triggers | L / R |
+| Pause (SELECT in pause = retreat) | Enter | Start | START |
+
+## What's in it
+
+**Modes**
+- **Gauntlet:** eight areas. Each has three designed virus battles, then a boss duel. HP carries between
+  an area's battles; losing resets the area.
+- **Free Battle:** replay any battle you've reached, rematch bosses at V2, V3 and Ω, or roll a random
+  mixed battle.
+- **Folder:** edit your 30-chip folder from everything you've won. BN-style limits apply.
+- **Programs:** equip passive parts (SuperArmor, UnderShirt, FloatShoes, AirShoes, Custom+1/+2) within a
+  memory budget, a light take on BN3's Navi Customizer.
+
+**The battle system**, recreated:
+- **Field:** a 6x3 grid. Red area vs blue area, with ownership that moves: AreaGrab/PanlGrab steal panels,
+  which return after a while.
+- **Panels:** normal, cracked (breaks when you step off), broken (recovers later), grass (Fire ×2 and
+  burns away; Wood bodies regenerate on it), ice (you slide; Elec ×2), lava (50 Fire damage to non-Fire
+  bodies), poison (drains HP), holy (halves damage), sand and metal.
+- **Navi:** single-step movement with hold-repeat and input buffering. The buster does Attack-level
+  damage and doesn't flinch. Hold B to charge; the charge shot does 10× Attack and flinches. Rapid and
+  Charge levels change the timings.
+- **Custom Gauge:** fills over about 8.5 s; L/R opens the Custom Screen.
+- **Custom Screen:**
+  - you draw from a shuffled 30-chip folder;
+  - the BN selection rule applies: all selected chips must be the same chip or share one code, with
+    `*` matching any code;
+  - up to 5 chips;
+  - unpicked chips stay in your hand;
+  - ADD skips a turn for +5 chips (10 max).
+- **Fusions (Program Advance–style):** consecutive codes (Cannon A-B-C → Cannonade) or chip sets (Sword +
+  WideSwrd + LongSwrd → LifeSaber). Atk+10, Fire+30 and the other boost chips fold into the chip before
+  them.
+- **Hits:**
+  - the element wheel (Fire > Wood > Elec > Aqua > Fire) doubles damage;
+  - flinch, followed by player invincibility frames;
+  - paralysis (stun);
+  - knockback;
+  - Barrier (absorbs damage), Aura (blocks hits below its power), Guard (reflects), Invis;
+  - **Counter hits:** a chip landing during an enemy's wind-up.
+- **Rank:** time, hits taken, steps moved, and double/triple deletes, the way BN3 scores its Busting
+  Level.
+- **157 chips plus 15 fusions** across 65 behaviours covering every BN3 attack family:
+  - cannons, guns with splash, bombs, swords, shockwaves, punches, waves, rats;
+  - yo-yos, boomerangs, meteors, traps;
+  - recovery, barriers, area theft, stage changers, gauge chips;
+  - boosts and Navi chips that summon the game's own characters.
+- **Enemies:** 13 virus families with 4 levels each (L1-L3 and Ω), plus 8 boss navis with V1/V2/V3/Ω.
+
+## How it was built
+
+This project followed the [universal-modder](https://github.com/rehan-remade/universal-modder) skill's
+loop. The whole journal is in [`MODLOG.md`](MODLOG.md).
+
+1. **Recon.**
+   - The knowledge base had no prior notes on Battle Network or the GBA.
+   - No BN3 disassembly exists.
+   - Archipelago's MMBN3 randomizer supplied the text charset and the chip ID order.
+2. **Route: engine recreation.** BN3's battle rules are a pure, deterministic 60 Hz simulation
+   (`src/engine/`), and a canvas view draws it (`src/render/`). Nothing runs the original code.
+3. **Source of truth.** Small scripts, kept *outside* the repo, read these tables from the ROM:
+   - the chip data table: 0x20-byte records with codes, element, family, MB, rarity and damage;
+   - the chip-name and description text archives;
+   - the enemy stat table, packed as `HP | element << 12`;
+   - the preset folders.
+
+   The Program Advance recipe table was never found, so the recipes come from community documentation.
+   Timings (gauge fill, charge, i-frames) are tuned to how BN3 feels; they weren't measured from the ROM.
+4. **Oracles.**
+   - A headless rules bench (`npm test`), checked against deliberately broken builds.
+   - Per-pack tests for every enemy.
+   - Sprite contact sheets that were actually looked at.
+   - An end-to-end Playwright run through the real UI (`node tools/smoke.mjs`).
+5. **Content in parallel.** The engine contract is pinned in [`docs/CONTRACT.md`](docs/CONTRACT.md). It
+   let the virus packs, boss packs, core art and audio be built as separate files.
+
+### Fidelity: what each number is
+
+| Thing | Source |
+|---|---|
+| Chip damage, codes, MB, element, rarity (all standard and Navi chips) | BN3 ROM chip table |
+| Virus/boss HP and element per level | BN3 ROM enemy stat table |
+| Starter folder composition | BN3 ROM preset folder 0 |
+| Fusion (PA) damage | BN3 ROM chip table rows 320+ |
+| Fusion recipes | community-documented BN3 combos (recipe table not located) |
+| Gauge time, charge time, buster rate, i-frames, enemy attack damage and timings | tuned |
+
+## Project layout
+
+```
+src/engine/   deterministic battle sim (no DOM): battle, field, player, custom screen, chips, enemies
+src/render/   240x160 canvas renderer, pixel API, fonts, sprites, chip art, Custom Screen UI
+src/audio/    WebAudio synth: sound effects and original music, all generated at runtime
+src/game/     scenes (title, Gauntlet, Free Battle, folder, programs, options), save, rewards, data
+tests/        node:test benches (rules, data, enemy packs)
+tools/        dev server, single-file build, screenshot/smoke scripts, sprite sheet page
+docs/         CONTRACT.md (engine/content contract), field note
+```
+
+`npm test` runs every bench. `npm run build` makes the single-file game.
+
+## Legal
+
+This is a fan-made, non-commercial project. It isn't affiliated with or endorsed by Capcom.
+
+- *Mega Man Battle Network* is a trademark of Capcom; it's named here only to describe what this game's
+  battle rules recreate.
+- No Capcom code, graphics, audio or text is included.
+- The game's characters, names, art and music are original.
+- The ROM was used only as a private reference to read game data, and it isn't distributed.
+
+Code and original assets: MIT (see `LICENSE`).

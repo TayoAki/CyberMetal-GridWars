@@ -27,3 +27,13 @@ const page = html.replace(tag, () => `<script>${js}</script>`);
 await mkdir(dirname(out), { recursive: true });
 await writeFile(out, page);
 console.log(`wrote ${out} (${(page.length / 1024).toFixed(1)} KiB)`);
+
+// Artifact variant: the hosting page supplies <html>/<head>/<body>, so emit only the title, the style
+// and the body content (plus the inline script).
+const title = html.match(/<title>[\s\S]*?<\/title>/)[0];
+const style = html.match(/<style>[\s\S]*?<\/style>/)[0];
+const body = html.slice(html.indexOf('<body>') + 6, html.indexOf('</body>')).replace(tag, () => `<script>${js}</script>`);
+const artifact = `${title}\n${style}\n${body.trim()}\n`;
+const artifactOut = resolve(root, 'dist/artifact.html');
+await writeFile(artifactOut, artifact);
+console.log(`wrote ${artifactOut} (${(artifact.length / 1024).toFixed(1)} KiB)`);

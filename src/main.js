@@ -12,7 +12,7 @@ ctx.imageSmoothingEnabled = false;
 
 function fit() {
   const touch = document.body.classList.contains('touch');
-  const availW = window.innerWidth - 16;
+  const availW = window.innerWidth - 32;
   const availH = window.innerHeight - (touch ? 230 : 60);
   let scale = Math.min(availW / SCREEN_W, availH / SCREEN_H);
   if (scale >= 2) scale = Math.floor(scale);
@@ -45,6 +45,14 @@ for (const btn of document.querySelectorAll('#touch [data-btn]')) {
   btn.addEventListener('pointerup', off);
   btn.addEventListener('pointercancel', off);
   btn.addEventListener('pointerleave', off);
+}
+
+// Keyboard focus: inside an embedding frame keys only arrive once the page has focus.
+canvas.addEventListener('pointerdown', () => canvas.focus({ preventScroll: true }));
+try {
+  canvas.focus({ preventScroll: true });
+} catch {
+  /* focus may be refused before interaction */
 }
 
 // Audio needs a user gesture.
