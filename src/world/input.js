@@ -67,18 +67,26 @@ export class WorldInput {
       if (!this.locked) this.mouseFire = false;
     });
     document.addEventListener('pointerlockerror', () => {
+      if (this.lockFailed) return;
       this.lockFailed = true;
+      this.onLockFailed?.();
     });
 
     if (touchRoot) this.bindTouch(touchRoot);
   }
 
   requestLock() {
-    try {
-      const r = this.canvas.requestPointerLock?.();
-      if (r && typeof r.catch === 'function') r.catch(() => (this.lockFailed = true));
-    } catch {
+    const fail = () => {
+      if (this.lockFailed) return;
       this.lockFailed = true;
+      this.onLockFailed?.();
+    };
+    if (!this.canvas.requestPointerLock) return fail();
+    try {
+      const r = this.canvas.requestPointerLock();
+      if (r && typeof r.catch === 'function') r.catch(fail);
+    } catch {
+      fail();
     }
   }
 

@@ -23,6 +23,7 @@ const view = await createView(canvas, world, await loadMechaBuffer(), { low });
 const input = new WorldInput(canvas, document.getElementById('touch'));
 const hud = new Hud(world, view);
 const bot = auto ? makeBot(world) : null;
+input.onLockFailed = () => hud.toast('MOUSE LOCK UNAVAILABLE · RIGHT-DRAG OR Q/E TO TURN', '#ffd84a', 4);
 
 // Sounds from the grid game's synth, mapped onto open-world events.
 const SFX = {
