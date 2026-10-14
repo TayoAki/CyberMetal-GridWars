@@ -737,6 +737,20 @@ export const BEHAVIORS = {
     });
   },
 
+  *navi_briar(b, u, chip) {
+    yield* summon(b, u, 'briarix', 14, function* () {
+      for (let k = 0; k < (chip.def.params.lashes ?? 3); k++) {
+        b.emit('sfx', { name: 'claw' });
+        const src = source(u, H(chip, { flinch: k === 2 }));
+        for (const f of b.opponentsOf(u.team)) {
+          b.emit('fx', { fx: 'lance', col: f.col, row: f.row });
+          b.hitPanel(src, f.col, f.row);
+        }
+        yield* wait(12);
+      }
+    });
+  },
+
   *navi_mender(b, u, chip) {
     yield* summon(b, u, 'mender', 14, function* () {
       const t = nearestOpponent(b, u);

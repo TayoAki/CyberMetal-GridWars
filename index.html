@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="description" content="CyberMetal GridWars: a fights-only real-time grid battle game.">
+<title>CyberMetal GridWars</title>
+<style>
+  :root {
+    --bg: #05070f;
+    --panel: #0d1530;
+    --ink: #cfd8ff;
+    --accent: #8ab0ff;
+    --btn: #18224a;
+    --btn-on: #3a54b0;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) { --bg: #05070f; }
+  }
+  :root[data-theme="dark"] { --bg: #05070f; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); overflow: hidden; touch-action: none; -webkit-user-select: none; user-select: none; }
+  body { display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: system-ui, sans-serif; }
+  #wrap { display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; }
+  #screen { image-rendering: pixelated; image-rendering: crisp-edges; display: block; background: #000; box-shadow: 0 0 0 2px #1a2550, 0 10px 40px rgba(40,80,200,.25); }
+  #touch { display: none; width: 100%; max-width: 520px; padding: 0 16px 12px; box-sizing: border-box; }
+  body.touch #touch { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; }
+  .dpad { position: relative; width: 132px; height: 132px; }
+  .dpad button { position: absolute; width: 44px; height: 44px; }
+  .dpad .up { left: 44px; top: 0; } .dpad .down { left: 44px; bottom: 0; } .dpad .left { left: 0; top: 44px; } .dpad .right { right: 0; top: 44px; }
+  .mid { display: flex; flex-direction: column; gap: 8px; align-items: center; }
+  .ab { position: relative; width: 132px; height: 120px; justify-self: end; }
+  .ab .a { position: absolute; right: 0; top: 10px; width: 58px; height: 58px; border-radius: 50%; }
+  .ab .b { position: absolute; left: 4px; top: 52px; width: 58px; height: 58px; border-radius: 50%; }
+  .shoulders { display: flex; gap: 8px; }
+  #touch button { background: var(--btn); color: var(--ink); border: 2px solid #2c3d80; border-radius: 10px; font: 700 14px system-ui, sans-serif; touch-action: none; }
+  #touch button.on { background: var(--btn-on); }
+  .small { width: 64px; height: 34px; font-size: 11px !important; }
+  #hint { font: 12px system-ui, sans-serif; color: #6f7fb8; text-align: center; padding: 0 16px; }
+  body.touch #hint { display: none; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="screen" width="240" height="160" aria-label="CyberMetal GridWars game screen"></canvas>
+  <div id="touch" aria-hidden="true">
+    <div class="dpad">
+      <button class="up" data-btn="up">▲</button>
+      <button class="left" data-btn="left">◀</button>
+      <button class="right" data-btn="right">▶</button>
+      <button class="down" data-btn="down">▼</button>
+    </div>
+    <div class="mid">
+      <div class="shoulders"><button class="small" data-btn="l">L</button><button class="small" data-btn="r">R</button></div>
+      <div class="shoulders"><button class="small" data-btn="select">SELECT</button><button class="small" data-btn="start">START</button></div>
+    </div>
+    <div class="ab">
+      <button class="a" data-btn="a">A</button>
+      <button class="b" data-btn="b">B</button>
+    </div>
+  </div>
+  <div id="hint">Arrows move · Z buster (hold to charge) · X chip / confirm · Q/E Custom · Enter pause</div>
+</div>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
