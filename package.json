@@ -1,0 +1,16 @@
+{
+  "name": "cybermetal-gridwars",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A fights-only real-time grid battle game: a clean-room recreation of the Battle Network 3 battle system.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "build": "node tools/build.mjs",
+    "serve": "node tools/serve.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.10"
+  },
+  "license": "MIT"
+}

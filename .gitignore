@@ -1,0 +1,19 @@
+# Never commit game files or anything extracted from them (universal-modder hard rule).
+*.gba
+*.gbc
+*.gb
+*.zip
+*.sav
+*.ss[0-9]
+*.sgm
+private/
+rom/
+extracted/
+
+# Build and tooling output
+node_modules/
+dist/
+.cache/
+shots/
+test-results/
+*.log
