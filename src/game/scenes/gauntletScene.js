@@ -167,8 +167,8 @@ export class GauntletScene {
     drawMenu(ctx, this.items(), this.cursor, 80, 99, { width: 92, t });
 
     if (this.note && t < 150) drawText(ctx, this.note.text, 120, 70, this.note.color, { align: 'center', outline: '#05070f' });
-    const eq = save.data.programs.equipped.map((k) => PROGRAMS[k]?.name).filter(Boolean).join(' ');
-    drawHints(ctx, `ATK ${save.data.stats.attack}  RAPID ${save.data.stats.rapid}  CHARGE ${save.data.stats.charge}${eq ? '  ' + eq : ''}`);
+    const parts = save.data.programs.equipped.filter((k) => PROGRAMS[k]).length;
+    drawHints(ctx, `ATK ${save.data.stats.attack}  RAPID ${save.data.stats.rapid}  CHARGE ${save.data.stats.charge}${parts ? `  +${parts} part${parts > 1 ? 's' : ''}` : ''}`);
   }
 }
 
