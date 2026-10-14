@@ -135,11 +135,11 @@ async function checkMusic(name) {
   const loopAt = info.introSec + info.loopSec;
   const seam = await audio.renderOffline('music', name, 7, { from: loopAt - 3 });
   const pre = stats(seam, 0, 3), post = stats(seam, 3, 7);
-  const gap = longestGap(seam);
+  const seamGap = longestGap(seam);
   add({
     kind: 'loop', name, duration: r4(seam.duration), peak: r4(Math.max(pre.peak, post.peak)), rms: r4(post.rms), nan: pre.nan || post.nan,
-    ok: !pre.nan && !post.nan && post.rms > MUSIC_MIN_RMS && pre.rms > MUSIC_MIN_RMS && Math.max(pre.peak, post.peak) <= 1 && gap <= 0.15,
-    note: `seam at ${loopAt.toFixed(2)} s; rms before ${pre.rms.toFixed(4)}, after ${post.rms.toFixed(4)}; longest gap ${gap.toFixed(2)} s`,
+    ok: !pre.nan && !post.nan && post.rms > MUSIC_MIN_RMS && pre.rms > MUSIC_MIN_RMS && Math.max(pre.peak, post.peak) <= 1 && seamGap <= 0.15,
+    note: `seam at ${loopAt.toFixed(2)} s; rms before ${pre.rms.toFixed(4)}, after ${post.rms.toFixed(4)}; longest gap ${seamGap.toFixed(2)} s`,
   });
 }
 

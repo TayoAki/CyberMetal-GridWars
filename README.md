@@ -4,6 +4,8 @@ A fights-only, real-time grid battler for the browser: a clean-room recreation o
 Mega Man Battle Network 3**, with no overworld and no story. You get straight into battles: 6x3 grid
 duels against viruses and boss navis, a chip folder, the Custom Screen, and Program Advance–style fusions.
 
+![The Custom Screen, a lava field, the Tidecaller boss and the final boss ZeroDay](docs/screenshot.png)
+
 Every character, sprite, sound and tune is original. The *rules* are rebuilt from the game itself: chip
 damage, codes, MB, elements and rarity, virus/boss HP and elements, and the starter-folder shape were read
 from the owner's own BN3 ROM. None of the ROM's bytes ship in this repo.
