@@ -5,6 +5,7 @@ import {
   CROWD, MELEE, HITSTOP, LOCK, COMBO_GRACE, REACTIONS, CHIPS, CHIP_OF, CHIP_FINISH, DECK_SIZE, chipLevel, pickTarget, switchTarget, onScreen,
 } from './combat.js';
 import { PARTS, SLOTS, STARTER, buildKit, validLoadout } from './parts.js';
+import { ELEMENTS, STATUS, MODS, MOD_KEYS, STARTER_MODS, MAX_DESIGNS, normalizeDesign, applyDesign } from './forge.js';
 
 // The open-world simulation: a fixed 60 Hz step with no rendering, like the grid game's engine. The view sends
 // one input per step and drains events (shots, hits, deletes...) for effects and sound. A seed plus an input
@@ -14,7 +15,9 @@ import { PARTS, SLOTS, STARTER, buildKit, validLoadout } from './parts.js';
 //   move: {x, y} camera-relative (x right, y forward, -1..1); camYaw, aimYaw, aimPitch; aimPoint {x,y,z} | null
 //   attack (melee combo), shoot (buster; hold to charge; `fire` is accepted as an alias), jump, dash,
 //   lock (toggle lock-on), next / prev (switch target), react (reaction command), chip: 0..4 (deck slot held)
-//   garage: { op: 'buy' | 'equip', part } (a one-off command from the garage menu)
+//   garage: a one-off command from the garage menu: { op: 'buy' | 'equip', part }, or for the forge
+//     { op: 'forge', design }, { op: 'equip-design' | 'delete-design', id }, { op: 'unlock', mod },
+//     { op: 'dummy' } (training dummies to test weapons on)
 // Yaw 0 faces +z; a facing yaw points along (sin yaw, cos yaw).
 //
 // The equipped parts (see parts.js) decide the moveset: the arm part the combo, the gun part what SHOOT
@@ -35,7 +38,19 @@ export const GARAGE_SAFE = 30; // metres: the garage only opens with no virus th
 const BUTTONS = ['shoot', 'attack', 'jump', 'dash', 'lock', 'next', 'prev', 'react'];
 const HEAVY = new Set(['charge', 'cannon', 'deflect', 'blast', 'rail', 'bomb']); // shots that knock back
 // How much a hit builds a virus's revenge value (KH2): a combo strike counts 1; pellets and rapid shots less.
-const REVENGE = { pellet: 0.15, blast: 0.3, buster: 0.4, needle: 0.4, heavy: 0.5 };
+const REVENGE = { pellet: 0.15, blast: 0.3, buster: 0.4, needle: 0.4, heavy: 0.5, arc: 0.3, burst: 0.3, burn: 0 };
+const CHAIN = { range: 6, share: 0.5 }; // Chain mod: a second virus within range takes this share
+const WAVE = { speed: 18, life: 0.8, share: 0.5 }; // Wave mod: the finisher's ground wave
+const BURST = { radius: 3.2, share: 0.5, shotRadius: 2.2 }; // Burst mod
+const DUMMY = { hp: 9999, life: 120, leash: 45 }; // training dummies
+const HOMING = { turn: 10, cone: 0.6, range: 60 }; // Homing mod: steering per second, and how far off aim it picks a target
+
+// Turn a direction around the vertical axis by `a` radians (positive turns left).
+function turnDir(d, a) {
+  const c = Math.cos(a);
+  const sn = Math.sin(a);
+  return { x: d.x * c + d.z * sn, y: d.y, z: -d.x * sn + d.z * c };
+}
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const approach = (v, target, step) => (v < target ? Math.min(target, v + step) : Math.max(target, v - step));
@@ -71,7 +86,13 @@ export class World {
     this.loadout = { ...STARTER };
     this.owned = new Set(Object.values(STARTER));
     this.wallet = 0;
-    this.kit = buildKit(this.loadout);
+    // The forge: saved weapon designs, unlocked mods (programs), and which design each weapon slot uses.
+    this.designs = [];
+    this.programs = new Set(STARTER_MODS);
+    this.equipped = { arm: null, gun: null };
+    this.critCount = 0;
+    this.leech = 0; // Wood's healing not paid out yet (under 1 HP)
+    this.kit = this.makeKit();
     this.player = this.newPlayer();
     this.prev = {};
     this.prevChip = 0;
@@ -560,7 +581,7 @@ export class World {
         if (!e.alive || e.spawnT > 0 || a.hitIds.has(e.id)) continue;
         if (Math.hypot(e.x - p.x, e.y + e.def.height * 0.5 - (p.y + 1), e.z - p.z) < 1.9 + e.def.radius) {
           a.hitIds.add(e.id);
-          this.hitEnemy(e, a.dmg, { kind: 'chip', dirX: a.dx, dirZ: a.dz, push: 7 });
+          this.hitEnemy(e, a.dmg, { kind: 'chip', dirX: a.dx, dirZ: a.dz, push: 7, element: a.element });
         }
       }
     } else {
@@ -591,12 +612,48 @@ export class World {
       if (d > s.reach + e.def.radius) continue;
       if (Math.abs(e.y + e.def.height * 0.5 - (p.y + 1)) > MELEE.vertical + e.def.height * 0.5) continue;
       if (s.arc < Math.PI * 2 && d > 0.3 && Math.acos(clamp((dx * fx + dz * fz) / d, -1, 1)) > s.arc / 2) continue;
-      this.hitEnemy(e, s.dmg, { kind: s.finisher ? 'finisher' : 'melee', dirX: dx / (d || 1), dirZ: dz / (d || 1), push: s.push, launch: s.launch, slam: s.slam, heavy: s.heavy });
+      this.hitEnemy(e, s.dmg, { kind: s.finisher ? 'finisher' : 'melee', dirX: dx / (d || 1), dirZ: dz / (d || 1), push: s.push, launch: s.launch, slam: s.slam, heavy: s.heavy, fx: this.kit.armFx });
       hits++;
     }
     if (p.action?.kind === 'melee') p.action.hits = hits;
     this.emit('strike', { name: s.name, hits, finisher: !!s.finisher, air: !!s.air, x: p.x + fx * 1.4, y: p.y + 1.1, z: p.z + fz * 1.4 });
     if (hits) this.hitstop = Math.max(this.hitstop, s.finisher ? HITSTOP.finisher : this.kit.arm.stop);
+    if (s.finisher) this.finisherMods(s, p.x + fx * 1.4, p.y + 1.1, p.z + fz * 1.4);
+  }
+
+  // A forged arm weapon's finisher extras: Burst explodes at the strike, Wave sends a shockwave ahead.
+  finisherMods(s, x, y, z) {
+    const fx = this.kit.armFx;
+    if (!fx) return;
+    if (fx.burst) this.burstAt(x, y, z, BURST.radius, Math.round(s.dmg * BURST.share), fx);
+    if (fx.wave) {
+      const p = this.player;
+      const dx = Math.sin(p.yaw);
+      const dz = Math.cos(p.yaw);
+      const wx = p.x + dx * 1.2;
+      const wz = p.z + dz * 1.2;
+      this.addShot({
+        team: 'player', kind: 'swordwave', x: wx, y: this.surfaceY(wx, wz) + 0.55, z: wz, vx: dx * WAVE.speed, vz: dz * WAVE.speed,
+        r: 1.0, dmg: Math.round(s.dmg * WAVE.share), life: WAVE.life, ground: true, pierce: true, hitIds: new Set(), fx: { element: fx.element },
+      });
+      this.emit('wave-cast', { x: wx, y: p.y, z: wz, dx, dz, element: fx.element });
+    }
+  }
+
+  // An explosion (Burst mod): every virus within `radius` of the point takes `dmg` once.
+  burstAt(x, y, z, radius, dmg, fx) {
+    for (const e of [...this.enemies]) {
+      if (!e.alive || e.spawnT > 0) continue;
+      if (Math.hypot(e.x - x, e.y + e.def.height * 0.5 - y, e.z - z) > radius + e.def.radius) continue;
+      const d = Math.hypot(e.x - x, e.z - z) || 1;
+      this.hitEnemy(e, dmg, { kind: 'burst', fx: { element: fx?.element ?? null }, dirX: (e.x - x) / d, dirZ: (e.z - z) / d, push: 5 });
+    }
+    this.emit('burst', { x, y, z, radius, element: fx?.element ?? null });
+  }
+
+  // Ground height, or the water's surface over the lake.
+  surfaceY(x, z) {
+    return Math.max(this.terrain.height(x, z), WATER_LEVEL);
   }
 
   // One step of a charging finisher.
@@ -611,7 +668,7 @@ export class World {
       if (Math.hypot(e.x - p.x, e.z - p.z) > 1.6 + e.def.radius) continue;
       if (Math.abs(e.y + e.def.height * 0.5 - (p.y + 1)) > MELEE.vertical + e.def.height * 0.5) continue;
       a.hitIds.add(e.id);
-      this.hitEnemy(e, s.dmg, { kind: 'finisher', dirX: dx, dirZ: dz, push: s.push, heavy: s.heavy });
+      this.hitEnemy(e, s.dmg, { kind: 'finisher', dirX: dx, dirZ: dz, push: s.push, heavy: s.heavy, fx: this.kit.armFx });
       this.hitstop = Math.max(this.hitstop, HITSTOP.finisher);
     }
     a.hits = a.hitIds.size;
@@ -620,6 +677,7 @@ export class World {
       p.vx *= 0.2;
       p.vz *= 0.2;
       this.emit('strike', { name: s.name, hits: a.hits, finisher: true, air: false, x: p.x + dx * 1.4, y: p.y + 1.1, z: p.z + dz * 1.4 });
+      this.finisherMods(s, p.x + dx * 1.4, p.y + 1.1, p.z + dz * 1.4);
     }
   }
 
@@ -779,7 +837,7 @@ export class World {
     this.stats.chipsUsed++;
     if (key === 'shockwave') {
       p.action = { kind: 'chip', name: key, t: 0, dur: 0.5, comboNext };
-      this.hazards.push({ kind: 'ring', team: 'player', x: p.x, y: p.y, z: p.z, r: 0.8, speed: 14, max: 9 + 2 * c.level, thick: 1.4, dmg, hitIds: new Set() });
+      this.hazards.push({ kind: 'ring', team: 'player', x: p.x, y: p.y, z: p.z, r: 0.8, speed: 14, max: 9 + 2 * c.level, thick: 1.4, dmg, hitIds: new Set(), element: def.element });
     } else if (key === 'cannon') {
       p.action = { kind: 'chip', name: key, t: 0, dur: 0.35, comboNext };
       const yaw = target ? Math.atan2(target.x - p.x, target.z - p.z) : input.aimYaw ?? p.yaw;
@@ -793,7 +851,7 @@ export class World {
         const l = Math.hypot(tx, ty, tz) || 1;
         dir = { x: tx / l, y: ty / l, z: tz / l };
       } else dir = this.aimDir(m, input, yaw);
-      this.addShot({ team: 'player', kind: 'cannon', ...m, vx: dir.x * 36, vy: dir.y * 36, vz: dir.z * 36, r: 0.55, dmg, splash: 3, splashDmg: Math.round(dmg * 0.5), life: 2 });
+      this.addShot({ team: 'player', kind: 'cannon', ...m, vx: dir.x * 36, vy: dir.y * 36, vz: dir.z * 36, r: 0.55, dmg, splash: 3, splashDmg: Math.round(dmg * 0.5), life: 2, element: def.element });
     } else if (key === 'findash') {
       let dx = Math.sin(p.yaw);
       let dz = Math.cos(p.yaw);
@@ -803,7 +861,7 @@ export class World {
         dz = (target.z - p.z) / l;
       }
       p.yaw = Math.atan2(dx, dz);
-      p.action = { kind: 'chip', name: key, t: 0, dur: 0.4, dx, dz, dmg, hitIds: new Set(), comboNext };
+      p.action = { kind: 'chip', name: key, t: 0, dur: 0.4, dx, dz, dmg, hitIds: new Set(), comboNext, element: def.element };
       p.iframes = Math.max(p.iframes, 0.5);
     }
     this.emit('chip-use', { chip: key, level: c.level, name: def.name, finish, ...at(p) });
@@ -859,12 +917,11 @@ export class World {
     else if (gun === 'bomber') this.fireBombs(m, dir, level, locked, input);
     else {
       const kind = ['buster', 'mid', 'charge'][level];
-      const speed = level ? CHARGE.speed : BUSTER.speed;
-      const shot = this.addShot({
-        team: 'player', kind, ...m, vx: dir.x * speed, vy: dir.y * speed, vz: dir.z * speed,
+      const [shot] = this.gunShot({
+        team: 'player', kind, ...m, speed: level ? CHARGE.speed : BUSTER.speed,
         r: level ? CHARGE.radius[level] : BUSTER.radius, dmg: level ? CHARGE.dmg[level] : BUSTER.dmg,
         splash: CHARGE.splash[level], splashDmg: CHARGE.splashDmg[level], life: level ? 1.8 : BUSTER.life,
-      });
+      }, dir, locked);
       this.emit('shot', { id: shot.id, kind, gun, level, ...m, dx: dir.x, dy: dir.y, dz: dir.z });
     }
     p.fireCd = this.kit.gun.cooldown;
@@ -872,10 +929,56 @@ export class World {
     this.stats.shots++;
   }
 
-  // Spreader: a fan of short-lived pellets around the aim direction.
+  // One projectile from the gun (plus side shots for the Split mod), carrying a forged gun's effects: Heavy
+  // damage, Pierce, Homing, Burst and its element. `spec` is a shot with a `speed`; returns the shots.
+  gunShot(spec, dir, locked = null, { split = true } = {}) {
+    const fx = this.kit.gunFx ?? null;
+    const { speed, ...rest } = spec;
+    const dirs = fx?.split && split ? [dir, turnDir(dir, 0.14), turnDir(dir, -0.14)] : [dir];
+    const homing = fx?.homing ? (locked ?? this.homingTarget(rest, dir)) : null;
+    return dirs.map((d, i) => {
+      const shot = this.addShot({ ...rest, vx: d.x * speed, vy: d.y * speed, vz: d.z * speed, dmg: Math.max(1, Math.round(rest.dmg * (fx?.heavy ? 1.3 : 1) * (i ? 0.6 : 1))), fx });
+      if (fx?.pierce) {
+        shot.pierce = true;
+        shot.hitIds = new Set();
+      }
+      if (homing) shot.homing = homing.id;
+      if (fx?.burst) {
+        if (shot.splash > 0) shot.splash *= 1.35;
+        else {
+          shot.splash = BURST.shotRadius;
+          shot.splashDmg = Math.max(1, Math.round(shot.dmg * BURST.share));
+        }
+      }
+      return shot;
+    });
+  }
+
+  // The virus a homing shot chases when nothing is locked: the one nearest the aim line, within reason.
+  homingTarget(m, dir) {
+    let best = null;
+    let bestA = HOMING.cone;
+    for (const e of this.enemies) {
+      if (!e.alive || e.spawnT > 0) continue;
+      const vx = e.x - m.x;
+      const vy = e.y + e.def.height * 0.5 - m.y;
+      const vz = e.z - m.z;
+      const d = Math.hypot(vx, vy, vz);
+      if (d > HOMING.range || d < 1e-3) continue;
+      const a = Math.acos(clamp((vx * dir.x + vy * dir.y + vz * dir.z) / d, -1, 1));
+      if (a < bestA) {
+        bestA = a;
+        best = e;
+      }
+    }
+    return best;
+  }
+
+  // Spreader: a fan of short-lived pellets around the aim direction (Split adds pellets and widens it).
   fireSpread(m, dir, level) {
     const g = this.kit.gun;
-    const n = g.pellets[level];
+    const wide = this.kit.gunFx?.split ? 1.25 : 1;
+    const n = g.pellets[level] + (this.kit.gunFx?.split ? 4 : 0);
     const kind = level === 2 ? 'blast' : 'pellet';
     const flat = Math.hypot(dir.x, dir.z) || 1;
     // Sideways (horizontal) axis for the fan.
@@ -883,7 +986,7 @@ export class World {
     const sz = -dir.x / flat;
     for (let i = 0; i < n; i++) {
       const k = n > 1 ? (i / (n - 1)) * 2 - 1 : 0;
-      const off = Math.tan(g.cone[level] * k);
+      const off = Math.tan(g.cone[level] * wide * k);
       const lift = (i % 2 ? 1 : -1) * 0.03 * (level + 1);
       let vx = dir.x + sx * off;
       let vy = dir.y + lift;
@@ -892,7 +995,7 @@ export class World {
       vx /= l;
       vy /= l;
       vz /= l;
-      this.addShot({ team: 'player', kind, ...m, vx: vx * g.speed, vy: vy * g.speed, vz: vz * g.speed, r: g.radius, dmg: g.dmg[level], life: g.life });
+      this.gunShot({ team: 'player', kind, ...m, speed: g.speed, r: g.radius, dmg: g.dmg[level], life: g.life }, { x: vx, y: vy, z: vz }, null, { split: false });
     }
     this.emit('shot', { kind, gun: 'spreader', level, count: n, ...m, dx: dir.x, dy: dir.y, dz: dir.z });
   }
@@ -903,10 +1006,19 @@ export class World {
     const g = this.kit.gun;
     if (!level) {
       const n = g.needle;
-      const shot = this.addShot({ team: 'player', kind: 'needle', ...m, vx: dir.x * n.speed, vy: dir.y * n.speed, vz: dir.z * n.speed, r: n.radius, dmg: n.dmg, life: n.life });
+      const [shot] = this.gunShot({ team: 'player', kind: 'needle', ...m, speed: n.speed, r: n.radius, dmg: n.dmg, life: n.life }, dir);
       this.emit('shot', { id: shot.id, kind: 'needle', gun: 'railgun', level, ...m, dx: dir.x, dy: dir.y, dz: dir.z });
       return;
     }
+    // Split fans out two more beams at 60%.
+    const fx = this.kit.gunFx ?? null;
+    const beams = fx?.split ? [[dir, 1], [turnDir(dir, 0.12), 0.6], [turnDir(dir, -0.12), 0.6]] : [[dir, 1]];
+    for (const [d, share] of beams) this.beam(m, d, Math.round(g.beam[level] * share * (fx?.heavy ? 1.3 : 1)), level, fx);
+  }
+
+  // One railgun beam from `m` along `dir`.
+  beam(m, dir, dmg, level, fx) {
+    const g = this.kit.gun;
     const T = this.terrain;
     let len = g.range;
     for (let t = 1; t < g.range; t += 0.5) {
@@ -929,8 +1041,9 @@ export class World {
       const r = e.def.radius + g.width;
       if (cx * cx + cy * cy + cz * cz - t * t <= r * r) hit.push(e);
     }
-    for (const e of hit) this.hitEnemy(e, g.beam[level], { kind: 'rail', vx: dir.x, vz: dir.z });
-    this.emit('beam', { level, hits: hit.length, x0: m.x, y0: m.y, z0: m.z, x1: m.x + dir.x * len, y1: m.y + dir.y * len, z1: m.z + dir.z * len });
+    for (const e of hit) this.hitEnemy(e, dmg, { kind: 'rail', vx: dir.x, vz: dir.z, fx });
+    this.emit('beam', { level, hits: hit.length, element: fx?.element ?? null, x0: m.x, y0: m.y, z0: m.z, x1: m.x + dir.x * len, y1: m.y + dir.y * len, z1: m.z + dir.z * len });
+    if (fx?.burst) this.burstAt(m.x + dir.x * len, m.y + dir.y * len, m.z + dir.z * len, 2.5, Math.round(dmg * BURST.share), fx);
   }
 
   // Bomber: bombs lobbed on an arc onto the target (the lock-on target, else the crosshair's point, at most
@@ -952,7 +1065,7 @@ export class World {
       tz = m.z + (dir.z / flat) * reach;
       ty = this.terrain.ground(tx, tz);
     }
-    const n = g.count[level];
+    const n = g.count[level] + (this.kit.gunFx?.split ? 2 : 0);
     const side = { x: tz - m.z, z: -(tx - m.x) };
     const sl = Math.hypot(side.x, side.z) || 1;
     for (let i = 0; i < n; i++) {
@@ -963,10 +1076,11 @@ export class World {
       const dz = bz - m.z;
       const flight = clamp(Math.hypot(dx, dz) / 16, 0.45, 1.1);
       const vy = (ty - m.y + 0.5 * g.gravity * flight * flight) / flight;
-      const shot = this.addShot({
-        team: 'player', kind: 'bomb', ...m, vx: dx / flight, vy, vz: dz / flight, gravity: g.gravity,
+      const speed = Math.hypot(dx / flight, vy, dz / flight);
+      const [shot] = this.gunShot({
+        team: 'player', kind: 'bomb', ...m, speed, gravity: g.gravity,
         r: g.radius[level], dmg: g.dmg[level], splash: g.splash[level], splashDmg: g.splashDmg[level], life: 3,
-      });
+      }, { x: dx / flight / speed, y: vy / speed, z: dz / flight / speed }, locked, { split: false });
       if (i === 0) this.emit('shot', { id: shot.id, kind: 'bomb', gun: 'bomber', level, count: n, ...m, dx: dir.x, dy: dir.y, dz: dir.z });
     }
   }
@@ -1093,12 +1207,35 @@ export class World {
     const dx = p.x - e.x;
     const dz = p.z - e.z;
     const dist = Math.hypot(dx, dz);
+    if (e.dummy) {
+      // Training dummies pack up after a while, or when you walk away.
+      e.dummyT -= DT;
+      if (e.dummyT <= 0 || dist > DUMMY.leash) {
+        e.alive = false;
+        e.dying = 0.3;
+        return;
+      }
+    }
+    // Status effects. Burn counts whole ticks (with a little slack for float sums), so a burn always deals
+    // the same damage.
+    if (e.burn > 0) {
+      e.burnTick -= DT;
+      if (e.burnTick <= 1e-9) {
+        e.burnTick += STATUS.burn.every;
+        e.burn--;
+        this.burnTick(e);
+        if (!e.alive) return;
+      }
+    }
+    const soaked = e.soak > 0;
+    if (soaked) e.soak -= DT;
     if (e.flinch > 0) {
       e.flinch -= DT;
       e.vx *= 0.88;
       e.vz *= 0.88;
     } else {
-      AI[e.type](this, e, DT, { dx, dz, dist, sees: p.alive && dist < e.def.aggro });
+      // Soaked viruses think and attack slower.
+      AI[e.type](this, e, soaked ? DT * STATUS.soak.clock : DT, { dx, dz, dist, sees: p.alive && dist < e.def.aggro });
     }
     // Leash: a virus never strays far from its rift.
     const hx = e.home.x - e.x;
@@ -1109,12 +1246,13 @@ export class World {
       e.vz = (hz / hd) * e.def.speed;
       e.yaw = Math.atan2(hx, hz);
     }
-    e.x += e.vx * DT;
-    e.z += e.vz * DT;
+    const speed = soaked ? STATUS.soak.speed : 1;
+    e.x += e.vx * DT * speed;
+    e.z += e.vz * DT * speed;
     this.keepInWorld(e, e.def.radius);
     const g = T.ground(e.x, e.z);
     if (e.def.hover) {
-      e.y += (e.vy ?? 0) * DT;
+      e.y += (e.vy ?? 0) * DT * speed;
       if (e.flinch > 0) e.vy *= 0.95;
       e.y = Math.max(e.y, g + 0.6);
     } else if (e.air) {
@@ -1153,7 +1291,18 @@ export class World {
   // src: a shot (kind, vx, vz) or a strike ({ kind, dirX, dirZ, push, launch, slam, stun }).
   hitEnemy(e, dmg, src) {
     if (!e.alive) return;
+    const fx = src.fx ?? null;
+    const element = fx?.element ?? src.element ?? null;
     let amount = dmg;
+    // Elements (Battle Network): the element that beats the virus's own deals double damage.
+    const weak = !!element && ELEMENTS[element].beats === e.def.element;
+    if (weak) amount *= 2;
+    // Critical mod: every fourth hit from a forged weapon with it deals double.
+    let crit = false;
+    if (fx?.crit && ++this.critCount % 4 === 0) {
+      amount *= 2;
+      crit = true;
+    }
     const counter = e.state === 'windup';
     if (counter) {
       amount *= this.kit.counter;
@@ -1196,12 +1345,73 @@ export class World {
       e.vy = src.launch;
     }
     if (src.slam) e.vy = -src.slam;
+    // A forged weapon's element also leaves a status effect.
+    if (fx && element) this.applyStatus(e, element, amount);
     this.stats.hits++;
-    this.emit('enemy-hit', { id: e.id, x: e.x, y: e.y + e.def.height * 0.6, z: e.z, amount: Math.round(amount), counter, kind, armored });
-    if (e.hp <= 0) this.killEnemy(e);
+    this.emit('enemy-hit', { id: e.id, x: e.x, y: e.y + e.def.height * 0.6, z: e.z, amount: Math.round(amount), counter, kind, armored, element, weak, crit });
+    // Chain mod: the hit arcs to the nearest other virus close by (arcs and splash hits don't chain again).
+    if (fx?.chain && !src.arc && !src.splashHit) {
+      let other = null;
+      let best = CHAIN.range;
+      for (const o of this.enemies) {
+        if (o === e || !o.alive || o.spawnT > 0) continue;
+        const d = Math.hypot(o.x - e.x, o.y - e.y, o.z - e.z);
+        if (d < best) {
+          best = d;
+          other = o;
+        }
+      }
+      if (other) {
+        this.emit('arc', { from: e.id, to: other.id, element, x0: e.x, y0: e.y + e.def.height * 0.5, z0: e.z, x1: other.x, y1: other.y + other.def.height * 0.5, z1: other.z });
+        const d = best || 1;
+        this.hitEnemy(other, Math.max(1, Math.round(dmg * CHAIN.share)), { kind: 'arc', arc: true, fx: { element }, dirX: (other.x - e.x) / d, dirZ: (other.z - e.z) / d, push: 1.5 });
+      }
+    }
+    if (e.dummy) {
+      if (e.hp < 1) e.hp = e.maxHp; // training dummies never break
+    } else if (e.hp <= 0) this.killEnemy(e);
+  }
+
+  // Status effects (forged elements): Fire burns, Aqua soaks, Elec builds to a stun, Wood heals the player.
+  applyStatus(e, element, amount) {
+    if (element === 'fire') {
+      if (!(e.burn > 0)) e.burnTick = STATUS.burn.every;
+      e.burn = STATUS.burn.ticks;
+    } else if (element === 'aqua') e.soak = STATUS.soak.time;
+    else if (element === 'elec') {
+      e.shock = (e.shock ?? 0) + 1;
+      if (e.shock >= STATUS.shock.hits) {
+        e.shock = 0;
+        e.flinch = Math.max(e.flinch, STATUS.shock.stun); // a stun gets through revenge armor
+        if (e.state === 'windup') {
+          e.state = 'recover';
+          e.t = 0.8;
+        }
+        this.emit('stun', { id: e.id, x: e.x, y: e.y + e.def.height, z: e.z });
+      }
+    } else if (element === 'wood') {
+      const p = this.player;
+      if (!p.alive || p.hp >= p.maxHp) return;
+      this.leech += amount * STATUS.leech;
+      const heal = Math.min(Math.floor(this.leech), p.maxHp - p.hp);
+      if (heal <= 0) return;
+      this.leech -= heal;
+      p.hp += heal;
+      this.emit('leech', { amount: heal, x: p.x, y: p.y + 1.6, z: p.z });
+    }
+  }
+
+  // One tick of burning.
+  burnTick(e) {
+    e.hp -= STATUS.burn.dmg;
+    this.emit('enemy-hit', { id: e.id, x: e.x, y: e.y + e.def.height * 0.6, z: e.z, amount: STATUS.burn.dmg, counter: false, kind: 'burn', armored: false, element: 'fire', weak: false, crit: false });
+    if (e.dummy) {
+      if (e.hp < 1) e.hp = e.maxHp;
+    } else if (e.hp <= 0) this.killEnemy(e);
   }
 
   killEnemy(e) {
+    if (e.dummy) return;
     e.alive = false;
     e.hp = 0;
     e.dying = 0.6;
@@ -1236,10 +1446,12 @@ export class World {
   // The garage only opens out of combat: alive, with no virus within GARAGE_SAFE metres.
   canGarage() {
     const p = this.player;
-    return p.alive && !this.enemies.some((e) => e.alive && Math.hypot(e.x - p.x, e.z - p.z) < GARAGE_SAFE);
+    return p.alive && !this.enemies.some((e) => e.alive && !e.dummy && Math.hypot(e.x - p.x, e.z - p.z) < GARAGE_SAFE);
   }
 
-  garage({ op, part } = {}) {
+  garage(cmd = {}) {
+    const { op, part } = cmd;
+    if (['forge', 'equip-design', 'delete-design', 'unlock', 'dummy'].includes(op)) return this.forgeCommand(cmd);
     const def = PARTS[part];
     if (!def || (op !== 'buy' && op !== 'equip')) return;
     if (!this.canGarage()) return this.emit('garage-denied', { reason: 'combat', part });
@@ -1252,16 +1464,100 @@ export class World {
       return;
     }
     if (!this.owned.has(part)) return this.emit('garage-denied', { reason: 'locked', part });
-    if (this.loadout[def.slot] === part) return;
+    if (this.loadout[def.slot] === part && !this.equipped[def.slot]) return;
     this.loadout[def.slot] = part;
+    if (this.equipped[def.slot] !== undefined) this.equipped[def.slot] = null; // back to the plain part
     this.applyKit();
     this.emit('part-equipped', { part, slot: def.slot });
+  }
+
+  // The forge's commands (out of combat, like the rest of the garage).
+  forgeCommand(cmd) {
+    const deny = (reason, extra = {}) => this.emit('garage-denied', { reason, ...extra });
+    if (!this.canGarage()) return deny('combat');
+    const { op } = cmd;
+    if (op === 'dummy') return this.spawnDummies();
+    if (op === 'unlock') {
+      const mod = MODS[cmd.mod];
+      if (!mod || this.programs.has(cmd.mod)) return;
+      if (this.wallet < mod.price) return deny('data', { mod: cmd.mod });
+      this.wallet -= mod.price;
+      this.programs.add(cmd.mod);
+      return this.emit('program-unlocked', { mod: cmd.mod, price: mod.price });
+    }
+    if (op === 'forge') {
+      const { design, error } = normalizeDesign(cmd.design);
+      if (error) return deny('design', { message: error });
+      if (!this.owned.has(design.base)) return deny('locked', { part: design.base });
+      const missing = design.mods.find((m) => !this.programs.has(m));
+      if (missing) return deny('program', { mod: missing });
+      const at = this.designs.findIndex((d) => d.id === design.id);
+      if (at >= 0) {
+        if (this.designs[at].slot !== design.slot) return deny('design', { message: 'a weapon keeps its slot' });
+        this.designs[at] = design;
+      } else {
+        if (this.designs.length >= MAX_DESIGNS) return deny('full');
+        let id = 1;
+        while (this.designs.some((d) => d.id === id)) id++;
+        design.id = id;
+        this.designs.push(design);
+      }
+      if (this.equipped[design.slot] === design.id) this.applyKit();
+      return this.emit('design-saved', { id: design.id, name: design.name, slot: design.slot });
+    }
+    const design = this.designs.find((d) => d.id === cmd.id);
+    if (!design) return deny('design', { message: 'no such weapon' });
+    if (op === 'equip-design') {
+      if (!this.owned.has(design.base)) return deny('locked', { part: design.base });
+      this.loadout[design.slot] = design.base;
+      this.equipped[design.slot] = design.id;
+      this.applyKit();
+      return this.emit('part-equipped', { part: design.base, slot: design.slot, design: design.id, name: design.name });
+    }
+    if (op === 'delete-design') {
+      this.designs = this.designs.filter((d) => d !== design);
+      if (this.equipped[design.slot] === design.id) {
+        this.equipped[design.slot] = null;
+        this.applyKit();
+      }
+      return this.emit('design-deleted', { id: design.id, name: design.name });
+    }
+  }
+
+  // The kit from the loadout, with the equipped forged designs applied.
+  makeKit() {
+    const kit = buildKit(this.loadout);
+    for (const slot of ['arm', 'gun']) {
+      const d = this.designs.find((x) => x.id === this.equipped[slot]);
+      if (d && d.base === this.loadout[slot]) applyDesign(kit, d);
+      else this.equipped[slot] = null;
+    }
+    return kit;
+  }
+
+  // Training dummies to try a weapon on: one of each virus (so each element's weakness shows), standing in a
+  // row ahead, out of the way of rifts. They never break, never fight back, and pack up after a while.
+  spawnDummies() {
+    for (const e of this.enemies) if (e.dummy) e.alive = false;
+    const p = this.player;
+    const fx = Math.sin(p.yaw);
+    const fz = Math.cos(p.yaw);
+    const ids = [];
+    ['rivet', 'plinker', 'dartfin'].forEach((type, i) => {
+      const side = (i - 1) * 3.2;
+      const x = p.x + fx * 7.5 - fz * side;
+      const z = p.z + fz * 7.5 + fx * side;
+      const e = this.spawnEnemy(type, { id: -1, x, z, roster: [type] }, 0);
+      Object.assign(e, { x, z, y: this.terrain.ground(x, z) + (e.def.hover ?? 0), dummy: true, dummyT: DUMMY.life, hp: DUMMY.hp, maxHp: DUMMY.hp, state: 'recover', t: 1e9, spawnT: 0.4, home: { x, z }, yaw: Math.atan2(p.x - x, p.z - z) });
+      ids.push(e.id);
+    });
+    this.emit('dummies', { ids });
   }
 
   // Rebuild the kit from the loadout and carry the player's state over (HP keeps its fraction).
   applyKit() {
     const p = this.player;
-    const k = (this.kit = buildKit(this.loadout));
+    const k = (this.kit = this.makeKit());
     const frac = p.maxHp ? p.hp / p.maxHp : 1;
     p.maxHp = k.hp;
     if (p.alive) p.hp = Math.max(1, Math.round(k.hp * frac));
@@ -1276,14 +1572,15 @@ export class World {
   // Progress that outlives a session: parts, the loadout, DATA and chips.
   saveData() {
     return {
-      v: 1, loadout: { ...this.loadout }, owned: [...this.owned], wallet: this.wallet,
+      v: 2, loadout: { ...this.loadout }, owned: [...this.owned], wallet: this.wallet,
       chips: Object.fromEntries(Object.entries(this.chips).map(([k, c]) => [k, { deletes: c.deletes }])), deck: [...this.deck],
+      designs: this.designs.map((d) => ({ ...d, form: { ...d.form }, mods: [...d.mods] })), programs: [...this.programs], equipped: { ...this.equipped },
     };
   }
 
   // Restore a save (from browser storage, so check everything). Returns whether it was applied.
   loadSave(save) {
-    if (!save || save.v !== 1) return false;
+    if (!save || (save.v !== 1 && save.v !== 2)) return false;
     const owned = new Set([...Object.values(STARTER), ...(Array.isArray(save.owned) ? save.owned.filter((k) => PARTS[k]) : [])]);
     const loadout = validLoadout(save.loadout) && SLOTS.every((slot) => owned.has(save.loadout[slot])) ? { ...save.loadout } : { ...STARTER };
     this.owned = owned;
@@ -1296,6 +1593,17 @@ export class World {
     }
     this.deck = (Array.isArray(save.deck) ? save.deck : []).filter((k, i, all) => this.chips[k]?.level >= 1 && all.indexOf(k) === i).slice(0, DECK_SIZE);
     for (const k of Object.keys(this.chips)) if (this.chips[k].level >= 1 && !this.deck.includes(k) && this.deck.length < DECK_SIZE) this.deck.push(k);
+    this.programs = new Set([...STARTER_MODS, ...(Array.isArray(save.programs) ? save.programs.filter((k) => MODS[k]) : [])]);
+    this.designs = [];
+    for (const raw of Array.isArray(save.designs) ? save.designs.slice(0, MAX_DESIGNS) : []) {
+      const { design } = normalizeDesign(raw);
+      if (design && design.id && !this.designs.some((d) => d.id === design.id)) this.designs.push(design);
+    }
+    const eq = save.equipped ?? {};
+    this.equipped = {
+      arm: this.designs.some((d) => d.id === eq.arm && d.slot === 'arm') ? eq.arm : null,
+      gun: this.designs.some((d) => d.id === eq.gun && d.slot === 'gun') ? eq.gun : null,
+    };
     this.applyKit();
     this.player.hp = this.player.maxHp;
     return true;
@@ -1313,32 +1621,44 @@ export class World {
         continue;
       }
       s.vy -= s.gravity * DT;
+      if (s.homing) this.steer(s);
       const steps = Math.max(1, Math.ceil((Math.hypot(s.vx, s.vy, s.vz) * DT) / 0.5));
       for (let k = 0; k < steps && !s.dead; k++) {
         s.x += (s.vx * DT) / steps;
         s.y += (s.vy * DT) / steps;
         s.z += (s.vz * DT) / steps;
-        const h = T.height(s.x, s.z);
-        if (s.y < WATER_LEVEL && h < WATER_LEVEL) {
-          this.impact(s, s.x, WATER_LEVEL, s.z, 'water');
-          break;
-        }
-        if (s.y < h) {
-          this.impact(s, s.x, h, s.z, 'ground');
-          break;
-        }
-        for (const o of T.near(s.x, s.z, 1)) {
-          if (s.y < o.top && Math.hypot(s.x - o.x, s.z - o.z) < o.r + s.r * 0.5) {
-            this.impact(s, s.x, s.y, s.z, o.type);
+        if (s.ground) {
+          // A ground wave rides the surface and passes through trees.
+          s.y = this.surfaceY(s.x, s.z) + 0.55;
+        } else {
+          const h = T.height(s.x, s.z);
+          if (s.y < WATER_LEVEL && h < WATER_LEVEL) {
+            this.impact(s, s.x, WATER_LEVEL, s.z, 'water');
             break;
           }
+          if (s.y < h) {
+            this.impact(s, s.x, h, s.z, 'ground');
+            break;
+          }
+          for (const o of T.near(s.x, s.z, 1)) {
+            if (s.y < o.top && Math.hypot(s.x - o.x, s.z - o.z) < o.r + s.r * 0.5) {
+              this.impact(s, s.x, s.y, s.z, o.type);
+              break;
+            }
+          }
+          if (s.dead) break;
         }
-        if (s.dead) break;
         if (s.team === 'player') {
           for (const e of this.enemies) {
-            if (!e.alive || e.spawnT > 0) continue;
+            if (!e.alive || e.spawnT > 0 || s.hitIds?.has(e.id)) continue;
             if (Math.hypot(s.x - e.x, s.y - (e.y + e.def.height * 0.5), s.z - e.z) < s.r + e.def.radius) {
               this.hitEnemy(e, s.dmg, s);
+              if (s.pierce) {
+                // Pierce: keep going, and hit each virus once.
+                s.hitIds.add(e.id);
+                this.emit('impact', { x: s.x, y: s.y, z: s.z, kind: s.kind, team: s.team, surface: 'enemy', pass: true, element: s.fx?.element ?? null });
+                continue;
+              }
               this.impact(s, s.x, s.y, s.z, 'enemy', e);
               break;
             }
@@ -1355,12 +1675,42 @@ export class World {
   impact(s, x, y, z, surface, direct = null) {
     s.dead = true;
     if (s.splash > 0) {
-      for (const e of this.enemies) {
+      const src = { ...s, splashHit: true }; // splash hits don't set off Chain
+      for (const e of [...this.enemies]) {
         if (!e.alive || e === direct || e.spawnT > 0) continue;
-        if (Math.hypot(x - e.x, y - (e.y + e.def.height * 0.5), z - e.z) < s.splash + e.def.radius) this.hitEnemy(e, s.splashDmg, s);
+        if (Math.hypot(x - e.x, y - (e.y + e.def.height * 0.5), z - e.z) < s.splash + e.def.radius) this.hitEnemy(e, s.splashDmg, src);
       }
     }
-    this.emit('impact', { x, y, z, kind: s.kind, team: s.team, surface });
+    this.emit('impact', { x, y, z, kind: s.kind, team: s.team, surface, element: s.fx?.element ?? s.element ?? null, splash: s.splash || 0 });
+  }
+
+  // Homing mod: turn a shot toward its target, keeping its speed (a lobbed bomb only turns sideways).
+  steer(s) {
+    const t = this.enemy(s.homing);
+    if (!t?.alive) return;
+    const tx = t.x - s.x;
+    const ty = t.y + t.def.height * 0.5 - s.y;
+    const tz = t.z - s.z;
+    const k = Math.min(1, HOMING.turn * DT);
+    if (s.gravity) {
+      const sp = Math.hypot(s.vx, s.vz) || 1;
+      const l = Math.hypot(tx, tz) || 1;
+      let vx = s.vx / sp + (tx / l - s.vx / sp) * k;
+      let vz = s.vz / sp + (tz / l - s.vz / sp) * k;
+      const n = Math.hypot(vx, vz) || 1;
+      s.vx = (vx / n) * sp;
+      s.vz = (vz / n) * sp;
+      return;
+    }
+    const sp = Math.hypot(s.vx, s.vy, s.vz) || 1;
+    const l = Math.hypot(tx, ty, tz) || 1;
+    const vx = s.vx / sp + (tx / l - s.vx / sp) * k;
+    const vy = s.vy / sp + (ty / l - s.vy / sp) * k;
+    const vz = s.vz / sp + (tz / l - s.vz / sp) * k;
+    const n = Math.hypot(vx, vy, vz) || 1;
+    s.vx = (vx / n) * sp;
+    s.vy = (vy / n) * sp;
+    s.vz = (vz / n) * sp;
   }
 
   updateHazards() {
@@ -1378,7 +1728,7 @@ export class World {
           if (Math.abs(Math.hypot(e.x - h.x, e.z - h.z) - h.r) < h.thick + e.def.radius && e.y - h.y < 3) {
             h.hitIds.add(e.id);
             const d = Math.hypot(e.x - h.x, e.z - h.z) || 1;
-            this.hitEnemy(e, h.dmg, { kind: 'chip', dirX: (e.x - h.x) / d, dirZ: (e.z - h.z) / d, push: 5, launch: 5 });
+            this.hitEnemy(e, h.dmg, { kind: 'chip', dirX: (e.x - h.x) / d, dirZ: (e.z - h.z) / d, push: 5, launch: 5, element: h.element });
           }
         }
       } else if (!h.hit && p.alive) {
@@ -1432,6 +1782,8 @@ export class World {
     for (const e of this.enemies) h = (h * 33 + Math.round(e.x * 100) + Math.round(e.z * 100) * 7 + e.hp) | 0;
     h = (h + (p.lock ?? 0) * 7 + this.deck.length * 5 + this.stats.strikes * 3 + this.wallet * 11) | 0;
     for (const slot of SLOTS) for (const ch of this.loadout[slot]) h = (h * 31 + ch.charCodeAt(0)) | 0;
+    h = (h + this.designs.length * 17 + (this.equipped.arm ?? 0) * 3 + (this.equipped.gun ?? 0) * 5 + this.critCount + Math.round(this.leech * 100)) | 0;
+    for (const e of this.enemies) h = (h * 7 + Math.round((e.burn ?? 0) * 10) + Math.round((e.soak ?? 0) * 10)) | 0;
     return (h + this.shots.length * 101 + this.stats.data * 13) | 0;
   }
 }

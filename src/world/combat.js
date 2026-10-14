@@ -42,12 +42,13 @@ export const REACTIONS = {
   deflect: { label: 'DEFLECT', mult: 2.5 }, // a cannonball about to hit: bat it back
 };
 
-// Chips: each virus family's signature attack, learned by deleting it. Levels come from more deletes.
+// Chips: each virus family's signature attack, learned by deleting it, carrying that virus's element. Levels
+// come from more deletes.
 // Cooldowns follow Birth by Sleep's command deck (light commands reload in about 10 s), a little quicker.
 export const CHIPS = {
-  shockwave: { short: 'Shock', color: 0xffb040, name: 'ShockWave', from: 'rivet', cooldown: 8, dmg: [0, 30, 42, 56], desc: 'Slam the ground: a shockwave ring hits every virus around you.' },
-  cannon: { short: 'Cannon', color: 0xffd84a, name: 'Cannon', from: 'plinker', cooldown: 7, dmg: [0, 45, 62, 80], desc: 'A heavy cannonball at your target that bursts on impact.' },
-  findash: { short: 'FinDash', color: 0x5af0ff, name: 'FinDash', from: 'dartfin', cooldown: 6, dmg: [0, 28, 38, 50], desc: 'Dive through enemies in a line, invincible on the way.' },
+  shockwave: { element: 'wood', short: 'Shock', color: 0xffb040, name: 'ShockWave', from: 'rivet', cooldown: 8, dmg: [0, 30, 42, 56], desc: 'Slam the ground: a shockwave ring hits every virus around you.' },
+  cannon: { element: 'fire', short: 'Cannon', color: 0xffd84a, name: 'Cannon', from: 'plinker', cooldown: 7, dmg: [0, 45, 62, 80], desc: 'A heavy cannonball at your target that bursts on impact.' },
+  findash: { element: 'aqua', short: 'FinDash', color: 0x5af0ff, name: 'FinDash', from: 'dartfin', cooldown: 6, dmg: [0, 28, 38, 50], desc: 'Dive through enemies in a line, invincible on the way.' },
 };
 export const CHIP_OF = Object.fromEntries(Object.entries(CHIPS).map(([k, c]) => [c.from, k]));
 export const CHIP_LEVELS = [0, 1, 5, 15]; // deletes needed for level 1, 2, 3

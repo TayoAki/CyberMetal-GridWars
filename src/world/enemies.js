@@ -3,13 +3,15 @@
 // during the wind-up is a counter, as in the grid game) and recovers. AI functions get the world, the enemy,
 // dt and the player's relative position, and only set intent (velocity, facing, state); the world integrates.
 
+// Each virus has a Battle Network element (Fire > Wood > Elec > Aqua > Fire): forged weapons of the element
+// that beats it deal double damage.
 export const ENEMY_TYPES = {
   // Hard-hat virus: walks up and slams the ground, sending out a shockwave ring. Jump it or dash through it.
-  rivet: { hp: 60, radius: 0.75, height: 1.3, speed: 3.6, aggro: 32, data: 2 },
+  rivet: { hp: 60, radius: 0.75, height: 1.3, speed: 3.6, aggro: 32, data: 2, element: 'wood' },
   // Cannon tank: keeps its distance, charges and fires a slow cannonball with a little lead.
-  plinker: { hp: 85, radius: 1.0, height: 1.5, speed: 2.2, aggro: 38, data: 3 },
+  plinker: { hp: 85, radius: 1.0, height: 1.5, speed: 2.2, aggro: 38, data: 3, element: 'fire' },
   // Flying fin drone: circles the player, marks a spot and dives through it.
-  dartfin: { hp: 48, radius: 0.8, height: 0.9, speed: 7, aggro: 36, hover: 3.2, data: 2 },
+  dartfin: { hp: 48, radius: 0.8, height: 0.9, speed: 7, aggro: 36, hover: 3.2, data: 2, element: 'aqua' },
 };
 
 export const RING = { speed: 11, max: 16, thick: 0.95, dmg: 14 };
