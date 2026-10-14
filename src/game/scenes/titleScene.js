@@ -12,6 +12,7 @@ import { ProgramsScene } from './programsScene.js';
 import { OptionsScene } from './optionsScene.js';
 import { CreditsScene } from './creditsScene.js';
 import { HelpScene } from './helpScene.js';
+import { ShopScene } from './shopScene.js';
 
 // Title + main menu, with an attract-mode demo battle playing behind the logo.
 
@@ -53,6 +54,7 @@ export class TitleScene {
       { label: 'FREE BATTLE', go: () => new FreeBattleScene(this.game) },
       { label: 'FOLDER', go: () => new FolderScene(this.game) },
       { label: 'PROGRAMS', go: () => new ProgramsScene(this.game) },
+      { label: 'CHIP SHOP', go: () => new ShopScene(this.game) },
       { label: 'HOW TO PLAY', go: () => new HelpScene(this.game) },
       { label: 'OPTIONS', go: () => new OptionsScene(this.game) },
       { label: 'CREDITS', go: () => new CreditsScene(this.game) },
@@ -102,8 +104,8 @@ export class TitleScene {
       drawText(ctx, 'A fan-made fights-only grid battler', 120, 148, '#4a5a90', { align: 'center' });
       return;
     }
-    drawWindow(ctx, 60, 62, 120, 84);
-    drawMenu(ctx, this.items(), this.cursor, 76, 68, { width: 100, t: this.t, lineHeight: 11 });
+    drawWindow(ctx, 60, 60, 120, 88);
+    drawMenu(ctx, this.items(), this.cursor, 76, 65, { width: 100, t: this.t, lineHeight: 10 });
     const d = this.game.save.data;
     const area = AREAS[Math.min(d.progress.area, AREAS.length - 1)];
     drawHints(ctx, d.progress.finished ? 'All areas cleared!  Try Free Battle Ω' : `Next: ${area.name}`);
@@ -119,6 +121,7 @@ export class TitleScene {
       const x = sweep - 40 + i * 3;
       if (x > 30 && x < 210) rect(ctx, x, y + 20, 1, 22, 'rgba(255,255,255,0.35)');
     }
+    if (this.state === 'menu') return;
     rect(ctx, 52, y + 46, 136, 1, shade('#8ab0ff', -0.3));
     drawText(ctx, 'NET BATTLE PROTOCOL', 120, y + 49, '#8ab0ff', { align: 'center' });
   }
