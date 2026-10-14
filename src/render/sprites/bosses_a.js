@@ -6,7 +6,7 @@
 // hand-placed detail and drawn with sprite() in the house style (cached bitmaps, dark 1px outline).
 // Each grid uses palette keys, so per-version palettes are plain key -> colour maps.
 
-import { sprite, rect, px, line, ellipse, disc, ring, poly, shade, mix } from '../pixel.js';
+import { sprite, rect, px, line, ellipse, disc, ring, poly, shade } from '../pixel.js';
 import { floorPoint } from '../layout.js';
 
 const OUTLINE = '#0c0f1c';
@@ -494,6 +494,15 @@ function drawVolt(ctx, e, x, y, t) {
       px(ctx, lx + dir * 2, ly - 1, '#fff6c0');
       px(ctx, lx + dir * 2, ly + 1, '#fff6c0');
       px(ctx, lx + dir * 3, ly, '#fffbe8');
+    }
+    // Stray charge crawls from the chest core down an arm every so often.
+    const ph = t % 84;
+    if (ph < 6) {
+      const bob = pose.bob ?? 0;
+      const [cx, cy] = framePt(x, y, VW, VH, flip, 18.3, 22 + bob);
+      const hand = ph < 3 ? pose.armF[2] : pose.armB[2];
+      const [hx, hy] = framePt(x, y, VW, VH, flip, hand[0], hand[1] + bob);
+      bolt(ctx, cx, cy, hx, hy, (t / 84) | 0, ph % 2 ? '#ffffff' : neon, 4, 2);
     }
   }
 }
@@ -1451,9 +1460,14 @@ function drawFlameJet(ctx, s, x, y) {
   const fire = PYRE_FIRE[levelOf(s) - 1];
   const t = s.t ?? 0;
   const d = (s.data.dir ?? s.dir ?? -1) < 0 ? -1 : 1;
+  // The jet spans the zone's cells: from the palm (just behind the first) past the far edge of the last.
+  const cells = s.data.cells?.length ? s.data.cells : [[0, 0], [d, 0]];
+  const first = floorPoint(cells[0][0], cells[0][1]);
+  const last = floorPoint(cells[cells.length - 1][0], cells[cells.length - 1][1]);
+  const span = Math.abs(last.x - first.x);
   const x0 = x - d * 14;
   const y0 = y - 28;
-  const x1 = x + d * 58;
+  const x1 = x + d * (span + 18);
   const y1 = y - 13;
   const grow = Math.min(1, (t + 1) / 6);
   const n = 18;

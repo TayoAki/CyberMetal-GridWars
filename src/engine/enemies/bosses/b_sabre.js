@@ -32,13 +32,19 @@ function canGuard(b, e) {
   return b.fightFrames >= (e.data.guardReady ?? 0);
 }
 
+// The shield is up for guardTime frames: every hit is blocked, and the first one is bounced back down the
+// row (the engine fires the reflection); after that it only blocks.
 function* guard(b, e, s) {
   noteMove(e, 'guard');
   e.setAnim('guard');
   e.guardTimer = s.guardTime;
   e.guard = { reflect: s.reflect };
   b.emit('sfx', { name: 'guardup' });
-  yield* wait(s.guardTime);
+  const old = new Set(b.spells.filter((sp) => sp.type === 'reflect' && sp.owner === e));
+  for (let t = 0; t < s.guardTime; t++) {
+    if (e.guard?.reflect > 0 && b.spells.some((sp) => sp.type === 'reflect' && sp.owner === e && !old.has(sp))) e.guard.reflect = 0;
+    yield;
+  }
   e.guardTimer = 0;
   e.guard = null;
   e.data.guardReady = b.fightFrames + s.guardCd;
@@ -157,10 +163,10 @@ export const SABRE = {
     // slash: Wide Slash; wave: Crescent; stepSlash: Step Slash (V2+); triple: each Triple Edge cut (V3+);
     // reflect: damage bounced back while guarding. guardChance/react: odds and reaction frames to guard
     // when the player fires; guardCd: frames before he can guard again; riposte: odds of striking back.
-    { attack: 60, slash: 60, wave: 40, stepSlash: 0, triple: 0, reflect: 20, windup: 22, aimWind: 0, waveWind: 26, waveSpeed: 6, tripleWind: 0, tripleGap: 0, tripleCd: 0, guardChance: 0.45, react: 10, guardTime: 60, guardCd: 100, riposte: 0.25, idle: [60, 100], hop: 34, recover: 44 },
-    { attack: 80, slash: 80, wave: 60, stepSlash: 90, triple: 0, reflect: 40, windup: 20, aimWind: 22, waveWind: 22, waveSpeed: 5, tripleWind: 0, tripleGap: 0, tripleCd: 0, guardChance: 0.6, react: 8, guardTime: 60, guardCd: 90, riposte: 0.35, idle: [50, 85], hop: 30, recover: 36 },
-    { attack: 120, slash: 120, wave: 90, stepSlash: 130, triple: 100, reflect: 60, windup: 18, aimWind: 20, waveWind: 20, waveSpeed: 4, tripleWind: 12, tripleGap: 6, tripleCd: 480, guardChance: 0.7, react: 6, guardTime: 60, guardCd: 80, riposte: 0.45, idle: [40, 70], hop: 26, recover: 30 },
-    { attack: 180, slash: 180, wave: 130, stepSlash: 190, triple: 150, reflect: 100, windup: 15, aimWind: 16, waveWind: 16, waveSpeed: 3, tripleWind: 10, tripleGap: 4, tripleCd: 360, guardChance: 0.8, react: 4, guardTime: 60, guardCd: 70, riposte: 0.55, idle: [30, 55], hop: 22, recover: 24 },
+    { attack: 60, slash: 60, wave: 40, stepSlash: 0, triple: 0, reflect: 10, windup: 22, aimWind: 0, waveWind: 26, waveSpeed: 6, tripleWind: 0, tripleGap: 0, tripleCd: 0, guardChance: 0.45, react: 10, guardTime: 60, guardCd: 100, riposte: 0.25, idle: [60, 100], hop: 34, recover: 44 },
+    { attack: 80, slash: 80, wave: 60, stepSlash: 90, triple: 0, reflect: 20, windup: 20, aimWind: 22, waveWind: 22, waveSpeed: 5, tripleWind: 0, tripleGap: 0, tripleCd: 0, guardChance: 0.6, react: 8, guardTime: 60, guardCd: 90, riposte: 0.35, idle: [50, 85], hop: 30, recover: 36 },
+    { attack: 120, slash: 120, wave: 90, stepSlash: 130, triple: 100, reflect: 30, windup: 18, aimWind: 20, waveWind: 20, waveSpeed: 4, tripleWind: 12, tripleGap: 6, tripleCd: 480, guardChance: 0.62, react: 6, guardTime: 60, guardCd: 96, riposte: 0.45, idle: [40, 70], hop: 26, recover: 30 },
+    { attack: 180, slash: 180, wave: 130, stepSlash: 190, triple: 150, reflect: 50, windup: 15, aimWind: 16, waveWind: 16, waveSpeed: 3, tripleWind: 10, tripleGap: 4, tripleCd: 360, guardChance: 0.7, react: 4, guardTime: 60, guardCd: 84, riposte: 0.55, idle: [30, 55], hop: 22, recover: 24 },
   ],
   onSpawn(b, e) {
     e.data.moves = {};

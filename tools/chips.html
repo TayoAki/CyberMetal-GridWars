@@ -39,7 +39,7 @@ if (mode === 'chips') {
   const keys = q.get('keys') ? list('keys') : Object.keys(CHIPS);
   const cols = Number(q.get('cols') ?? 6);
   const t = Number(q.get('t') ?? 0);
-  const CW = 66;
+  const CW = 96;
   const CHT = 80;
   const extra = q.get('elements') ? 20 : 0;
   W = cols * CW + 4;
@@ -65,6 +65,7 @@ if (mode === 'chips') {
       drawChipIcon(ctx, def, x + 2, y + 50);
       drawElementIcon(ctx, def.element, x + 18, y + 52);
       drawText(ctx, def.name, x + 29, y + 51, '#ffffff', { mini: false, scale: 1 });
+      drawText(ctx, def.key, x + 60, y + 8, '#7a83b8', { mini: false });
       drawText(ctx, `${def.behavior}`.slice(0, 13), x + 2, y + 66, '#7a83b8', { mini: true });
       if (def.klass !== 'standard') drawText(ctx, def.klass, x + 44, y + 66, '#ffd27a', { mini: true });
     });

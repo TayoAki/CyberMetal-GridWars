@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Audio Check</title>
+<style>
+  :root { --bg: #0e1220; --fg: #dfe6ff; --dim: #8a94b8; --ok: #5fd38a; --bad: #ff6b6b; --warn: #ffc857; --line: #273050; }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 13px/1.4 ui-monospace, Menlo, Consolas, monospace; }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  p { color: var(--dim); margin: 0 0 12px; }
+  table { border-collapse: collapse; width: 100%; max-width: 980px; }
+  th, td { text-align: left; padding: 3px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--dim); font-weight: normal; }
+  td.num { text-align: right; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); } .warn { color: var(--warn); }
+  button { background: #1b2340; color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 2px 8px; margin: 2px; font: inherit; cursor: pointer; }
+  #listen { margin: 12px 0; max-width: 980px; }
+  .wrap { overflow-x: auto; }
+</style>
+</head>
+<body>
+<h1>Audio check</h1>
+<p id="status">Rendering every sound offline...</p>
+<div id="listen"></div>
+<div class="wrap"><table id="out"><thead><tr><th>kind</th><th>name</th><th>dur s</th><th>peak</th><th>rms</th><th>NaN</th><th>result</th><th>note</th></tr></thead><tbody></tbody></table></div>
+<script type="module">
+import { audio, SFX_NAMES, TRACK_NAMES, trackInfo } from '../src/audio/index.js';
+
+const SILENT = 0.001; // -60 dBFS: where a sound counts as over
+const SFX_MIN_RMS = 0.003;
+const MUSIC_MIN_RMS = 0.01;
+const LONG_OK = new Set(['playerdelete']); // allowed past 1.2 s
+const results = [];
+const tbody = document.querySelector('#out tbody');
+
+// Mono mix helper and measurements over [from, to) seconds.
+function stats(buf, from = 0, to = buf ? buf.duration : 0) {
+  if (!buf) return null;
+  const sr = buf.sampleRate;
+  const chans = [];
+  for (let c = 0; c < buf.numberOfChannels; c++) chans.push(buf.getChannelData(c));
+  const i0 = Math.max(0, Math.floor(from * sr));
+  const i1 = Math.min(buf.length, Math.floor(to * sr));
+  let peak = 0, sum = 0, n = 0, nan = false, lastLoud = -1;
+  for (let i = i0; i < i1; i++) {
+    for (const d of chans) {
+      const x = d[i];
+      if (x !== x) { nan = true; continue; }
+      const a = Math.abs(x);
+      if (a > peak) peak = a;
+      if (a > SILENT) lastLoud = i;
+      sum += x * x;
+      n++;
+    }
+  }
+  return { peak, rms: Math.sqrt(sum / Math.max(1, n)), nan, end: (lastLoud + 1) / sr };
+}
+
+function mono(buf, from, len) {
+  const sr = buf.sampleRate, i0 = Math.floor(from * sr), n = Math.floor(len * sr);
+  const out = new Float32Array(n);
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    const d = buf.getChannelData(c);
+    for (let i = 0; i < n; i++) out[i] += d[i0 + i] || 0;
+  }
+  return out;
+}
+
+function correlation(a, b) {
+  let ma = 0, mb = 0;
+  for (let i = 0; i < a.length; i++) { ma += a[i]; mb += b[i]; }
+  ma /= a.length; mb /= b.length;
+  let sab = 0, saa = 0, sbb = 0;
+  for (let i = 0; i < a.length; i++) { const x = a[i] - ma, y = b[i] - mb; sab += x * y; saa += x * x; sbb += y * y; }
+  return sab / Math.sqrt(saa * sbb || 1);
+}
+
+const r4 = (x) => (x == null ? null : Math.round(x * 10000) / 10000);
+function add(row) {
+  results.push(row);
+  const tr = document.createElement('tr');
+  const cls = row.ok ? (row.warn ? 'warn' : 'ok') : 'bad';
+  tr.innerHTML = `<td>${row.kind}</td><td>${row.name}</td><td class="num">${row.duration?.toFixed(3) ?? '-'}</td>` +
+    `<td class="num">${row.peak?.toFixed(3) ?? '-'}</td><td class="num">${row.rms?.toFixed(4) ?? '-'}</td>` +
+    `<td>${row.nan ? 'yes' : 'no'}</td><td class="${cls}">${row.ok ? (row.warn ? 'warn' : 'ok') : 'FAIL'}</td><td>${row.note || ''}</td>`;
+  tbody.appendChild(tr);
+}
+
+async function checkSfx(name) {
+  const buf = await audio.renderOffline('sfx', name, 2.5);
+  if (!buf) return add({ kind: 'sfx', name, ok: false, note: 'render returned null' });
+  const all = stats(buf);
+  const dur = all.end;
+  const s = stats(buf, 0, Math.max(dur, 0.01));
+  const long = dur >= 1.2;
+  const ok = !s.nan && s.peak <= 1 && s.rms > SFX_MIN_RMS && (!long || LONG_OK.has(name));
+  add({ kind: 'sfx', name, duration: r4(dur), peak: r4(s.peak), rms: r4(s.rms), nan: s.nan, ok, warn: long, note: long ? 'long (allowed)' : '' });
+}
+
+async function checkMusic(name) {
+  const info = trackInfo(name);
+  const buf = await audio.renderOffline('music', name, 8);
+  if (!buf) return add({ kind: 'music', name, ok: false, note: 'render returned null' });
+  const s = stats(buf);
+  const ok = !s.nan && s.peak <= 1 && s.rms > MUSIC_MIN_RMS && info.mismatch.length === 0;
+  add({
+    kind: 'music', name, duration: r4(buf.duration), peak: r4(s.peak), rms: r4(s.rms), nan: s.nan, ok,
+    note: `${info.bpm} bpm, ${info.key}, intro ${info.introSec.toFixed(2)} s, loop ${info.loopSec.toFixed(2)} s (${info.loopBars} bars)${info.loop ? '' : ', one-shot'}${info.mismatch.length ? ' MISMATCH ' + info.mismatch.join('; ') : ''}`,
+  });
+  if (!info.loop) {
+    // One-shot jingle: render it whole and report its real length.
+    const full = await audio.renderOffline('music', name, info.loopSec + 3);
+    const f = stats(full);
+    add({ kind: 'jingle', name, duration: r4(f.end), peak: r4(f.peak), rms: r4(stats(full, 0, f.end).rms), nan: f.nan, ok: !f.nan && f.peak <= 1 && f.end > 2 && f.end < 9, note: 'whole jingle; ends (-60 dB) at the duration shown' });
+    return;
+  }
+  // Loop seam: start 3 s before the loop point (via the same Sequencer, seeking) and render 7 s.
+  const loopAt = info.introSec + info.loopSec;
+  const seam = await audio.renderOffline('music', name, 7, { from: loopAt - 3 });
+  const pre = stats(seam, 0, 3), post = stats(seam, 3, 7);
+  add({
+    kind: 'loop', name, duration: r4(seam.duration), peak: r4(Math.max(pre.peak, post.peak)), rms: r4(post.rms), nan: pre.nan || post.nan,
+    ok: !pre.nan && !post.nan && post.rms > MUSIC_MIN_RMS && pre.rms > MUSIC_MIN_RMS && Math.max(pre.peak, post.peak) <= 1,
+    note: `seam at ${loopAt.toFixed(2)} s; rms before ${pre.rms.toFixed(4)}, after ${post.rms.toFixed(4)}`,
+  });
+}
+
+// One full straight render past the loop point (no seeking): the scheduler wraps on its own.
+async function fullLoop(name) {
+  const info = trackInfo(name);
+  const loopAt = info.introSec + info.loopSec;
+  const t0 = performance.now();
+  const buf = await audio.renderOffline('music', name, loopAt + 6);
+  const ms = performance.now() - t0;
+  const all = stats(buf), after = stats(buf, loopAt, loopAt + 6);
+  const c = correlation(mono(buf, info.introSec + 0.5, 4), mono(buf, loopAt + 0.5, 4));
+  add({
+    kind: 'fullloop', name, duration: r4(buf.duration), peak: r4(all.peak), rms: r4(after.rms), nan: all.nan,
+    ok: !all.nan && all.peak <= 1 && after.rms > MUSIC_MIN_RMS && c > 0.8,
+    note: `straight ${buf.duration.toFixed(1)} s render (${(ms / 1000).toFixed(1)} s); rms after loop point ${after.rms.toFixed(4)}; pass 1 vs pass 2 correlation ${c.toFixed(3)}`,
+  });
+}
+
+// Click-to-listen buttons (live playback; the first click unlocks audio).
+const listen = document.getElementById('listen');
+for (const t of [...TRACK_NAMES, null]) {
+  const b = document.createElement('button');
+  b.textContent = t ? `music: ${t}` : 'music: stop';
+  b.onclick = () => { audio.unlock(); audio.music(t); };
+  listen.appendChild(b);
+}
+listen.appendChild(document.createElement('br'));
+for (const n of SFX_NAMES) {
+  const b = document.createElement('button');
+  b.textContent = n;
+  b.onclick = () => { audio.unlock(); audio.play(n); };
+  listen.appendChild(b);
+}
+
+try {
+  for (const n of SFX_NAMES) await checkSfx(n);
+  for (const t of TRACK_NAMES) await checkMusic(t);
+  await fullLoop('battle');
+  const unknown = await audio.renderOffline('sfx', 'definitely-not-a-sound', 1);
+  add({ kind: 'api', name: 'unknown sfx', ok: unknown === null, note: 'renderOffline of an unknown name resolves to null' });
+} catch (e) {
+  add({ kind: 'error', name: String(e && e.message || e), ok: false });
+}
+const failed = results.filter((r) => !r.ok);
+document.getElementById('status').textContent = `${results.length} checks, ${failed.length} failed.`;
+window.__results = results;
+window.__ready = true;
+</script>
+</body>
+</html>

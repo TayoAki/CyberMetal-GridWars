@@ -193,7 +193,7 @@ export const BRIARIX = {
     // root: Root Snare damage (paralyzes `stun` frames, +15 through grass); petal: each Petal Storm tick
     // (every 10 frames for petalFrames); overgrow: V2+ field to grass; bud: V3+ Thorn Bud (budHp, thorn dmg).
     { attack: 30, root: 30, stun: 60, rootDelay: 42, snares: 1, snareGap: 0, petal: 10, petalWarn: 24, petalFrames: 40, overgrow: false, growWind: 22, growCd: 0, bud: false, budHp: 0, thorn: 0, budLife: 0, budRate: 0, budCd: 0, windup: 24, idle: [60, 100], stepEvery: 36, recover: 44 },
-    { attack: 60, root: 60, stun: 60, rootDelay: 38, snares: 1, snareGap: 0, petal: 20, petalWarn: 22, petalFrames: 40, overgrow: true, growWind: 22, growCd: 600, bud: false, budHp: 0, thorn: 0, budLife: 0, budRate: 0, budCd: 0, windup: 22, idle: [50, 85], stepEvery: 32, recover: 36 },
+    { attack: 60, root: 60, stun: 60, rootDelay: 36, snares: 2, snareGap: 20, petal: 20, petalWarn: 22, petalFrames: 40, overgrow: true, growWind: 22, growCd: 600, bud: false, budHp: 0, thorn: 0, budLife: 0, budRate: 0, budCd: 0, windup: 22, idle: [50, 85], stepEvery: 32, recover: 36 },
     { attack: 90, root: 90, stun: 66, rootDelay: 34, snares: 2, snareGap: 16, petal: 30, petalWarn: 20, petalFrames: 40, overgrow: true, growWind: 20, growCd: 540, bud: true, budHp: 60, thorn: 40, budLife: 900, budRate: 90, budCd: 600, windup: 20, idle: [40, 70], stepEvery: 28, recover: 30 },
     { attack: 140, root: 140, stun: 72, rootDelay: 30, snares: 2, snareGap: 12, petal: 45, petalWarn: 18, petalFrames: 40, overgrow: true, growWind: 18, growCd: 480, bud: true, budHp: 100, thorn: 70, budLife: 900, budRate: 75, budCd: 480, windup: 16, idle: [30, 60], stepEvery: 24, recover: 24 },
   ],

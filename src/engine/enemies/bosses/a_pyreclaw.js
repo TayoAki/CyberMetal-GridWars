@@ -39,13 +39,14 @@ const BRAZIER = {
 // A fire pillar that erupts at the edge of the player's area and marches across the row, one panel
 // every `towerSpeed` frames. The first time the player is in another row when it finishes a panel, it
 // slides to that row (no hits while sliding) and marches on from there. Every panel it leaves keeps
-// burning for `trail` frames.
+// burning for `trail` frames (half damage).
 function fireTower(b, e, s) {
   const dir = e.facing;
   let row = b.player.row;
   let col = rowEdge(b, TEAM.RED, row, 'front');
   if (col < 0) return null;
   const hit = { damage: s.tower, element: ELEMENT.FIRE, flinch: true };
+  const embers = { damage: Math.max(10, Math.round(s.tower / 2)), element: ELEMENT.FIRE, flinch: true };
   const sp = b.addSpell({ type: 'firetower2', team: e.team, owner: e, col, row, dir, hit });
   sp.data.level = e.level;
   sp.data.phase = 'rise';
@@ -68,7 +69,7 @@ function fireTower(b, e, s) {
         b.hitPanel(sp, col, row);
         yield;
       }
-      const trail = zone(b, e, hit, [[col, row]], s.trail, { type: 'pyreflame' });
+      const trail = zone(b, e, embers, [[col, row]], s.trail, { type: 'pyreflame' });
       trail.data.level = e.level;
       trail.data.life = s.trail;
       if (!reaimed && b.player.row !== row) {

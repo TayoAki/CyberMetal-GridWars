@@ -67,9 +67,10 @@ function* nullBarrage(b, e, s) {
 }
 
 function splitWave(b, e, hit, row, speed) {
+  // Each wave starts under ZeroDay and crosses its own area first: a beat to read which rows it took.
   const sw = shockwave(b, e, hit, {
     row,
-    col: e.col + e.facing,
+    col: e.col,
     speed,
     type: 'voidwave',
     // Crack the floor it crosses in the player's area (its own panels are spared).
@@ -90,12 +91,13 @@ function* earthSplitter(b, e, s) {
     yield;
   }
   e.hidden = true; // out of sight above the field
-  yield* wait(s.airTime);
-  // Come down on a panel of its area, favouring the middle row.
+  // It comes down on a panel of its area (favouring the middle row); a shadow marks the spot.
   const spots = otherSpots(b, e);
   const mid = spots.filter(([, r]) => r === 1);
-  const land = mid.length && b.rng.chance(0.6) ? b.rng.pick(mid) : spots.length ? b.rng.pick(spots) : null;
-  if (land) b.moveEntity(e, land[0], land[1], { noBreak: true });
+  const land = mid.length && b.rng.chance(0.6) ? b.rng.pick(mid) : spots.length ? b.rng.pick(spots) : [e.col, e.row];
+  const shadow = warning(b, e, 'voidland', [land], s.airTime + 6);
+  yield* wait(s.airTime);
+  if (land[0] !== e.col || land[1] !== e.row) b.moveEntity(e, land[0], land[1], { noBreak: true });
   e.hidden = false;
   e.setAnim('smash');
   for (let t = 1; t <= 6; t++) {
@@ -103,6 +105,7 @@ function* earthSplitter(b, e, s) {
     yield;
   }
   e.z = 0;
+  shadow.kill();
   b.emit('sfx', { name: 'bigexplode' });
   b.emit('fx', { fx: 'voidquake', col: e.col, row: e.row, level: e.level });
   const hit = { damage: s.wave, flinch: true };
