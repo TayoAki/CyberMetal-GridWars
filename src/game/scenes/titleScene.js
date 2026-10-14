@@ -11,6 +11,7 @@ import { FolderScene } from './folderScene.js';
 import { ProgramsScene } from './programsScene.js';
 import { OptionsScene } from './optionsScene.js';
 import { CreditsScene } from './creditsScene.js';
+import { HelpScene } from './helpScene.js';
 
 // Title + main menu, with an attract-mode demo battle playing behind the logo.
 
@@ -52,6 +53,7 @@ export class TitleScene {
       { label: 'FREE BATTLE', go: () => new FreeBattleScene(this.game) },
       { label: 'FOLDER', go: () => new FolderScene(this.game) },
       { label: 'PROGRAMS', go: () => new ProgramsScene(this.game) },
+      { label: 'HOW TO PLAY', go: () => new HelpScene(this.game) },
       { label: 'OPTIONS', go: () => new OptionsScene(this.game) },
       { label: 'CREDITS', go: () => new CreditsScene(this.game) },
     ];
@@ -93,15 +95,15 @@ export class TitleScene {
     ctx.globalAlpha = 0.62;
     rect(ctx, 0, 0, 240, 160, '#03050c');
     ctx.globalAlpha = 1;
-    this.drawLogo(ctx, 18);
+    this.drawLogo(ctx, this.state === 'menu' ? 8 : 18);
     if (this.state === 'press') {
       if (this.t % 50 < 34) drawText(ctx, 'PRESS START', 120, 112, '#ffffff', { align: 'center', outline: '#0a1a4a' });
       drawText(ctx, 'Z buster  X chip  Q/E custom', 120, 128, UI.dim, { align: 'center' });
       drawText(ctx, 'A fan-made fights-only grid battler', 120, 148, '#4a5a90', { align: 'center' });
       return;
     }
-    drawWindow(ctx, 60, 74, 120, 80);
-    drawMenu(ctx, this.items(), this.cursor, 76, 82, { width: 100, t: this.t });
+    drawWindow(ctx, 60, 62, 120, 84);
+    drawMenu(ctx, this.items(), this.cursor, 76, 68, { width: 100, t: this.t, lineHeight: 11 });
     const d = this.game.save.data;
     const area = AREAS[Math.min(d.progress.area, AREAS.length - 1)];
     drawHints(ctx, d.progress.finished ? 'All areas cleared!  Try Free Battle Ω' : `Next: ${area.name}`);

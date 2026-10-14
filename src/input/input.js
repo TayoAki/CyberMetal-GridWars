@@ -36,39 +36,63 @@ export const KEY_HELP = [
 
 export class Input {
   constructor(target = window) {
-    this.keys = new Set();
-    this.touch = new Set();
+    // Keyboard and touch are tracked as a queue of transitions per button. Each sample replays at most
+    // one transition per button, so a press and release that both land between two frames (slow or
+    // stalled frames) are still seen as a press followed by a release — no tap is ever lost or merged.
+    this.count = {}; // physical keys/touches currently holding each button
+    this.queue = {}; // pending held-state transitions per button
+    this.state = {}; // replayed held state per button
     this.listeners = [];
     this.lastDevice = 'keyboard';
     this.onFirstInput = null;
-    const down = (e) => {
+    this.down = new Set(); // codes currently down, to ignore auto-repeat and stray keyups
+    const keydown = (e) => {
       const btn = DEFAULT_KEYS[e.code];
       if (btn) {
-        this.keys.add(btn + ':' + e.code);
-        this.lastDevice = 'keyboard';
         e.preventDefault();
+        this.lastDevice = 'keyboard';
+        if (!this.down.has(e.code)) {
+          this.down.add(e.code);
+          this.change(btn, +1);
+        }
       }
       this.fireFirst();
     };
-    const up = (e) => {
+    const keyup = (e) => {
       const btn = DEFAULT_KEYS[e.code];
       if (btn) {
-        this.keys.delete(btn + ':' + e.code);
         e.preventDefault();
+        if (this.down.delete(e.code)) this.change(btn, -1);
       }
     };
-    const blur = () => {
-      this.keys.clear();
-      this.touch.clear();
-    };
-    target.addEventListener('keydown', down);
-    target.addEventListener('keyup', up);
+    const blur = () => this.releaseAll();
+    target.addEventListener('keydown', keydown);
+    target.addEventListener('keyup', keyup);
     target.addEventListener('blur', blur);
     this.listeners.push(() => {
-      target.removeEventListener('keydown', down);
-      target.removeEventListener('keyup', up);
+      target.removeEventListener('keydown', keydown);
+      target.removeEventListener('keyup', keyup);
       target.removeEventListener('blur', blur);
     });
+  }
+
+  change(btn, delta) {
+    const before = (this.count[btn] ?? 0) > 0;
+    this.count[btn] = Math.max(0, (this.count[btn] ?? 0) + delta);
+    const after = this.count[btn] > 0;
+    if (before !== after) (this.queue[btn] ??= []).push(after);
+  }
+
+  releaseAll() {
+    for (const b of BUTTONS) {
+      if ((this.count[b] ?? 0) > 0) (this.queue[b] ??= []).push(false);
+      this.count[b] = 0;
+    }
+    this.down.clear();
+  }
+
+  get keys() {
+    return new Set([...this.down]);
   }
 
   fireFirst() {
@@ -81,20 +105,22 @@ export class Input {
 
   // On-screen buttons call these.
   touchDown(btn) {
-    this.touch.add(btn);
+    this.change(btn, +1);
     this.lastDevice = 'touch';
     this.fireFirst();
   }
 
   touchUp(btn) {
-    this.touch.delete(btn);
+    this.change(btn, -1);
   }
 
   sample() {
     const held = {};
-    for (const b of BUTTONS) held[b] = false;
-    for (const k of this.keys) held[k.split(':')[0]] = true;
-    for (const t of this.touch) held[t] = true;
+    for (const b of BUTTONS) {
+      const q = this.queue[b];
+      if (q && q.length) this.state[b] = q.shift();
+      held[b] = !!this.state[b];
+    }
     const pads = typeof navigator !== 'undefined' && navigator.getGamepads ? navigator.getGamepads() : [];
     for (const gp of pads) {
       if (!gp || !gp.connected) continue;
