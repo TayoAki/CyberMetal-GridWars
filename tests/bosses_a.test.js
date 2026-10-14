@@ -5,6 +5,7 @@ import { ENEMIES } from '../src/engine/enemies/index.js';
 import { FAMILIES } from '../src/engine/enemies/bosses/bosses_a.js';
 import { CHIPS } from '../src/engine/chips/library.js';
 import { makeBattle, folderOf, run, toFight, pickAndFight, press } from './helpers.js';
+import { ENTITY_SPRITES, SPELL_SPRITES, FX_SPRITES } from '../src/render/sprites/bosses_a.js';
 
 // Boss pack A: Voltframe (FlashMan), Feralis (BeastMan), Tidecaller (BubbleMan), Pyreclaw (FlameMan).
 
@@ -531,3 +532,78 @@ for (const spec of BOSSES) {
     assert.equal(a, play());
   });
 }
+
+// ------------------------------------------------------------------ sprites
+
+// A no-op 2D context/canvas so the pixel helpers run under Node (draw code must never throw).
+function stubCanvas() {
+  const store = { globalAlpha: 1, fillStyle: '#000', globalCompositeOperation: 'source-over' };
+  const ctx = new Proxy(store, { get: (o, k) => (k in o ? o[k] : () => {}), set: (o, k, v) => ((o[k] = v), true) });
+  globalThis.OffscreenCanvas ??= class {
+    constructor(w, h) {
+      this.width = w;
+      this.height = h;
+    }
+    getContext() {
+      return ctx;
+    }
+  };
+  return ctx;
+}
+
+const BODY_ANIMS = ['idle', 'move', 'warp', 'charge', 'cast', 'flashcharge', 'flash', 'crouch', 'rake', 'pounce', 'land', 'howl', 'aim', 'shoot', 'call', 'tide', 'windup', 'slam', 'blast', 'roar', 'pulse', 'zap', 'summon', 'hurt', 'delete', 'nonsense'];
+
+test('sprites: bodies and objects draw from stub entities at every level and pose', () => {
+  const ctx = stubCanvas();
+  for (const key of ['voltframe', 'feralis', 'tidecaller', 'pyreclaw', 'neonlamp', 'coralrock', 'brazier']) {
+    assert.ok(ENTITY_SPRITES[key], key);
+    for (const level of [undefined, 1, 2, 3, 4, 9]) {
+      for (const anim of BODY_ANIMS) {
+        for (const facing of [1, -1, undefined]) {
+          for (const animT of [0, 7, 45, 999]) {
+            ENTITY_SPRITES[key].draw(ctx, { type: key, anim, animT, facing, level, data: {} }, 120, 100, animT * 3);
+          }
+        }
+      }
+    }
+    // Bare minimum stub (what a summon or a sheet may pass).
+    ENTITY_SPRITES[key].draw(ctx, { type: key }, 0, 0, 0);
+  }
+});
+
+test('sprites: spells and effects draw from stub data at every phase', () => {
+  const ctx = stubCanvas();
+  for (const [key, sp] of Object.entries(SPELL_SPRITES)) {
+    for (const data of [{}, { progress: 0 }, { progress: 0.99, level: 4 }, { landed: true }, { struck: true }, { phase: 'rise', progress: 0.5 }, { phase: 'burn' }, { phase: 'shift' }, { phase: 'surface', progress: 0.7 }, { phase: 'dash' }, { cells: [[0, 0], [1, 0]], dir: 1, life: 20 }]) {
+      for (const t of [0, 3, 50]) sp.draw(ctx, { type: key, t, x: 1, y: 1, z: 0, dir: t % 2 ? 1 : -1, team: 'blue', data: { ...data } }, 60, 90, t);
+    }
+    sp.draw(ctx, { type: key, data: {} }, 0, 0, 0);
+  }
+  for (const [key, fx] of Object.entries(FX_SPRITES)) {
+    assert.ok(fx.duration > 0, key);
+    for (let age = 0; age <= fx.duration; age++) {
+      fx.draw(ctx, { fx: key, col: 2, row: 1, dir: age % 2 ? 1 : -1 }, 80, 90, age);
+      fx.draw(ctx, { fx: key }, 80, 90, age);
+    }
+  }
+});
+
+test('sprites: every spell and effect the bosses emit has a sprite in this pack', () => {
+  const OTHER_OWNERS = new Set(['flash', 'warp', 'stun']); // renderer / core art
+  const spells = new Set();
+  const fxs = new Set();
+  for (const spec of BOSSES) {
+    for (const level of [1, 3, 4]) {
+      const b = bossBattle(spec.type, level, { seed: 77 + level });
+      toFight(b);
+      for (let f = 0; f < 3000; f++) {
+        b.step({});
+        for (const s of b.spells) spells.add(s.type);
+        for (const ev of b.drainEvents()) if (ev.type === 'fx') fxs.add(ev.fx);
+      }
+    }
+  }
+  for (const k of spells) assert.ok(SPELL_SPRITES[k], `spell sprite ${k}`);
+  for (const k of fxs) if (!OTHER_OWNERS.has(k)) assert.ok(FX_SPRITES[k], `fx sprite ${k}`);
+  for (const k of ['arcbolt', 'zapwarn', 'rakewarn', 'pounce', 'tidebubble', 'torpedofish', 'tidegeyser', 'firetower2', 'pyreflame', 'flamejet']) assert.ok(spells.has(k), `${k} seen in play`);
+});

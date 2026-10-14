@@ -71,6 +71,7 @@ function snare(b, e, s, c, r) {
     linger: stun,
     onLand: (spell) => {
       spell.data.caught = spell.hitIds.size > 0;
+      spell.z = 1; // the roots wrap whoever they caught: drawn over bodies
     },
   });
   sp.data.level = e.level;
@@ -104,6 +105,7 @@ function* petalStorm(b, e, s) {
   yield* wait(s.petalWarn);
   e.data.warn = null;
   const z = zone(b, e, { damage: s.petal, element: W, flinch: false }, cells, s.petalFrames, { type: 'petals', rehit: 10 });
+  z.z = 1; // the storm engulfs the row
   z.data.level = e.level;
   z.data.frames = s.petalFrames;
   yield* wait(s.petalFrames);
@@ -143,6 +145,7 @@ const THORN_BUD = {
         b.emit('sfx', { name: 'gun' });
         const t = projectile(b, o, { damage: s.thorn, element: W, flinch: true }, { type: 'briarthorn', speed: 5 });
         t.data.level = o.level;
+        t.z = 1;
         yield* wait(14);
         life -= 14;
         o.setAnim('idle');

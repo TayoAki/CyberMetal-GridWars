@@ -214,14 +214,62 @@ test('Mortarshell mortars land on the player panel: break / ice / lava / plus bl
     assert.ok(until(b, () => !ball.alive, 120) >= 0);
     marks.push(b.field.typeAt(1, 2));
     if (level === 4) {
+      // Only the centre breaks; the plus around it is blast damage, not field damage.
       assert.equal(b.field.typeAt(1, 2), PANEL.BROKEN);
-      assert.equal(b.field.typeAt(0, 2), PANEL.CRACKED);
-      assert.equal(b.field.typeAt(2, 2), PANEL.CRACKED);
-      assert.equal(b.field.typeAt(1, 1), PANEL.CRACKED);
+      assert.equal(b.field.typeAt(0, 2), PANEL.NORMAL);
+      assert.equal(b.field.typeAt(2, 2), PANEL.NORMAL);
+      assert.equal(b.field.typeAt(1, 1), PANEL.NORMAL);
+      assert.equal(ball.data.landing?.length ?? 5, 5);
     }
     assert.equal(b.stats.damageTaken, 0);
   }
   assert.deepEqual(marks, [PANEL.BROKEN, PANEL.ICE, PANEL.LAVA, PANEL.BROKEN]);
+});
+
+test("Mortarshell's ice thaws and its lava cools back to normal panels", () => {
+  for (const [level, type, frames] of [[2, PANEL.ICE, 480], [3, PANEL.LAVA, 300]]) {
+    const b = makeBattle({ enemies: [{ type: 'mortarshell', level, col: 4, row: 1 }], seed: 9, player: BIG_HP });
+    toFight(b);
+    b.player.row = 2;
+    assert.ok(until(b, () => b.spells.some((s) => s.type === 'mortarball'), 900) >= 0);
+    const ball = b.spells.find((s) => s.type === 'mortarball');
+    b.player.row = 0; // every later shell lands on row 0
+    assert.ok(until(b, () => !ball.alive, 120) >= 0);
+    assert.equal(b.field.typeAt(1, 2), type);
+    const mark = b.spells.find((s) => s.type === 'mortarmark' && s.col === 1 && s.row === 2);
+    assert.ok(mark && mark.hit === null);
+    run(b, frames - 10);
+    assert.equal(b.field.typeAt(1, 2), type, `L${level} mark still there just before it fades`);
+    run(b, 15);
+    assert.equal(b.field.typeAt(1, 2), PANEL.NORMAL, `L${level} mark faded`);
+  }
+});
+
+test('the Lv3 Mortarshell keeps at most 2 lava panels on the player side', () => {
+  const b = makeBattle({ enemies: [{ type: 'mortarshell', level: 3, col: 4, row: 1 }], seed: 13, player: BIG_HP });
+  toFight(b);
+  const lavaCount = () => {
+    let n = 0;
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) if (b.field.typeAt(c, r) === PANEL.LAVA) n++;
+    return n;
+  };
+  let landed = 0;
+  let maxLava = 0;
+  // Hop the player to a fresh panel after every throw so each shell lands on an empty one.
+  const tour = [[0, 0], [1, 0], [2, 0], [0, 1], [2, 1], [0, 2], [1, 2], [2, 2], [1, 1]];
+  for (let f = 0; f < 3600 && landed < 7; f++) {
+    const ball = b.spells.find((s) => s.type === 'mortarball');
+    if (ball && ball.t === 1) {
+      const [c, r] = tour[landed % tour.length];
+      b.player.col = c === ball.data.target.col && r === ball.data.target.row ? (c + 1) % 3 : c;
+      b.player.row = r;
+      landed++;
+    }
+    b.step({});
+    maxLava = Math.max(maxLava, lavaCount());
+  }
+  assert.ok(landed >= 5);
+  assert.equal(maxLava, 2);
 });
 
 test('Gloop is untargetable while sunk and resurfaces at the front of the player row', () => {
@@ -358,4 +406,63 @@ test('determinism: the same seed and inputs replay the same pack-A battle', () =
     assert.ok(a.length > 1000);
   }
   assert.notEqual(play(5), play(6));
+});
+
+// ---------------------------------------------------------------- sprites (no DOM: a stub canvas)
+
+function stubCtx(counter) {
+  return new Proxy({ globalAlpha: 1, fillStyle: '#000', globalCompositeOperation: 'source-over' }, {
+    get(t, k) {
+      if (k in t) return t[k];
+      return (...args) => {
+        if (k === 'drawImage') counter.images++;
+        return k === 'getContext' ? stubCtx(counter) : undefined;
+      };
+    },
+    set(t, k, v) {
+      t[k] = v;
+      return true;
+    },
+  });
+}
+
+test('pack A sprites draw every family, level, anim and facing (and bare stubs) without throwing', async () => {
+  const counter = { images: 0 };
+  globalThis.OffscreenCanvas ??= class {
+    constructor(w, h) {
+      this.width = w;
+      this.height = h;
+    }
+    getContext() {
+      return stubCtx(counter);
+    }
+  };
+  const { ENTITY_SPRITES, SPELL_SPRITES } = await import('../src/render/sprites/viruses_a.js');
+  const ctx = stubCtx(counter);
+  const families = ['rivet', 'plinker', 'dartfin', ...TYPES];
+  for (const type of families) assert.ok(ENTITY_SPRITES[type], `${type} has a sprite`);
+  const anims = ['idle', 'move', 'windup', 'aim', 'swing', 'fire', 'dash', 'hurt', 'sink', 'rise', 'open', 'close', 'mystery'];
+  for (const type of families) {
+    for (const level of [1, 2, 3, 4]) {
+      for (const anim of anims) {
+        for (const animT of [0, 4, 9, 13, 30]) {
+          for (const facing of [1, -1]) {
+            const before = counter.images;
+            // The shape the contact sheet passes: no stats, empty data.
+            const e = { type, anim, animT, facing, level, team: facing > 0 ? 'red' : 'blue', element: 'null', data: {}, hp: 100, maxHp: 100, z: 0, offsetX: 0, offsetY: 0, alive: true };
+            ENTITY_SPRITES[type].draw(ctx, e, 120, 100, 30 + animT);
+            assert.ok(counter.images > before, `${type} L${level} ${anim}@${animT} drew nothing`);
+          }
+        }
+      }
+    }
+    ENTITY_SPRITES[type].draw(ctx, {}, 0, 0); // a bare object and no clock
+  }
+  const spells = ['emberball', 'voltring', 'mortarball', 'beetlebomb', 'gloopwave', 'gloopbubble'];
+  for (const type of spells) {
+    assert.ok(SPELL_SPRITES[type], `${type} has a sprite`);
+    for (const s of [{}, { data: {} }, { t: 20, z: 30, dir: 1, element: 'fire', data: { level: 4, target: { col: 1, row: 2 }, landing: [[1, 2], [0, 2], [2, 2]], progress: 0.5 } }]) {
+      SPELL_SPRITES[type].draw(ctx, { type, ...s }, 60, 90, 11);
+    }
+  }
 });

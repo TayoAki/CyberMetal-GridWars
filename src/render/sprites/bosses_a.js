@@ -869,17 +869,790 @@ function drawTide(ctx, e, x, y, t) {
   }
 }
 
+// =================================================================== PYRECLAW
+
+// Keys: A-E armour (light->darkest), F G H fire (white-hot, flame, deep), I J furnace (core, glow),
+// K L M claws (shine, steel, dark), N O accent stripes (light, dark), P Q rivets/trim (light, dark), # contour.
+const PYRE_PAL = [
+  { A: '#a8a8b8', B: '#767688', C: '#4e4e5e', D: '#323240', E: '#1c1c28', F: '#fff6c0', G: '#ffa020', H: '#e04010', I: '#ffe070', J: '#ff8a1a', K: '#ffffff', L: '#c4c8d0', M: '#727684', N: '#ee4a2e', O: '#a0201a', P: '#f0c060', Q: '#a07028', '#': OUTLINE },
+  { A: '#ffb4a4', B: '#dc5c4a', C: '#a2303a', D: '#6a1a26', E: '#3e0e18', F: '#ffffe0', G: '#ffd040', H: '#ff8020', I: '#fff2a0', J: '#ffc030', K: '#ffffff', L: '#d8d0c8', M: '#8a7c74', N: '#ffd040', O: '#c88a10', P: '#ffe8b0', Q: '#c09050', '#': OUTLINE },
+  { A: '#ffe8b0', B: '#d8aa54', C: '#a0722a', D: '#664616', E: '#3a270a', F: '#ffffff', G: '#fff0a0', H: '#ff9a30', I: '#ffffff', J: '#fff0b0', K: '#ffffff', L: '#d0d4dc', M: '#7a7e8c', N: '#ff5a3a', O: '#b02a1a', P: '#fff6d8', Q: '#c8b080', '#': OUTLINE },
+  { A: '#7e6e9c', B: '#4e426a', C: '#342b4a', D: '#211b32', E: '#130f20', F: '#ffe8ff', G: '#d070ff', H: '#8a2ad0', I: '#f8d0ff', J: '#c060ff', K: '#f0e8ff', L: '#a898c8', M: '#5e5280', N: '#ff4ad8', O: '#a01c90', P: '#d8b8ff', Q: '#8a6ab8', '#': OUTLINE },
+];
+const PYRE_GLOW = '#c050ff';
+const PYRE_FIRE = [
+  ['#c02810', '#ff8a1a', '#ffd040', '#fff6c0'],
+  ['#e05010', '#ffb020', '#ffe860', '#ffffe0'],
+  ['#ff7a20', '#ffd060', '#fff4c0', '#ffffff'],
+  ['#6a1ab0', '#b050ff', '#e0a0ff', '#fff0ff'],
+];
+const PM = { armor: 'ABCD', far: 'BCDE', claw: 'KLLM', clawFar: 'LLMM', accent: 'NNOO', trim: 'PPQQ', dark: 'CDEE', furnace: 'IIJJ' };
+const PW = 56;
+const PH = 56;
+
+// pose: { bob, lean, head: [dx, dy], armF/armB: [shoulder, elbow, wrist], clawF/clawB: direction, legF/legB: [hip, knee, ankle], liftF }
+function buildPyre(p) {
+  const g = new Grid(PW, PH);
+  const by = p.bob ?? 0;
+  const lx = p.lean ?? 0;
+  const U = (x, y) => [x + lx, y + by];
+  const [hdx, hdy] = p.head ?? [0, 0];
+  const Hd = (x, y) => [x + lx + hdx, y + by + hdy];
+  const claws = (w, dir, mat, o) => {
+    const [dx, dy] = dir;
+    const l = Math.hypot(dx, dy) || 1;
+    const ux = dx / l;
+    const uy = dy / l;
+    for (const [spread, len] of [[-0.55, 6.2], [0, 7.6], [0.55, 6.2]]) {
+      const cx = ux * Math.cos(spread) - uy * Math.sin(spread);
+      const cy = ux * Math.sin(spread) + uy * Math.cos(spread);
+      const sx = w[0] + cx * 3.4;
+      const sy = w[1] + cy * 3.4;
+      g.capsule(sx, sy, sx + cx * len * 0.55, sy + cy * len * 0.55, 1.45, 1.0, mat, o);
+      g.capsule(sx + cx * len * 0.55, sy + cy * len * 0.55, sx + cx * len + cy * 0.8, sy + cy * len - cx * 0.8 + 0.5, 1.0, 0.3, mat, o);
+    }
+  };
+
+  // Chimney stacks behind the shoulders.
+  g.capsule(...U(17, 14), ...U(16, 3.6), 2.0, 1.9, PM.dark);
+  g.ellipse(...U(16, 3.4), 2.6, 1.1, PM.trim);
+  g.capsule(...U(21.5, 12), ...U(21.5, 2.2), 1.7, 1.6, PM.dark);
+  g.ellipse(...U(21.5, 2), 2.2, 1.0, PM.trim);
+
+  // Far arm.
+  const [bs, be, bw] = p.armB;
+  g.capsule(...U(...bs), ...U(...be), 3.8, 3.4, PM.far);
+  g.capsule(...U(...be), ...U(...bw), 3.4, 3.1, PM.far);
+  claws(U(...bw), p.clawB ?? [0.4, 1], PM.clawFar);
+  g.ellipse(...U(...bw), 4.6, 4.0, PM.far);
+
+  // Legs and boots.
+  const boot = (a, mat, o) => g.poly([[a[0] - 6, a[1] - 1], [a[0] + 4, a[1] - 1], [a[0] + 7, a[1] + 1.6], [a[0] + 7, a[1] + 4.1], [a[0] - 6, a[1] + 4.1]], mat, { round: 0.35, ...o });
+  const [, bk, ba] = p.legB;
+  g.capsule(...p.legB[0], ...bk, 4.2, 3.8, PM.far);
+  g.capsule(...bk, ...ba, 3.6, 3.3, PM.far);
+  boot(ba, PM.dark);
+  const [, fk, fa] = p.legF;
+  g.capsule(...p.legF[0], ...fk, 4.3, 3.9, PM.armor, { sep: true });
+  g.capsule(...fk, ...fa, 3.7, 3.4, PM.armor, { sep: true });
+  boot(fa, PM.armor, { sep: true });
+  g.seg(fa[0] - 5, fa[1] + 1.5, fa[0] + 5, fa[1] + 1.5, 'O');
+  g.seg(fk[0] - 2.5, fk[1] - 1, fk[0] + 3, fk[1] - 1.5, 'N');
+  g.seg(fk[0] - 2.5, fk[1], fk[0] + 3, fk[1] - 0.5, 'O');
+
+  // Belt, barrel torso and the furnace grate.
+  g.rect(...U(20, 37.6), 18, 5.4, PM.armor, { bevel: 1 });
+  g.ellipse(...U(29, 40.2), 2.3, 2.0, PM.trim);
+  g.ellipse(...U(28, 28), 13.6, 11.6, PM.armor);
+  g.poly([U(22, 21.5), U(35, 21.5), U(36.6, 23.5), U(36.6, 33), U(35, 35), U(22, 35), U(20.4, 33), U(20.4, 23.5)], PM.dark, { flat: 2, bevel: 1 });
+  g.rect(...U(22.6, 23.2), 11.8, 10.2, p.furnaceHot ? 'IIII' : PM.furnace, { round: 0.6 });
+  for (const yy of [25.8, 28.8, 31.8]) g.seg(...U(22.5, yy), ...U(34.5, yy), 'E');
+  g.seg(...U(28.5, 23), ...U(28.5, 33.5), 'D');
+  g.dots([U(21.4, 22.5), U(35.6, 22.5), U(21.4, 34), U(35.6, 34)], 'P');
+
+  // Far pauldron, head, near pauldron.
+  g.ellipse(...U(15.5, 20.5), 7.4, 6.4, PM.far);
+  g.seg(...U(9, 23.5), ...U(20, 25.5), 'O');
+  // head: small and sunk between the shoulders, a visor slit and a crest
+  g.poly([Hd(25, 9.5), Hd(27, 5.2), Hd(31.5, 6.8), Hd(30.5, 9.5)], PM.trim, { round: 0.4 });
+  g.ellipse(...Hd(30, 13), 5.6, 5.2, PM.armor, { sep: true });
+  g.seg(...Hd(29, 10.6), ...Hd(35, 11.2), 'D');
+  g.seg(...Hd(31.5, 12.4), ...Hd(35, 12.4), p.eyeHot ? 'F' : 'G');
+  g.seg(...Hd(31.5, 13.4), ...Hd(34.5, 13.4), 'H');
+  g.poly([Hd(27.5, 15.4), Hd(35, 15.4), Hd(34, 18.6), Hd(28.5, 18.6)], PM.far, { round: 0.4, sep: true });
+  g.seg(...Hd(29, 17), ...Hd(33.5, 17), 'E');
+  g.ellipse(...U(41, 21), 8.4, 7.0, PM.armor, { sep: true });
+  g.seg(...U(34, 25.8), ...U(48, 24.6), 'N');
+  g.seg(...U(34.5, 26.8), ...U(47, 25.8), 'O');
+  g.dots([U(38, 17), U(43, 16.6), U(46.6, 20)], 'P');
+
+  // Near arm and its claw gauntlet.
+  const [fs, fe, fw] = p.armF;
+  g.capsule(...U(...fs), ...U(...fe), 4.2, 3.8, PM.armor, { sep: true });
+  g.capsule(...U(...fe), ...U(...fw), 3.8, 3.5, PM.armor, { sep: true });
+  claws(U(...fw), p.clawF ?? [0.4, 1], PM.claw, { sep: true });
+  g.ellipse(...U(...fw), 5.4, 4.6, PM.armor, { sep: true });
+  {
+    const [ex, ey] = U(...fe);
+    const [wx, wy] = U(...fw);
+    const l = Math.hypot(wx - ex, wy - ey) || 1;
+    const nx = -(wy - ey) / l;
+    const ny = (wx - ex) / l;
+    const mx = ex + (wx - ex) * 0.62;
+    const my = ey + (wy - ey) * 0.62;
+    g.seg(mx - nx * 3, my - ny * 3, mx + nx * 3, my + ny * 3, 'N');
+    if (p.palmHot) g.ellipse(wx + ((wx - ex) / l) * 2, wy + ((wy - ey) / l) * 2, 2.2, 2.2, 'FFFG');
+  }
+  return g.rows();
+}
+
+const PL = { F: [[33, 42], [35, 47.5], [35, 51.5]], B: [[24, 42], [22, 47.5], [22, 51.5]] };
+const PYRE_POSES = {
+  idle: { armF: [[41, 24], [45, 33], [44, 40.5]], clawF: [0.35, 1], armB: [[16, 24], [11, 33], [13, 41]], clawB: [0.4, 1], legF: PL.F, legB: PL.B },
+  idle2: { bob: 1, armF: [[41, 24], [45.2, 33.2], [44.4, 40.8]], clawF: [0.35, 1], armB: [[16, 24], [10.8, 33.2], [12.6, 41.2]], clawB: [0.4, 1], legF: PL.F, legB: PL.B },
+  move: { lean: 1, bob: -1, armF: [[41, 24], [45.5, 32], [45.5, 39.5]], clawF: [0.5, 1], armB: [[16, 24], [11, 32], [12, 40]], clawB: [0.3, 1], legF: [[33, 41], [38, 44.5], [37.5, 48.5]], legB: PL.B },
+  windup: { bob: -1, head: [0, -1], eyeHot: true, furnaceHot: true, armF: [[41, 23], [47.5, 15], [44.5, 7.5]], clawF: [0.15, -1], armB: [[16, 24], [11, 32], [14, 39]], clawB: [0.5, 1], legF: [[33, 42], [36, 47.5], [37, 51.5]], legB: [[24, 42], [21, 47.5], [20, 51.5]] },
+  slam: { lean: 2, bob: 2, head: [1, 1], eyeHot: true, furnaceHot: true, armF: [[41, 25], [48.5, 33], [49.5, 43.5]], clawF: [0.3, 1], armB: [[16, 25], [12, 33], [15, 40]], clawB: [0.5, 1], legF: [[33, 42], [37, 47], [38, 51.5]], legB: [[24, 42], [21, 47.5], [19, 51.5]] },
+  aim: { lean: 1, eyeHot: true, palmHot: true, armF: [[41, 24], [47.5, 26.5], [51, 27.5]], clawF: [1, -0.05], armB: [[16, 24], [20, 31.5], [26, 34.5]], clawB: [1, 0.3], legF: [[33, 42], [36.5, 47.5], [37.5, 51.5]], legB: [[24, 42], [21.5, 47.5], [20.5, 51.5]] },
+  blast: { lean: -1, eyeHot: true, palmHot: true, furnaceHot: true, armF: [[41, 24], [47, 26.5], [50.5, 27.5]], clawF: [1, -0.1], armB: [[16, 24], [20, 31.5], [26, 34.5]], clawB: [1, 0.3], legF: [[33, 42], [36.5, 47.5], [37.5, 51.5]], legB: [[24, 42], [21.5, 47.5], [20.5, 51.5]] },
+  roar: { head: [0, -1], eyeHot: true, furnaceHot: true, armF: [[41, 23], [48.5, 16.5], [51, 8.5]], clawF: [0.3, -1], armB: [[16, 23], [9, 16.5], [6.5, 8.5]], clawB: [-0.3, -1], legF: [[33, 42], [36, 47.5], [37, 51.5]], legB: [[24, 42], [21, 47.5], [20, 51.5]] },
+  hurt: { lean: -2, bob: -1, head: [-1, 0], armF: [[41, 24], [45, 18.5], [41.5, 13]], clawF: [-0.2, -1], armB: [[16, 24], [11, 32], [12, 40]], clawB: [0.2, 1], legF: PL.F, legB: PL.B },
+};
+const PYRE_FRAMES = {};
+for (const [k, pose] of Object.entries(PYRE_POSES)) PYRE_FRAMES[k] = buildPyre(pose);
+
+// A flickering flame tongue with its base at (x, y): w wide, h tall; cols: [deep, mid, bright, core].
+function flame(ctx, x, y, w, h, t, cols, seed = 0) {
+  const layers = [[1, cols[0]], [0.72, cols[1]], [0.46, cols[2]], [0.22, cols[3]]];
+  for (const [k, c] of layers) {
+    const hh = Math.max(1, Math.round(h * k * (0.85 + 0.15 * Math.sin(t / 3 + seed))));
+    const ww = Math.max(1, w * k);
+    for (let i = 0; i < hh; i++) {
+      const f = i / hh;
+      const half = Math.max(0.5, ww * (1 - f * f) * 0.5);
+      const sway = Math.sin(t / 4 + seed + i * 0.6) * f * 1.6;
+      const x0 = Math.round(x - half + sway);
+      const x1 = Math.round(x + half + sway);
+      rect(ctx, x0, y - i, Math.max(1, x1 - x0), 1, c);
+    }
+  }
+}
+
+function drawPyre(ctx, e, x, y, t) {
+  const L = lvl(e);
+  const pal = PYRE_PAL[L - 1];
+  const fire = PYRE_FIRE[L - 1];
+  const flip = (e.facing ?? -1) < 0;
+  const anim = e.anim ?? 'idle';
+  const at = e.animT ?? 0;
+  let key = anim;
+  if (anim === 'idle') key = (t >> 4) % 2 ? 'idle2' : 'idle';
+  else if (anim === 'summon') key = 'slam';
+  else if (!PYRE_FRAMES[anim]) key = 'idle';
+  const pose = PYRE_POSES[key];
+  const glow = L === 4 ? { glow: PYRE_GLOW, glowAlpha: 0.4 + 0.2 * Math.sin(t / 6) } : {};
+  const dir = flip ? -1 : 1;
+  const P = (fx0, fy0) => framePt(x, y, PW, PH, flip, fx0 + (pose.lean ?? 0), fy0 + (pose.bob ?? 0));
+  // Chimney fire behind the body.
+  const hot = key === 'roar' || key === 'windup' || key === 'slam' || key === 'blast';
+  for (const [cx0, cy0, sd] of [[16, 2.2, 0], [21.5, 1, 2]]) {
+    const [cx, cy] = P(cx0, cy0);
+    flame(ctx, cx, cy, hot ? 4 : 3, hot ? 9 : 4 + ((t + sd * 5) % 3), t + sd * 7, fire, sd);
+  }
+  body(ctx, PYRE_FRAMES[key], pal, x, y, flip, glow);
+  // Crest flame and furnace flicker.
+  const [hx, hy] = framePt(x, y, PW, PH, flip, 28.5 + (pose.lean ?? 0) + (pose.head?.[0] ?? 0), 5.5 + (pose.bob ?? 0) + (pose.head?.[1] ?? 0));
+  flame(ctx, hx, hy, 3, hot ? 8 : 5, t + 3, fire, 1);
+  for (let i = 0; i < 4; i++) {
+    const fx0 = 23.5 + ((i * 3 + (t >> 2)) % 10);
+    const fy0 = 24 + ((i * 7 + (t >> 3)) % 3) * 3;
+    const [qx, qy] = P(fx0, fy0);
+    px(ctx, qx, qy, i % 2 ? fire[3] : fire[2]);
+  }
+  if (key === 'windup') {
+    const [gx, gy] = P(44.5, 4);
+    flame(ctx, gx, gy + 3, 7, 6 + (at % 4), t, fire, 4);
+  } else if (key === 'slam' && at < 12) {
+    const [gx, gy] = P(50, 53);
+    for (let i = 0; i < 5; i++) spark(ctx, gx + dir * (i * 3 - 4) + ((at * (i + 2)) % 3), gy - ((at * (i + 1) * 2) % 9), 1, i % 2 ? fire[2] : fire[3]);
+  } else if (key === 'aim') {
+    const [gx, gy] = P(54, 27.5);
+    const r = 1 + Math.min(4, at >> 3);
+    disc(ctx, gx, gy, r + 1, fire[1]);
+    disc(ctx, gx, gy, r, fire[3]);
+  } else if (key === 'blast') {
+    const [gx, gy] = P(54, 27.5);
+    disc(ctx, gx, gy, 4, fire[2]);
+    disc(ctx, gx, gy, 2, fire[3]);
+  }
+}
+
+// =================================================================== OBJECTS
+
+// Neon Lamp (Voltframe V3+): a lightning-bolt neon sign on an insulated post. Uses Voltframe's palettes.
+function buildLamp(state) {
+  const g = new Grid(18, 38);
+  g.ellipse(9, 35.6, 6.4, 2.2, VM.dark);
+  g.rect(5.5, 33, 7, 2.4, VM.trim, { bevel: 1 });
+  g.capsule(9, 33, 9, 19, 1.1, 1.1, VM.far);
+  for (const yy of [30, 27, 24]) g.ellipse(9, yy, 2.4, 0.8, VM.porc);
+  // sign box
+  g.poly([[2.6, 1.5], [15.4, 1.5], [16.4, 3], [16.4, 18], [15, 19.5], [3, 19.5], [1.6, 18], [1.6, 3]], VM.dark, { flat: 2, bevel: 1 });
+  g.rect(3.4, 3, 11.2, 15, 'DEEE', { flat: 2 });
+  // the neon bolt
+  const tube = state === 'zap' ? 'F' : 'G';
+  const core = state === 'idle' ? 'G' : 'F';
+  const path = [[11.5, 4], [7, 10.5], [10.5, 10.5], [6.5, 17]];
+  for (let i = 0; i < path.length - 1; i++) g.seg(...path[i], ...path[i + 1], tube);
+  for (let i = 0; i < path.length - 1; i++) g.seg(path[i][0] + 1, path[i][1], path[i + 1][0] + 1, path[i + 1][1], i === 1 ? core : 'H');
+  g.dots([[11, 5], [7.5, 10.5], [7, 16]], core);
+  g.dots([[3, 2.5], [15, 2.5], [3, 18.5], [15, 18.5]], 'P');
+  return g.rows();
+}
+const LAMP_FRAMES = { idle: buildLamp('idle'), charge: buildLamp('charge'), zap: buildLamp('zap') };
+
+function drawLamp(ctx, e, x, y, t) {
+  const L = lvl(e);
+  const pal = VOLT_PAL[L - 1];
+  const neon = VOLT_NEON[L - 1];
+  const anim = e.anim ?? 'idle';
+  const at = e.animT ?? 0;
+  const flick = anim === 'charge' && at % 4 < 2;
+  const frame = anim === 'zap' ? LAMP_FRAMES.zap : anim === 'charge' ? (flick ? LAMP_FRAMES.zap : LAMP_FRAMES.charge) : LAMP_FRAMES.idle;
+  const glow = L === 4 ? { glow: VOLT_GLOW, glowAlpha: 0.45 } : {};
+  body(ctx, frame, pal, x, y, false, glow);
+  const top = y - 38;
+  if (anim === 'charge') {
+    for (let i = 0; i < 2; i++) {
+      const sx = x - 9 + ((at * 5 + i * 11) % 18);
+      const sy = top + 2 + ((at * 3 + i * 7) % 16);
+      spark(ctx, sx, sy, 1, neon);
+    }
+    if (at % 6 < 3) bolt(ctx, x - 7, top + 1, x + 7, top - 4, at, neon, 4, 2);
+  } else if (anim === 'zap') {
+    bolt(ctx, x, top + 10, x - 14, top + 30, at * 3 + 1, '#ffffff', 5, 3);
+    bolt(ctx, x, top + 10, x + 14, top + 26, at * 5 + 2, neon, 5, 3);
+  } else if (hash((t >> 3) + e.id * 7) > 0.1) {
+    px(ctx, x - 9, top + 10, neon);
+    px(ctx, x + 9, top + 10, neon);
+  }
+}
+
+// Coral Rock (Tidecaller): a stone mound crusted with coral and barnacles.
+// Keys: A-D stone, S T coral, O P barnacles, G H water.
+const CORAL_PAL = [
+  { A: '#a8c4cc', B: '#6e8c98', C: '#4a6470', D: '#2e424c', S: '#ffb4a0', T: '#e0586a', O: '#f4f0e0', P: '#b8b098', G: '#4ad8ff', H: '#1a8ad0', '#': OUTLINE },
+  { A: '#e8d4b0', B: '#c0a070', C: '#8a6c44', D: '#544028', S: '#ffd8a0', T: '#e88a4a', O: '#fff8e8', P: '#c8b8a0', G: '#3af0d0', H: '#14a890', '#': OUTLINE },
+  { A: '#ffffff', B: '#cfd8e2', C: '#98a6b6', D: '#5e6a7c', S: '#c8f0ff', T: '#5aa0e0', O: '#ffffff', P: '#b0bccc', G: '#6affb8', H: '#20b878', '#': OUTLINE },
+  { A: '#7a6a98', B: '#4e426a', C: '#342b4a', D: '#1e182e', S: '#f0a0ff', T: '#a030c8', O: '#d8c8f0', P: '#8a7aa8', G: '#c070ff', H: '#7a30c8', '#': OUTLINE },
+];
+function buildCoral() {
+  const g = new Grid(34, 28);
+  const rock = 'ABCD';
+  // coral branches behind the stone
+  g.capsule(12, 16, 9.5, 4.5, 1.6, 0.9, 'SSTT');
+  g.capsule(10.5, 9, 6, 5.5, 1.0, 0.7, 'SSTT');
+  g.capsule(10, 7, 13, 2.5, 0.9, 0.6, 'SSTT');
+  g.capsule(24, 15, 26.5, 5.5, 1.5, 0.9, 'SSTT');
+  g.capsule(25.8, 9, 29.5, 7, 0.9, 0.6, 'SSTT');
+  // the stone mound
+  g.ellipse(17, 21.5, 13.5, 6.4, rock);
+  g.ellipse(10.5, 18.5, 6.4, 6.2, rock);
+  g.ellipse(22.5, 17.5, 7.2, 7.2, rock);
+  g.ellipse(16.5, 13.5, 5.2, 4.4, rock);
+  // cracks and barnacles
+  g.seg(13, 20, 16, 23, 'D');
+  g.seg(16, 23, 15, 26, 'D');
+  g.seg(25, 18, 27, 22, 'D');
+  for (const [bx, byy] of [[8, 16], [19, 12.5], [27.5, 20], [20, 24]]) {
+    g.ellipse(bx, byy, 1.4, 1.2, 'OOPP');
+    g.put(bx, byy, 'P');
+  }
+  // small coral fan in front
+  g.capsule(5, 25.5, 3, 21, 1.0, 0.6, 'SSTT');
+  g.capsule(4, 23, 1.5, 21.5, 0.7, 0.5, 'SSTT');
+  // water sheen
+  g.seg(12, 11, 15, 9.5, 'G');
+  g.put(21, 11.5, 'G');
+  return g.rows();
+}
+const CORAL_FRAME = buildCoral();
+
+function drawCoral(ctx, e, x, y, t) {
+  const L = lvl(e);
+  const glow = L === 4 ? { glow: TIDE_GLOW, glowAlpha: 0.35 } : {};
+  body(ctx, CORAL_FRAME, CORAL_PAL[L - 1], x, y + 1, false, glow);
+  // a bubble now and then
+  const ph = (t + (e.id ?? 0) * 13) % 70;
+  if (ph < 26) ring(ctx, x + 6 + Math.round(Math.sin((t + ph) / 4)), y - 22 - (ph >> 1), ph < 10 ? 1 : 2, '#c8f4ff');
+}
+
+// Brazier (Pyreclaw V2+): an iron fire bowl on a tripod; it heals Pyreclaw until broken.
+function buildBrazier() {
+  const g = new Grid(24, 30);
+  g.capsule(7, 16, 3, 28.5, 1.2, 1.0, PM.far);
+  g.capsule(17, 16, 21, 28.5, 1.2, 1.0, PM.far);
+  g.capsule(12, 17, 12, 28.5, 1.3, 1.1, PM.armor);
+  g.ellipse(12, 26, 6.5, 1.2, PM.dark);
+  g.poly([[2.5, 11.5], [21.5, 11.5], [19, 17], [16, 19], [8, 19], [5, 17]], PM.armor, { round: 0.6 });
+  g.seg(4.5, 15, 19.5, 15, 'N');
+  g.seg(5.5, 16, 18.5, 16, 'O');
+  g.ellipse(12, 11.5, 9.6, 2.4, PM.trim);
+  g.ellipse(12, 11.3, 7.8, 1.5, 'HHHH');
+  g.ellipse(12, 11, 5.5, 1.0, 'GGGG');
+  g.dots([[6, 13.5], [12, 14], [18, 13.5]], 'P');
+  return g.rows();
+}
+const BRAZIER_FRAME = buildBrazier();
+
+function drawBrazier(ctx, e, x, y, t) {
+  const L = lvl(e);
+  const fire = PYRE_FIRE[L - 1];
+  const anim = e.anim ?? 'idle';
+  const at = e.animT ?? 0;
+  const glow = L === 4 ? { glow: PYRE_GLOW, glowAlpha: 0.35 } : {};
+  body(ctx, BRAZIER_FRAME, PYRE_PAL[L - 1], x, y, false, glow);
+  const top = y - 30 + 11;
+  const big = anim === 'pulse' ? Math.max(0, 8 - (at >> 1)) : 0;
+  flame(ctx, x - 3, top, 5, 8 + big, t + (e.id ?? 0), fire, 1);
+  flame(ctx, x + 3, top, 5, 7 + big, t + 5 + (e.id ?? 0), fire, 3);
+  flame(ctx, x, top, 7, 11 + big, t + 2 + (e.id ?? 0), fire, 2);
+  // embers
+  for (let i = 0; i < 2; i++) {
+    const ph = (t + i * 17 + (e.id ?? 0) * 5) % 34;
+    px(ctx, x - 3 + i * 6 + Math.round(Math.sin((t + i * 9) / 5) * 2), top - 10 - (ph >> 1), ph < 20 ? fire[2] : fire[1]);
+  }
+}
+
+// =================================================================== SPELLS
+
+// Ellipse outline (pixel-exact), for floor sigils.
+function oval(ctx, cx, cy, rx, ry, c, dash = 0, phase = 0) {
+  const n = Math.max(12, Math.round((rx + ry) * 2.2));
+  for (let i = 0; i < n; i++) {
+    if (dash && ((i + phase) % (dash * 2)) >= dash) continue;
+    const a = (i / n) * Math.PI * 2;
+    px(ctx, Math.round(cx + Math.cos(a) * rx), Math.round(cy + Math.sin(a) * ry), c);
+  }
+}
+
+function levelOf(s) {
+  const l = s?.data?.level ?? s?.owner?.level ?? 1;
+  return l >= 1 && l <= 4 ? l : 1;
+}
+
+// Arc Bolt telegraph: a tightening ring of sparks on the target panel while charge gathers overhead.
+function drawArcBolt(ctx, s, x, y) {
+  const neon = VOLT_NEON[levelOf(s) - 1];
+  const k = s.data.progress ?? 0;
+  const t = s.t ?? 0;
+  const cy = y - 8;
+  if (s.data.landed) {
+    alpha(ctx, 0.6, () => ellipse(ctx, x, cy + 1, 12, 4, '#1a1420'));
+    for (let i = 0; i < 3; i++) spark(ctx, x - 8 + i * 8, cy - ((t * (i + 2)) % 7), 1, i % 2 ? neon : '#ffffff');
+    return;
+  }
+  const on = k > 0.72 ? t % 4 < 2 : t % 10 < 7;
+  const rx = Math.round(17 - 8 * k);
+  const ry = Math.round(7 - 3 * k);
+  oval(ctx, x, cy, rx, ry, on ? '#ffffff' : neon, 3, t >> 1);
+  oval(ctx, x, cy, Math.max(2, rx - 4), Math.max(1, ry - 2), neon, 2, -(t >> 1));
+  if (on) {
+    line(ctx, x - 2, cy, x + 2, cy, neon);
+    line(ctx, x, cy - 1, x, cy + 1, neon);
+  }
+  // Charge gathering in the sky above the panel.
+  const sky = y - 74;
+  const r = 1 + Math.round(4 * k);
+  disc(ctx, x, sky, r + 1, neon);
+  disc(ctx, x, sky, r, '#ffffff');
+  if (t % 3 === 0) bolt(ctx, x, sky, x + ((t * 7) % 9) - 4, sky + 6 + r, t, neon, 3, 2);
+  if (k > 0.5 && t % 4 < 2) line(ctx, x, sky + r + 2, x, sky + r + 2 + Math.round(30 * (k - 0.5)), '#fff6b0');
+}
+
+// Neon Lamp row warning: a dashed, blinking frame on each panel of the row about to be zapped.
+function drawZapWarn(ctx, s, x, y) {
+  const neon = VOLT_NEON[levelOf(s) - 1];
+  const k = s.data.progress ?? 0;
+  const t = s.t ?? 0;
+  const on = k > 0.6 ? t % 4 < 2 : t % 8 < 5;
+  if (!on) return;
+  const c = k > 0.6 ? '#ffffff' : neon;
+  for (let i = 0; i < 36; i += 4) {
+    const o = (i + (t >> 1)) % 36;
+    rect(ctx, x - 18 + o, y - 17, 2, 1, c);
+    rect(ctx, x + 17 - o, y, 2, 1, c);
+  }
+  rect(ctx, x - 18, y - 16, 1, 16, neon);
+  rect(ctx, x + 18, y - 16, 1, 16, neon);
+  spark(ctx, x - 12 + ((t * 5) % 24), y - 9, 1, neon);
+}
+
+// Rake telegraph: three claw marks hovering down onto the panel, burning brighter until they strike.
+function drawRakeWarn(ctx, s, x, y) {
+  const acc = FERAL_ACCENT[levelOf(s) - 1];
+  const k = s.data.progress ?? 0;
+  const t = s.t ?? 0;
+  const d = (s.dir ?? -1) < 0 ? -1 : 1;
+  if (s.data.struck) {
+    for (let i = -1; i <= 1; i++) line(ctx, x + i * 7 + d * 6, y - 15, x + i * 7 - d * 6, y - 2, i === 0 ? '#ffffff' : acc);
+    return;
+  }
+  // floor scratches
+  const fl = k > 0.65 ? t % 4 < 2 : t % 8 < 6;
+  for (let i = -1; i <= 1; i++) {
+    line(ctx, x + i * 7 + d * 5, y - 13, x + i * 7 - d * 5, y - 3, fl ? acc : shade(acc, -0.45));
+  }
+  // claws dropping from above
+  const h = Math.round((1 - k) * 22);
+  for (let i = -1; i <= 1; i++) {
+    const cx = x + i * 7;
+    const top = y - 30 - h;
+    line(ctx, cx + d * 4, top, cx - d * 2, top + 9, '#ffffff');
+    line(ctx, cx + d * 5, top, cx - d, top + 9, acc);
+    px(ctx, cx - d * 2, top + 10, '#ffffff');
+  }
+}
+
+// Pounce: Feralis streaking across the row (the body itself is hidden while it dashes).
+function drawPounce(ctx, s, x, y, t) {
+  const L = levelOf(s);
+  const pal = FERAL_PAL[L - 1];
+  const acc = FERAL_ACCENT[L - 1];
+  const flip = (s.dir ?? -1) < 0;
+  const d = flip ? -1 : 1;
+  for (const [back, a] of [[16, 0.2], [8, 0.4]]) body(ctx, FERAL_FRAMES.pounce, pal, x - d * back, y - 2, flip, { alpha: a });
+  for (let i = 0; i < 5; i++) {
+    const ly = y - 8 - ((i * 7 + (t >> 1)) % 26);
+    const len = 8 + ((i * 5) % 10);
+    line(ctx, x - d * (18 + (i % 3) * 4), ly, x - d * (18 + (i % 3) * 4 + len), ly, i % 2 ? acc : '#ffffff');
+  }
+  body(ctx, FERAL_FRAMES.pounce, pal, x, y - 2, flip, L === 4 ? { glow: FERAL_GLOW, glowAlpha: 0.5 } : {});
+}
+
+// Bubble Volley shot: a wobbling bubble with a highlight.
+function drawTideBubble(ctx, s, x, y) {
+  const water = TIDE_WATER[levelOf(s) - 1];
+  const t = s.t ?? 0;
+  const seed = s.data.seed ?? 0;
+  const bx = x;
+  const byy = y - 12 + Math.round(Math.sin(t / 3 + seed) * 2) - s.z;
+  const r = 6 + ((t >> 2) % 2);
+  alpha(ctx, 0.4, () => disc(ctx, bx, byy, r, water));
+  ring(ctx, bx, byy, r + 1, '#0c2a48');
+  ring(ctx, bx, byy, r, water);
+  ring(ctx, bx, byy, r - 1, '#bff4ff');
+  rect(ctx, bx - 3, byy - 4, 2, 2, '#ffffff');
+  px(ctx, bx - 4, byy - 2, '#ffffff');
+  px(ctx, bx + 3, byy + 3, '#e8ffff');
+  const d = (s.dir ?? -1) < 0 ? -1 : 1;
+  ring(ctx, bx - d * 9, byy + 2 + (t % 3), 1, '#c8f4ff');
+  px(ctx, bx - d * 13, byy - 1, '#c8f4ff');
+}
+
+// Torpedo fish (Tidecaller): built with the rasteriser, Tidecaller's palette.
+function buildFish(kick) {
+  const g = new Grid(30, 14);
+  // tail fin
+  g.poly([[6, 7], [1, 1.5 + kick], [3, 7], [1, 12.5 + kick]], TM.water, { round: 0.3 });
+  // dorsal and belly fins
+  g.poly([[11, 3.5], [15, 0.5], [19, 3.5]], TM.water, { round: 0.3 });
+  g.poly([[13, 10.5], [16, 13], [18, 10.5]], TM.water, { round: 0.3 });
+  // body and brass nose cone
+  g.ellipse(14.5, 7, 9.8, 4.2, TM.metalDark);
+  g.ellipse(23, 7, 5.2, 3.6, TM.metal, { sep: true });
+  g.seg(7, 7, 18, 7, 'J');
+  g.seg(8, 5, 18, 5, 'C');
+  for (const xx of [11, 14, 17]) g.put(xx, 9, 'E');
+  // eye and mouth
+  g.ellipse(24.2, 6, 1.3, 1.3, 'FFGG');
+  g.put(24.6, 5.6, 'I');
+  g.seg(25.5, 8.6, 28, 8.2, 'E');
+  return g.rows();
+}
+const FISH_FRAMES = [buildFish(0), buildFish(1.5)];
+
+function drawFish(ctx, s, x, y) {
+  const L = levelOf(s);
+  const pal = TIDE_PAL[L - 1];
+  const water = TIDE_WATER[L - 1];
+  const t = s.t ?? 0;
+  const flip = (s.dir ?? -1) < 0;
+  const d = flip ? -1 : 1;
+  const frame = FISH_FRAMES[(t >> 2) % 2];
+  if (s.data.phase === 'surface') {
+    // Breaking the surface: the fish quivers in a ring of ripples.
+    const k = s.data.progress ?? 0;
+    const q = t % 4 < 2 ? 1 : -1;
+    oval(ctx, x, y - 6, 16 - (t % 8), 5, water, 0);
+    oval(ctx, x, y - 6, 9 + ((t >> 1) % 6), 3, '#e8ffff', 2, t);
+    sprite(ctx, frame, pal, x + q * (k > 0.6 ? 1 : 0), y - 4, { anchor: 'feet', flip, outline: OUTLINE });
+    alpha(ctx, 0.75, () => ellipse(ctx, x, y - 5, 15, 3, water));
+    for (let i = 0; i < 3; i++) px(ctx, x - 8 + i * 8, y - 12 - ((t + i * 5) % 8), '#e8ffff');
+    return;
+  }
+  // Dashing: a foaming wake behind it.
+  for (let i = 0; i < 6; i++) {
+    const wx = x - d * (12 + i * 5 + ((t * 3 + i * 7) % 5));
+    const wy = y - 9 + ((i * 3 + t) % 5) - 2;
+    rect(ctx, wx, wy, 2, 1, i % 2 ? '#ffffff' : water);
+  }
+  sprite(ctx, frame, pal, x, y - 4, { anchor: 'feet', flip, outline: OUTLINE });
+}
+
+// Tide Rise telegraph: a whirlpool on the panel; when it lands, a geyser column (it leaves ice).
+function drawGeyser(ctx, s, x, y) {
+  const water = TIDE_WATER[levelOf(s) - 1];
+  const k = s.data.progress ?? 0;
+  const t = s.t ?? 0;
+  const cy = y - 8;
+  if (s.data.landed) {
+    const h = 44;
+    alpha(ctx, 0.55, () => rect(ctx, x - 8, y - h, 16, h - 4, water));
+    rect(ctx, x - 5, y - h + 2, 2, h - 8, '#e8ffff');
+    rect(ctx, x + 3, y - h + 6, 1, h - 12, '#c8f4ff');
+    for (let i = 0; i < 5; i++) disc(ctx, x - 8 + i * 4, y - h + 1 + ((i * 3 + t) % 3), 2, '#ffffff');
+    for (let i = 0; i < 4; i++) {
+      const ix = x - 13 + i * 9;
+      poly(ctx, [[ix, cy + 3], [ix + 2, cy - 2], [ix + 4, cy + 3], [ix + 2, cy + 6]], '#e8fcff');
+    }
+    return;
+  }
+  alpha(ctx, 0.35 + 0.3 * k, () => ellipse(ctx, x, cy, 15, 6, water));
+  const n = 10;
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2 + t / 5;
+    const r = 15 - 5 * k;
+    rect(ctx, Math.round(x + Math.cos(a) * r), Math.round(cy + Math.sin(a) * r * 0.4), 3, 1, i % 2 ? '#ffffff' : '#bff4ff');
+    const a2 = a + Math.PI / n + t / 9;
+    rect(ctx, Math.round(x + Math.cos(a2) * r * 0.5), Math.round(cy + Math.sin(a2) * r * 0.2), 2, 1, '#e8ffff');
+  }
+  if (k > 0.6 && t % 4 < 2) oval(ctx, x, cy, 17, 7, '#ffffff', 0);
+  for (let i = 0; i < 2; i++) ring(ctx, x - 5 + i * 9, cy - 4 - ((t + i * 6) % 10), 1, '#c8f4ff');
+}
+
+// Fire Tower pillar: embers first, then a tall roaring column that marches across the row.
+function drawFireTower(ctx, s, x, y) {
+  const fire = PYRE_FIRE[levelOf(s) - 1];
+  const t = s.t ?? 0;
+  const phase = s.data.phase ?? 'burn';
+  if (phase === 'rise') {
+    const k = s.data.progress ?? 0;
+    oval(ctx, x, y - 7, 14, 5, t % 6 < 3 ? fire[2] : fire[1], 2, t);
+    flame(ctx, x - 6, y - 4, 4, 3 + Math.round(6 * k), t, fire, 1);
+    flame(ctx, x + 6, y - 4, 4, 2 + Math.round(5 * k), t + 4, fire, 2);
+    flame(ctx, x, y - 3, 6, 4 + Math.round(10 * k), t + 2, fire, 3);
+    for (let i = 0; i < 3; i++) px(ctx, x - 6 + i * 6, y - 12 - Math.round(k * 10) - ((t + i * 3) % 6), fire[3]);
+    return;
+  }
+  alpha(ctx, 0.5, () => ellipse(ctx, x, y - 6, 15, 5, fire[1]));
+  flame(ctx, x - 7, y - 3, 9, 26 + ((t >> 1) % 4), t + 3, fire, 1);
+  flame(ctx, x + 7, y - 3, 9, 30 + ((t >> 1) % 3), t + 7, fire, 2);
+  flame(ctx, x, y - 2, 15, 44 + ((t >> 2) % 3), t, fire, 0);
+  for (let i = 0; i < 4; i++) {
+    const ph = (t * 2 + i * 13) % 40;
+    px(ctx, x - 9 + i * 6 + Math.round(Math.sin((t + i * 7) / 4) * 2), y - 30 - ph, ph < 26 ? fire[3] : fire[2]);
+  }
+}
+
+// Brief flames left behind by the Fire Tower (fading as they burn out).
+function drawPyreFlame(ctx, s, x, y) {
+  const fire = PYRE_FIRE[levelOf(s) - 1];
+  const t = s.t ?? 0;
+  const life = s.data.life ?? 24;
+  const k = Math.max(0.2, 1 - t / life);
+  flame(ctx, x - 7, y - 3, 6, Math.round(9 * k), t + 1, fire, 1);
+  flame(ctx, x + 6, y - 2, 6, Math.round(8 * k), t + 5, fire, 2);
+  flame(ctx, x, y - 1, 8, Math.round(13 * k), t + 3, fire, 3);
+}
+
+// Flamethrower jet: a turbulent cone of fire from Pyreclaw's palm across its two cells.
+function drawFlameJet(ctx, s, x, y) {
+  const fire = PYRE_FIRE[levelOf(s) - 1];
+  const t = s.t ?? 0;
+  const d = (s.data.dir ?? s.dir ?? -1) < 0 ? -1 : 1;
+  const x0 = x - d * 14;
+  const y0 = y - 28;
+  const x1 = x + d * 58;
+  const y1 = y - 13;
+  const grow = Math.min(1, (t + 1) / 6);
+  const n = 18;
+  const puffs = [];
+  for (let i = 0; i < n; i++) {
+    const u = (((i + t * 0.75) % n) / n) * grow;
+    const jy = (hash(i * 31 + (t >> 1)) - 0.5) * 6 * u;
+    const taper = u > 0.85 ? 0.4 + ((1 - u) / 0.15) * 0.6 : 1;
+    puffs.push([x0 + (x1 - x0) * u, y0 + (y1 - y0) * u + jy, (2.5 + 11 * u) * taper, u]);
+  }
+  for (const [cx, cy, r] of puffs) ellipse(ctx, cx, cy, Math.round(r + 1), Math.round((r + 1) * 0.62), fire[0]);
+  for (const [cx, cy, r] of puffs) ellipse(ctx, cx, cy, Math.round(r * 0.8), Math.round(r * 0.48), fire[1]);
+  for (const [cx, cy, r, u] of puffs) if (u < 0.72) ellipse(ctx, cx, cy, Math.round(r * 0.5), Math.round(r * 0.3), fire[2]);
+  for (const [cx, cy, r, u] of puffs) if (u < 0.38) ellipse(ctx, cx, cy, Math.max(1, Math.round(r * 0.32)), Math.max(1, Math.round(r * 0.2)), fire[3]);
+  for (let i = 0; i < 7; i++) {
+    const u = ((i * 0.15 + t * 0.045) % 1) * grow;
+    px(ctx, Math.round(x0 + (x1 - x0) * u), Math.round(y0 + (y1 - y0) * u - 6 - (i % 3) * 3 - u * 6), i % 2 ? fire[3] : fire[2]);
+  }
+}
+
+// =================================================================== EFFECTS
+
+const FX = {
+  // The Arc Bolt landing: a jagged strike from the sky, then sparks.
+  arcstrike: {
+    duration: 16,
+    draw(ctx, fx, x, y, age) {
+      const seed = (fx.col ?? 0) * 7 + (fx.row ?? 0) * 13;
+      if (age < 7) {
+        const c = age % 2 ? '#fff28a' : '#ffffff';
+        for (const o of [-1, 1]) bolt(ctx, x + o, y - 150, x + o, y - 6, seed, '#ffe23a', 10, 6);
+        bolt(ctx, x, y - 150, x, y - 6, seed, c, 10, 6);
+        if (age < 3) {
+          ellipse(ctx, x, y - 8, 14, 5, '#fff6c0');
+          ellipse(ctx, x, y - 8, 8, 3, '#ffffff');
+        }
+      }
+      const r = 4 + age;
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2 + seed;
+        spark(ctx, Math.round(x + Math.cos(a) * r), Math.round(y - 8 + Math.sin(a) * r * 0.45 - age * 0.5), age < 10 ? 1 : 0, '#ffe23a');
+      }
+    },
+  },
+  // Neon Lamp discharge on one panel of the row.
+  lampzap: {
+    duration: 14,
+    draw(ctx, fx, x, y, age) {
+      if (age > 9 && age % 2) return;
+      const seed = age + (fx.col ?? 0) * 11;
+      bolt(ctx, x - 21, y - 11, x + 21, y - 11, seed, '#ffe23a', 6, 4);
+      bolt(ctx, x - 21, y - 10, x + 21, y - 10, seed + 3, age % 2 ? '#ffffff' : '#fff6b0', 6, 3);
+      if (age < 3) {
+        rect(ctx, x - 19, y - 17, 38, 1, '#fff6c0');
+        rect(ctx, x - 19, y - 2, 38, 1, '#fff6c0');
+      }
+      spark(ctx, x - 12 + ((age * 7) % 24), y - 11, 1, '#ffffff');
+      spark(ctx, x + 10 - ((age * 5) % 20), y - 13, 1, '#ffe23a');
+    },
+  },
+  // Voltframe's Flash going off at the lamp head.
+  voltburst: {
+    duration: 26,
+    draw(ctx, fx, x, y, age) {
+      const cx = x;
+      const cy = y - 42;
+      const r = 4 + Math.round(age * 1.4);
+      if (age < 20 || age % 2) ring(ctx, cx, cy, r, age % 2 ? '#ffffff' : '#fff2a0');
+      if (r > 8 && age < 16) ring(ctx, cx, cy, r - 6, '#ffe23a');
+      for (let i = 0; i < 12; i++) {
+        const a = (i / 12) * Math.PI * 2 + 0.13;
+        const r0 = r + 2;
+        const r1 = r0 + (i % 2 ? 3 : 7);
+        if (age < 14) line(ctx, cx + Math.cos(a) * r0, cy + Math.sin(a) * r0, cx + Math.cos(a) * r1, cy + Math.sin(a) * r1, '#fff6c0');
+      }
+      if (age < 8) disc(ctx, cx, cy, 8 - age, '#ffffff');
+    },
+  },
+  // Feralis's claws striking a panel.
+  rakeclaw: {
+    duration: 14,
+    draw(ctx, fx, x, y, age) {
+      const d = (fx.dir ?? -1) < 0 ? -1 : 1;
+      const k = Math.min(1, (age + 1) / 3);
+      const fade = age > 8;
+      for (let i = -1; i <= 1; i++) {
+        const sx = x + i * 8 + d * 9;
+        const sy = y - 30;
+        const ex = sx - d * 18 * k;
+        const ey = sy + 26 * k;
+        if (!fade || (age + i) % 2) {
+          line(ctx, sx + 1, sy, ex + 1, ey, '#ff5a7a');
+          line(ctx, sx, sy, ex, ey, '#ffffff');
+        }
+      }
+      if (age < 5) for (let i = 0; i < 3; i++) spark(ctx, x - 10 + i * 10, y - 16 + ((age + i) % 3) * 4, 1, '#ffffff', '#ffe0e8');
+    },
+  },
+  // Feralis's howl: sound rings rolling forward from its head.
+  howlwave: {
+    duration: 30,
+    draw(ctx, fx, x, y, age) {
+      const d = (fx.dir ?? -1) < 0 ? -1 : 1;
+      const cx = x + d * 10;
+      const cy = y - 30;
+      for (let k = 0; k < 3; k++) {
+        const r = 4 + age * 1.3 - k * 7;
+        if (r < 3 || r > 40) continue;
+        for (let i = -6; i <= 6; i++) {
+          const a = (i / 6) * 0.9;
+          const px0 = cx + d * Math.cos(a) * r;
+          const py0 = cy + Math.sin(a) * r;
+          px(ctx, Math.round(px0), Math.round(py0), k === 0 ? '#ffffff' : '#ffd0e0');
+        }
+      }
+    },
+  },
+  // A bubble popping on whatever it hit.
+  bubblepop: {
+    duration: 14,
+    draw(ctx, fx, x, y, age) {
+      const cy = y - 12;
+      if (age < 5) ring(ctx, x, cy, 5 + age, '#c8f4ff');
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2 + 0.4;
+        const r = 3 + age * 1.4;
+        px(ctx, Math.round(x + Math.cos(a) * r), Math.round(cy + Math.sin(a) * r + age * age * 0.05), i % 2 ? '#ffffff' : '#6ad8ff');
+      }
+    },
+  },
+  // Water bursting up (coral rising, torpedo surfacing, geysers landing).
+  tidesplash: {
+    duration: 22,
+    draw(ctx, fx, x, y, age) {
+      const cy = y - 6;
+      oval(ctx, x, cy, 6 + age, 2 + (age >> 2), age % 2 ? '#e8ffff' : '#4ad8ff', 0);
+      for (let i = 0; i < 8; i++) {
+        const vx = (i - 3.5) * 0.9;
+        const vy = -2.6 - (i % 3) * 0.5;
+        const dx = vx * age;
+        const dy = vy * age + 0.16 * age * age;
+        if (dy > 2) continue;
+        rect(ctx, Math.round(x + dx), Math.round(cy + dy), i % 2 ? 2 : 1, 2, i % 3 ? '#e8ffff' : '#4ad8ff');
+      }
+    },
+  },
+  // Flames bursting out of the ground (Pyreclaw's slam, a brazier lighting).
+  pyreburst: {
+    duration: 18,
+    draw(ctx, fx, x, y, age) {
+      const fire = PYRE_FIRE[0];
+      const k = 1 - age / 18;
+      flame(ctx, x - 9, y - 3, 7, Math.round(12 * k) + 1, age, fire, 1);
+      flame(ctx, x + 9, y - 3, 7, Math.round(10 * k) + 1, age + 3, fire, 2);
+      flame(ctx, x, y - 2, 10, Math.round(18 * k) + 2, age + 1, fire, 3);
+      for (let i = 0; i < 5; i++) px(ctx, x - 12 + i * 6, y - 8 - age * (1 + (i % 3) * 0.5), i % 2 ? fire[3] : fire[2]);
+    },
+  },
+  // Embers rising around Pyreclaw as a brazier feeds it.
+  emberheal: {
+    duration: 26,
+    draw(ctx, fx, x, y, age) {
+      for (let i = 0; i < 7; i++) {
+        const ox = Math.round(Math.sin(i * 2.1 + age / 4) * (8 + (i % 3) * 3));
+        const oy = -6 - ((age * (1.2 + (i % 3) * 0.4) + i * 6) % 44);
+        const c = i % 3 === 0 ? '#9aff9a' : i % 2 ? '#ffd040' : '#fff6c0';
+        rect(ctx, x + ox, y + oy, 2, 2, c);
+      }
+      if (age < 10) spark(ctx, x + 6, y - 40 + age, 2, '#9aff9a', '#ffffff');
+    },
+  },
+};
+
 // =================================================================== registries
 
 export const ENTITY_SPRITES = {
   voltframe: { draw: drawVolt },
   feralis: { draw: drawFeral },
   tidecaller: { draw: drawTide },
+  pyreclaw: { draw: drawPyre },
+  neonlamp: { draw: drawLamp },
+  coralrock: { draw: drawCoral },
+  brazier: { draw: drawBrazier },
 };
 
-export const SPELL_SPRITES = {};
+export const SPELL_SPRITES = {
+  arcbolt: { draw: drawArcBolt },
+  zapwarn: { draw: drawZapWarn },
+  rakewarn: { draw: drawRakeWarn },
+  pounce: { draw: drawPounce },
+  tidebubble: { draw: drawTideBubble },
+  torpedofish: { draw: drawFish },
+  tidegeyser: { draw: drawGeyser },
+  firetower2: { draw: drawFireTower },
+  pyreflame: { draw: drawPyreFlame },
+  flamejet: { draw: drawFlameJet },
+};
 
-export const FX_SPRITES = {};
+export const FX_SPRITES = FX;
 
 // Exposed for the dev contact sheet and tests.
-export const _frames = { voltframe: VOLT_FRAMES, feralis: FERAL_FRAMES, tidecaller: TIDE_FRAMES };
+export const _frames = { voltframe: VOLT_FRAMES, feralis: FERAL_FRAMES, tidecaller: TIDE_FRAMES, pyreclaw: PYRE_FRAMES };

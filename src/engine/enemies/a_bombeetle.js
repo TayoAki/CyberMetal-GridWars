@@ -17,10 +17,10 @@ export const BOMBEETLE = {
   levels: [
     // idle: frames between volleys; wander: chance to scuttle first; flight: bomb frames in the air;
     // bombs: bombs per volley; blast: 'single' | 'plus'.
-    { attack: 20, idle: 60, wander: 0.5, windup: 30, flight: 36, bombs: 1, blast: 'single', rest: 30 },
-    { attack: 40, idle: 52, wander: 0.5, windup: 26, flight: 36, bombs: 1, blast: 'plus', rest: 26 },
-    { attack: 70, idle: 44, wander: 0.4, windup: 22, flight: 34, bombs: 2, blast: 'single', rest: 24 },
-    { attack: 110, idle: 36, wander: 0.4, windup: 18, flight: 28, bombs: 3, blast: 'single', rest: 20 },
+    { attack: 20, idle: 64, wander: 0.5, windup: 30, flight: 38, bombs: 1, blast: 'single', rest: 32 },
+    { attack: 40, idle: 58, wander: 0.5, windup: 26, flight: 38, bombs: 1, blast: 'plus', rest: 30 },
+    { attack: 70, idle: 54, wander: 0.4, windup: 24, flight: 36, bombs: 2, blast: 'single', rest: 30 },
+    { attack: 110, idle: 46, wander: 0.4, windup: 20, flight: 30, bombs: 3, blast: 'single', rest: 26 },
   ],
   *ai(b, e) {
     const s = e.stats;

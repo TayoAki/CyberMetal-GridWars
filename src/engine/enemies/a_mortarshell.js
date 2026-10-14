@@ -5,7 +5,8 @@ import { plusCells } from './a_common.js';
 // Mortarshell: a stationary armoured mortar turtle. It sits shut in its shell, then opens up (vulnerable
 // and counterable), lobs a mortar at the panel the player stands on and clamps shut again. The shell of
 // each level leaves its mark where it lands: Lv1 breaks the panel, the Aqua Lv2 freezes it to ice, the
-// Fire Lv3 melts it to lava, and the Ω shell breaks it and blasts a plus around it.
+// Fire Lv3 melts it to lava (at most 2 lava panels on the opponent's side at once), and the Ω shell breaks
+// it and blasts a plus around it. Ice thaws after 8 s and lava cools after 5 s.
 // Mirrors BN3's HardHead family (HardHead 80 Null / ColdHead 120 Aqua / HotHead 200 Fire / Ω 300 Null).
 //
 // The closed shell is a guard with no reflection (e.guard = { reflect: 0, shell: true } held up by a
@@ -27,18 +28,55 @@ export function setShell(e, closed) {
   }
 }
 
+// Most lava panels the Lv3 shell keeps on the opponent's side: past that its magma just splashes, so the
+// whole area can't turn into a minefield.
+const LAVA_CAP = 2;
+// Its marks don't last: lava cools and ice thaws back to a normal panel (broken panels already recover
+// on the engine's own timer).
+const COOL = { [PANEL.LAVA]: 300, [PANEL.ICE]: 480 };
+
+// A hit-less timer on a panel ('mortarmark', drawn as steam/frost as it fades): after `frames`, if the
+// panel still has the mark, it turns back to normal.
+export function fadeMark(b, e, c, r, type, frames = COOL[type]) {
+  const s = b.addSpell({ type: 'mortarmark', team: e.team, owner: e, col: c, row: r, hit: null });
+  s.data.mark = type;
+  s.script = (function* () {
+    for (let t = 0; t < frames; t++) {
+      s.data.progress = t / frames;
+      yield;
+    }
+    if (b.field.typeAt(c, r) === type) b.field.setType(c, r, PANEL.NORMAL);
+  })();
+  return s;
+}
+
 const EFFECTS = {
   // How the mortar marks the landing panel, per level.
   break: { breakPanel: true, landFx: 'explosion' },
-  ice: { panel: PANEL.ICE, landFx: 'ice' },
-  lava: { panel: PANEL.LAVA, landFx: 'flame' },
+  ice: {
+    landFx: 'ice',
+    onLandField(b, e, tc, tr) {
+      const t = b.field.typeAt(tc, tr);
+      if (t === PANEL.BROKEN || t === PANEL.ICE) return;
+      if (b.field.setType(tc, tr, PANEL.ICE)) fadeMark(b, e, tc, tr, PANEL.ICE);
+    },
+  },
+  lava: {
+    landFx: 'flame',
+    onLandField(b, e, tc, tr) {
+      const t = b.field.typeAt(tc, tr);
+      if (t === PANEL.BROKEN || t === PANEL.LAVA) return;
+      let lava = 0;
+      for (let r = 0; r < 3; r++) for (let c = 0; c < 6; c++) if (b.field.ownerAt(c, r) !== e.team && b.field.typeAt(c, r) === PANEL.LAVA) lava++;
+      if (lava < LAVA_CAP && b.field.setType(tc, tr, PANEL.LAVA)) fadeMark(b, e, tc, tr, PANEL.LAVA);
+    },
+  },
+  // Ω: the centre panel breaks (it only cracks under someone) and the blast hits a plus around it.
   blast: {
     cells: plusCells,
     landFx: 'explosion',
-    // Break the centre (cracks if someone stands on it), crack the four arms.
-    onLandField(b, tc, tr) {
+    onLandField(b, e, tc, tr) {
       b.field.breakPanel(tc, tr, !!b.entityAt(tc, tr));
-      for (const [c, r] of plusCells(tc, tr).slice(1)) if (b.field.inBounds(c, r)) b.field.crack(c, r, !!b.entityAt(c, r));
     },
   },
 };
@@ -93,9 +131,8 @@ export const MORTARSHELL = {
         type: 'mortarball',
         cells: fx.cells,
         breakPanel: fx.breakPanel,
-        panel: fx.panel,
         landFx: fx.landFx,
-        onLand: fx.onLandField ? (sp, tc, tr) => fx.onLandField(b, tc, tr) : undefined,
+        onLand: fx.onLandField ? (sp, tc, tr) => fx.onLandField(b, e, tc, tr) : undefined,
       });
       shot.data.level = e.level;
       shot.data.effect = s.effect;

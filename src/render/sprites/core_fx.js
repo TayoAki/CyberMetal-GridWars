@@ -27,6 +27,15 @@ function puff(ctx, cx, cy, r, cols) {
   if (r > 3) disc(ctx, cx - 2, cy - 2, r - 3, cols[2]);
 }
 
+// A small solid dust puff that fades from light to dark as k grows.
+function dust(ctx, x, y, r, k) {
+  if (r <= 0) return;
+  const c = k < 5 ? ['#8a8070', '#c8bca8', '#e8e0d0'] : k < 10 ? ['#6a6258', '#9a9080', '#b8ae9c'] : ['#4a443e', '#6a6258', '#827a6c'];
+  disc(ctx, x, y, r, c[0]);
+  if (r > 1) disc(ctx, x - 1, y - 1, r - 1, c[1]);
+  if (r > 2) px(ctx, x - 1, y - 2, c[2]);
+}
+
 const FIRE_STAGES = [
   ['#ffd23f', '#fff6c8', '#ffffff'],
   ['#ff7a1f', '#ffb43f', '#fff27a'],
@@ -66,12 +75,12 @@ const SLASH_COLS = {
   wood: ['#ffffff', '#d8ffb0', '#5fd23a', '#1c742a'],
 };
 
-// One crescent (thick in the middle), bulging toward d. age 0..9.
-function arc(ctx, cx, cy, rx, ry, d, age, cols) {
+// One crescent (thick in the middle), bulging toward d. age 0..9. thick = band width / rx.
+function arc(ctx, cx, cy, rx, ry, d, age, cols, thick = 0.45) {
   if (age > 9) return;
   const grow = Math.min(1, (age + 1) / 3);
   const fade = age > 4 ? (age - 4) / 6 : 0;
-  const w = Math.max(1, Math.round(rx * 0.45 * (1 - fade * 0.8)));
+  const w = Math.max(1, Math.round(rx * thick * (1 - fade * 0.8)));
   const span = (Math.PI / 2) * grow;
   const from = -span;
   const to = span;
@@ -80,6 +89,34 @@ function arc(ctx, cx, cy, rx, ry, d, age, cols) {
   if (age < 8) crescent(ctx, cx + d, cy, rx - 1, rx - Math.max(1, w - 2), ryy * 0.92, d, cols[2], from, to);
   if (age < 6) crescent(ctx, cx + d, cy, rx - 1, rx - Math.max(1, Math.round(w / 2)), ryy * 0.8, d, cols[1], from, to);
   if (age < 4) crescent(ctx, cx + d * 2, cy, rx - 2, rx - 3, ryy * 0.62, d, cols[0], from, to);
+}
+
+// A horizontal swoosh along the row (long blades): an elliptic band under (cx, cy) that sweeps from the
+// back end to the front end and tapers at both tips.
+function swoosh(ctx, cx, cy, rx, ry, d, age, cols) {
+  if (age > 9) return;
+  const grow = Math.min(1, (age + 1) / 3);
+  const fade = age > 4 ? (age - 4) / 6 : 0;
+  const a0 = d > 0 ? Math.PI : 0;
+  const a1 = d > 0 ? Math.PI * (1 - grow) : Math.PI * grow;
+  const band = (ro, ri, color, shrink = 1) => {
+    const pts = [];
+    const n = 20;
+    for (let i = 0; i <= n; i++) {
+      const a = a0 + ((a1 - a0) * i) / n;
+      pts.push([cx + Math.cos(a) * rx * shrink, cy + Math.sin(a) * ro]);
+    }
+    for (let i = n; i >= 0; i--) {
+      const a = a0 + ((a1 - a0) * i) / n;
+      pts.push([cx + Math.cos(a) * rx * shrink, cy + Math.sin(a) * ri]);
+    }
+    poly(ctx, pts, color);
+  };
+  const th = ry * 0.75 * (1 - fade * 0.75);
+  band(ry, ry - th, cols[3]);
+  if (age < 8) band(ry - 1, ry - th + 1, cols[2], 0.98);
+  if (age < 6) band(ry - 1, ry - th * 0.5, cols[1], 0.96);
+  if (age < 4) band(ry - 1, ry - 2, cols[0], 0.92);
 }
 
 // A straight diagonal blade streak (cross slash).
@@ -102,22 +139,22 @@ function drawSlash(ctx, fx, x, y, age) {
   const P = PANEL_W;
   switch (fx.shape) {
     case 'sword':
-      arc(ctx, x + d * (P - 12), cy, 14, 15, d, age, cols);
+      arc(ctx, x + d * (P - 18), cy - 1, 20, 19, d, age, cols, 0.5);
       break;
     case 'wide':
       arc(ctx, x + d * (P - 14), cy, 18, 34, d, age, cols);
       break;
-    case 'long': {
-      // A flat sweep along the row.
-      arc(ctx, x + d * (P + 4), cy, 30, 13, d, age, cols);
+    case 'long':
+      // A flat sweep along the two panels in front.
+      swoosh(ctx, x + d * (P * 1.5), cy - 10, P + 4, 16, d, age, cols);
       break;
-    }
     case 'hero':
-      arc(ctx, x + d * (P + 20), cy, 50, 14, d, age, cols);
-      if (age < 5) rect(ctx, d > 0 ? x + 14 : x - 14 - 3 * P + 20, cy - 1, 3 * P - 6, 2, cols[0]);
+      swoosh(ctx, x + d * (P * 2), cy - 10, P * 1.5 + 4, 17, d, age, cols);
+      if (age < 3) rect(ctx, d > 0 ? x + 16 : x - 16 - (3 * P - 8), cy + 4, 3 * P - 8, 1, cols[0]);
       break;
     case 'big':
-      arc(ctx, x + d * (P - 6), cy, 34, 36, d, age, cols);
+      // A huge crescent over the 2x3 block in front.
+      arc(ctx, x + d * 20, cy, 58, 36, d, age, cols, 0.62);
       break;
     case 'cross': {
       const cx = x + d * P;
@@ -229,9 +266,10 @@ export const FX_SPRITES = {
         if (age < 3) disc(ctx, mx + d * 3, my, r - 3, cols[0]);
         for (let i = 0; i < 3; i++) line(ctx, mx + d * (6 + age), my + (i - 1) * 3, mx + d * (10 + age * 3), my + (i - 1) * (4 + age), cols[1]);
       }
-      if (age >= 4 && age < 12) {
+      if (age >= 4 && age < 13) {
         const k = age - 4;
-        puff(ctx, mx - d * 2, my - 3 - k, Math.max(1, 4 - (k >> 1)), ['#3a3448', '#5a5470', '#7a7490']);
+        dust(ctx, mx + d * (2 - k), my - 3 - k, Math.max(1, 3 - (k >> 2)), k + 2);
+        dust(ctx, mx + d * (6 - (k >> 1)), my - 1 - (k >> 1), Math.max(1, 2 - (k >> 2)), k + 4);
       }
       if (age < 6) {
         const k = (age + 1) / 4;
@@ -253,11 +291,10 @@ export const FX_SPRITES = {
         const k = (age - i * 2) / 6;
         if (k < 0 || k > 1.3) continue;
         const rx = mx + (ex - mx) * Math.min(1, k);
-        const ry = 4 + i + Math.round(k * 3);
-        withAlpha(ctx, k > 1 ? 1.3 - k : 1, () => {
-          ellipseRing(ctx, rx, my, 2, ry, '#ffffff');
-          ellipseRing(ctx, rx - d, my, 2, ry - 1, '#bfe4ff');
-        });
+        const ry = 6 + i * 2 + Math.round(k * 3);
+        ellipseRing(ctx, rx - d, my, 3, ry, '#7ac0ff');
+        ellipseRing(ctx, rx, my, 3, ry, '#ffffff');
+        ellipseRing(ctx, rx + d, my, 2, ry - 2, '#d8eeff', -Math.PI / 2, Math.PI / 2);
       }
       if (age < 4) sparkle(ctx, mx, my, 3 - age, '#e8f4ff', '#ffffff');
     },
@@ -279,66 +316,80 @@ export const FX_SPRITES = {
     },
   },
 
-  // The classic chunky explosion: flash, fireball puffs, sparks, smoke.
+  // The classic chunky explosion: a white pop, a lumpy fireball that cools from yellow to red, flying
+  // sparks, then a dark smoke cloud that rises and breaks up.
   explosion: {
     duration: 22,
     draw(ctx, fx, x, y, age) {
       const cx = x;
-      const cy = y - 12;
+      const cy = y - 13;
       const seed = seedOf(fx);
-      if (age < 2) {
-        disc(ctx, cx, cy, 7 + age * 2, '#fff6c8');
-        disc(ctx, cx, cy, 5 + age, '#ffffff');
+      if (age === 0) {
+        disc(ctx, cx, cy, 7, '#fff6c8');
+        disc(ctx, cx, cy, 5, '#ffffff');
         return;
       }
-      const PUFFS = [
-        [0, 0, 9, 0],
-        [-7, -3, 6, 1],
-        [7, -4, 6, 1],
-        [-4, 5, 5, 2],
-        [5, 4, 5, 2],
-        [0, -9, 5, 3],
-      ];
-      // Sparks first so the fireball sits on top.
-      if (age < 12) {
-        for (let i = 0; i < 7; i++) {
-          const a = hash(seed, i) * Math.PI * 2;
-          const sp = 2.2 + hash(seed, i, 3) * 1.6;
+      if (age === 1) {
+        disc(ctx, cx, cy, 11, '#ffd23f');
+        disc(ctx, cx, cy, 9, '#fff6c8');
+        disc(ctx, cx, cy, 6, '#ffffff');
+        return;
+      }
+      // Sparks and embers (behind the cloud).
+      if (age < 15) {
+        for (let i = 0; i < 9; i++) {
+          const a = hash(seed, i, 9) * Math.PI * 2;
+          const sp = 2.4 + hash(seed, i, 4) * 1.8;
           const k = age - 1;
-          const sx = cx + Math.cos(a) * sp * k;
-          const sy = cy + Math.sin(a) * sp * k * 0.8 + k * k * 0.12;
-          rect(ctx, Math.round(sx), Math.round(sy), k < 6 ? 2 : 1, k < 6 ? 2 : 1, k < 5 ? '#fff27a' : '#ff7a1f');
+          const sx = Math.round(cx + Math.cos(a) * sp * k);
+          const sy = Math.round(cy + Math.sin(a) * sp * k * 0.75 + k * k * 0.16);
+          const big = k < 6 && i % 3 === 0;
+          rect(ctx, sx, sy, big ? 2 : 1, big ? 2 : 1, k < 4 ? '#fff6c8' : k < 8 ? '#ffd23f' : '#ff7a1f');
         }
       }
-      for (const [ox, oy, r0, delay] of PUFFS) {
-        const k = age - 1 - delay;
+      // Fireball: seeded puffs merged into one lumpy cloud (all rims, then all bodies, then cores).
+      const puffs = [];
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 7) * Math.PI * 2 + hash(seed, i) * 0.9;
+        const dist = i === 0 ? 0 : 4 + hash(seed, i, 1) * 4.5;
+        const r0 = i === 0 ? 10 : 5 + hash(seed, i, 2) * 3.5;
+        const delay = i === 0 ? 0 : Math.floor(hash(seed, i, 3) * 3);
+        const k = age - 2 - delay;
         if (k < 0) continue;
         const life = 18 - delay;
         if (k >= life) continue;
         const p = k / life;
-        const grow = Math.min(1, (k + 1) / 3);
-        const r = Math.round(r0 * grow * (1 - p * 0.55));
-        const spread = 1 + p * 0.9;
-        const jx = Math.round((hash(seed, ox, oy) - 0.5) * 2);
-        const px0 = cx + ox * spread + jx;
-        const py0 = cy + oy * spread - p * 8;
-        const stage = Math.min(4, Math.floor(p * 5.2));
-        if (stage >= 4) ditherDisc(ctx, px0, py0, r, FIRE_STAGES[4][1], age);
-        else puff(ctx, px0, py0, r, FIRE_STAGES[stage]);
+        const grow = Math.min(1, (k + 2) / 4);
+        const r = Math.max(1, Math.round(r0 * grow * (1 - p * p * 0.65)));
+        const spread = 1 + p * 1.3;
+        puffs.push({
+          x: Math.round(cx + Math.cos(a) * dist * spread),
+          y: Math.round(cy + Math.sin(a) * dist * spread * 0.8 - p * p * 11),
+          r,
+          st: Math.min(4, Math.floor(p * 5.4 + (i ? 0.2 : 0))),
+        });
       }
-      if (age < 6) disc(ctx, cx - 1, cy - 1, Math.max(1, 4 - (age >> 1)), '#ffffff');
+      for (const q of puffs) disc(ctx, q.x, q.y, q.r + 1, q.st >= 4 ? '#1c1a28' : FIRE_STAGES[Math.min(3, q.st + 1)][0]);
+      for (const q of puffs) disc(ctx, q.x, q.y, q.r, FIRE_STAGES[q.st][0]);
+      for (const q of puffs) if (q.r > 2) disc(ctx, q.x - 1, q.y - 1, q.r - 2, FIRE_STAGES[q.st][1]);
+      for (const q of puffs) if (q.r > 4) disc(ctx, q.x - 2, q.y - 2, q.r - 4, FIRE_STAGES[q.st][2]);
     },
   },
 
-  // A small spark.
+  // A small spark: a twinkling star with chips flying off.
   burst: {
     duration: 10,
     draw(ctx, fx, x, y, age) {
       const cy = y - BODY;
-      const r = age < 3 ? 3 + age * 2 : Math.max(1, 9 - age);
-      sparkBurst(ctx, x, cy, r, 8, age < 4 ? '#fff27a' : '#ffb43f', '#ffffff', age * 0.15);
-      if (age < 3) disc(ctx, x, cy, 3 - age, '#ffffff');
-      if (age >= 2) ring(ctx, x, cy, Math.min(12, 2 + age * 1.5), age < 6 ? '#fff6c8' : '#ffb43f');
+      const r = [4, 7, 8, 7, 5, 4, 3, 2, 1, 1][age] ?? 1;
+      poly(ctx, starPoints(x, cy, r, Math.max(1, r * 0.35), 4, age * 0.12), age < 5 ? '#ffd23f' : '#ff9a3a');
+      if (r > 2) poly(ctx, starPoints(x, cy, r - 2, 1, 4, age * 0.12), '#fff6c8');
+      px(ctx, x, cy, '#ffffff');
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2 + 0.4;
+        const d0 = 4 + age * 2.2;
+        if (age > 1 && age < 9) rect(ctx, Math.round(x + Math.cos(a) * d0), Math.round(cy + Math.sin(a) * d0 * 0.8), age < 5 ? 2 : 1, age < 5 ? 2 : 1, age < 5 ? '#fff6c8' : '#ffb43f');
+      }
     },
   },
 
@@ -364,7 +415,8 @@ export const FX_SPRITES = {
         }
       }
       if (age < 5) {
-        withAlpha(ctx, 0.5, () => disc(ctx, x, cy, 6 + age, '#3a9cff'));
+        ring(ctx, x, cy, 4 + age * 2, age < 3 ? '#ffffff' : '#8fe2ff');
+        if (age < 3) disc(ctx, x, cy, 3 - age, '#e8fbff');
       }
     },
   },
@@ -391,36 +443,33 @@ export const FX_SPRITES = {
     },
   },
 
-  // Ice crystals form, then shatter.
+  // Ice: a cluster of crystals juts up from the panel, then shatters into glitter.
   ice: {
     duration: 20,
     draw(ctx, fx, x, y, age) {
-      const cy = y - 12;
-      const shards = [[0, -1, 14], [-0.8, -0.5, 10], [0.8, -0.6, 10], [-0.5, 0.3, 7], [0.5, 0.35, 7]];
-      if (age < 12) {
-        const g = Math.min(1, (age + 1) / 4);
-        for (const [ux, uy, len] of shards) {
-          const l = len * g;
-          const tx = x + ux * l;
-          const ty = cy + uy * l;
-          const nx = -uy * 3;
-          const ny = ux * 3;
-          poly(ctx, [[x + nx, cy + ny], [tx, ty], [x - nx, cy - ny]], '#1a4a7a');
-          poly(ctx, [[x + nx * 0.6, cy + ny * 0.6], [tx - ux, ty - uy], [x - nx * 0.6, cy - ny * 0.6]], '#9adcf8');
-          line(ctx, x, cy, tx - ux * 2, ty - uy * 2, '#ffffff');
+      const crystals = [[-8, 12, 3, 1], [-2, 20, 4, 0], [5, 15, 3, 1], [10, 9, 3, 2], [-12, 7, 2, 2]];
+      if (age < 13) {
+        for (const [ox, h0, w, delay] of crystals) {
+          const k = age - delay;
+          if (k < 0) continue;
+          const h = Math.round(h0 * Math.min(1, (k + 1) / 3));
+          const bx = x + ox;
+          poly(ctx, [[bx - w - 1, y + 1], [bx - w - 1, y - h + w], [bx, y - h - 1], [bx + w + 1, y - h + w], [bx + w + 1, y + 1]], '#123a66');
+          poly(ctx, [[bx - w, y], [bx - w, y - h + w], [bx, y - h], [bx + w, y - h + w], [bx + w, y]], '#6ac8f0');
+          poly(ctx, [[bx - w, y], [bx - w, y - h + w], [bx, y - h], [bx, y]], '#bff0ff');
+          line(ctx, bx - w + 1, y - 2, bx - w + 1, y - h + w + 1, '#ffffff');
         }
-        disc(ctx, x, cy, 3, '#e8fbff');
-        if (age > 6 && age % 2) sparkle(ctx, x + 6, cy - 9, 2, '#e8fbff', '#ffffff', true);
+        if (age > 5 && age % 3 === 0) sparkle(ctx, x - 1, y - 23, 2, '#e8fbff', '#ffffff', true);
+        if (age < 4) ellipseRing(ctx, x, y - 1, 10 + age * 3, 3 + age, '#e8fbff');
       } else {
-        const k = age - 12;
-        for (let i = 0; i < 8; i++) {
-          const a = (i * Math.PI * 2) / 8 + 0.3;
-          const sx = x + Math.cos(a) * (6 + k * 3);
-          const sy = cy + Math.sin(a) * (5 + k * 2) + k * k * 0.3;
-          rect(ctx, Math.round(sx), Math.round(sy), 2, 2, i % 2 ? '#bff0ff' : '#ffffff');
+        const k = age - 13;
+        for (let i = 0; i < 10; i++) {
+          const a = -Math.PI * (0.1 + 0.8 * (i / 9));
+          const sx = x + Math.cos(a) * (4 + k * 3);
+          const sy = y - 8 + Math.sin(a) * (6 + k * 2.5) + k * k * 0.35;
+          rect(ctx, Math.round(sx), Math.round(sy), i % 3 ? 1 : 2, i % 3 ? 1 : 2, i % 2 ? '#bff0ff' : '#ffffff');
         }
       }
-      withAlpha(ctx, Math.max(0, 0.4 - age * 0.02), () => ellipse(ctx, x, y - 2, 16, 4, '#bff0ff'));
     },
   },
 
@@ -471,10 +520,11 @@ export const FX_SPRITES = {
       for (const s of [-1, 1]) {
         for (let j = 0; j < 2; j++) {
           const k = age - j * 2;
-          if (k < 0 || k > 14) continue;
-          const px0 = x + s * (6 + k * 1.6 + j * 4);
+          if (k < 0 || k > 15) continue;
+          const px0 = Math.round(x + s * (7 + k * 1.5 + j * 5));
+          const py0 = Math.round(y - 3 - k * 0.45);
           const r = Math.max(1, Math.round(5 - k * 0.3));
-          ditherDisc(ctx, px0, y - 3 - k * 0.4, r, k < 7 ? '#c8bca8' : '#8a8070', k);
+          dust(ctx, px0, py0, r, k);
         }
       }
     },
@@ -487,13 +537,17 @@ export const FX_SPRITES = {
       const d = fx.dir !== undefined ? (fx.dir < 0 ? -1 : 1) : (fx.col ?? 0) < 3 ? 1 : -1;
       const gx = x + d * 15;
       const cy = y - 26;
-      const a = Math.max(0, 1 - age / 12);
-      withAlpha(ctx, a, () => {
-        poly(ctx, [[gx - 4, cy - 10], [gx + 4, cy - 10], [gx + 7, cy], [gx + 4, cy + 10], [gx - 4, cy + 10], [gx - 7, cy]], '#bff4ff');
-        poly(ctx, [[gx - 2, cy - 7], [gx + 2, cy - 7], [gx + 4, cy], [gx + 2, cy + 7], [gx - 2, cy + 7], [gx - 4, cy]], '#ffffff');
-      });
-      if (age < 6) sparkle(ctx, gx + d * 6, cy - 4, 5 - age, '#ffffff', '#ffffff', true);
-      if (age < 8) ring(ctx, gx, cy, 9 + age * 2, '#86f3ff');
+      if (age < 9) {
+        const s = age < 3 ? 1 : 1 - (age - 3) / 8;
+        const hw = Math.round(5 * s) + 1;
+        const hh = Math.round(11 * s) + 1;
+        const hex = (w, h) => [[gx - w, cy - h + 3], [gx, cy - h], [gx + w, cy - h + 3], [gx + w, cy + h - 3], [gx, cy + h], [gx - w, cy + h - 3]];
+        poly(ctx, hex(hw + 1, hh + 1), age < 4 ? '#ffffff' : '#86f3ff');
+        poly(ctx, hex(hw, hh), age < 2 ? '#ffffff' : '#bff4ff');
+        if (hw > 2) poly(ctx, hex(hw - 2, hh - 3), '#ffffff');
+      }
+      if (age < 6) sparkle(ctx, gx + d * 7, cy - 6, 5 - age, '#ffffff', '#ffffff', true);
+      if (age >= 2 && age < 8) ellipseRing(ctx, gx, cy, 3 + age, 9 + age * 2, age < 5 ? '#86f3ff' : '#27c3ee');
     },
   },
 
@@ -504,8 +558,8 @@ export const FX_SPRITES = {
       const cy = y - 14;
       const k = Math.min(1, (age + 1) / 8);
       const r = Math.round(4 + 12 * k);
-      withAlpha(ctx, 0.25 * (1 - age / 18) + 0.1, () => disc(ctx, x, cy, r, '#9ae8ff'));
       ring(ctx, x, cy, r, age < 12 ? '#ffffff' : '#9ae8ff');
+      if (age < 6) ring(ctx, x, cy, r + 2, '#5ab8ff');
       if (age < 14) ring(ctx, x, cy, Math.max(1, r - 2), '#5ab8ff');
       for (let i = 0; i < 6; i++) {
         const a = (i * Math.PI) / 3 + age * 0.12;
@@ -521,7 +575,8 @@ export const FX_SPRITES = {
     draw(ctx, fx, x, y, age) {
       const cy = y - 14;
       ring(ctx, x, cy, 16, age % 2 ? '#ffffff' : '#9ae8ff');
-      withAlpha(ctx, 0.5 * (1 - age / 10), () => disc(ctx, x, cy, 15, '#bff4ff'));
+      if (age < 4) ring(ctx, x, cy, 15, '#e8fbff');
+      if (age < 3) sparkle(ctx, x + 9, cy - 9, 3 - age, '#ffffff', '#ffffff', true);
       for (let i = 0; i < 6; i++) {
         const a = (i * Math.PI) / 3 + 0.5;
         const r0 = 9 + age;
@@ -556,8 +611,9 @@ export const FX_SPRITES = {
         rect(ctx, Math.round(x + Math.cos(a) * r), Math.round(cy + Math.sin(a) * r * 1.1), 2, 2, i % 2 ? '#ff7ae0' : '#ffd0f8');
       }
       if (age < 7) {
-        withAlpha(ctx, 0.5 - age * 0.06, () => disc(ctx, x, cy, 14, '#ff7ae0'));
         ring(ctx, x, cy, 13 + (age >> 1), '#ffffff');
+        ring(ctx, x, cy, 15 + (age >> 1), '#ff7ae0');
+        if (age < 3) sparkle(ctx, x + 8, cy - 8, 3 - age, '#ffd0f8', '#ffffff', true);
       }
     },
   },
@@ -587,9 +643,12 @@ export const FX_SPRITES = {
     draw(ctx, fx, x, y, age) {
       const seed = seedOf(fx);
       const k = age / 34;
-      if (age < 14) {
-        ellipseRing(ctx, x, y - 2, 6 + age, 2 + (age >> 2), age < 8 ? '#b8ffc8' : '#5fe39a');
-        withAlpha(ctx, 0.25 * (1 - age / 14), () => rect(ctx, x - 12, y - 44, 24, 44, '#7aff9a'));
+      if (age < 14) ellipseRing(ctx, x, y - 2, 6 + age, 2 + (age >> 2), age < 8 ? '#b8ffc8' : '#5fe39a');
+      for (let j = 0; j < 2; j++) {
+        const k = age - j * 8;
+        if (k < 0 || k > 18) continue;
+        const ry = y - 2 - k * 2.2;
+        ellipseRing(ctx, x, ry, 13 - (k >> 2), 3, k < 10 ? '#b8ffc8' : '#5fe39a');
       }
       for (let i = 0; i < 9; i++) {
         const delay = Math.floor(hash(seed, i) * 14);
@@ -639,7 +698,7 @@ export const FX_SPRITES = {
         const y0 = cy + Math.sin(a) * 8;
         bolt(ctx, x0, y0, x0 + Math.cos(a) * 9, y0 + Math.sin(a) * 9, 3, 3, i % 2 ? '#ffe23a' : '#ffffff', age * 3 + i);
       }
-      if (age < 6) withAlpha(ctx, 0.4, () => disc(ctx, x, cy, 12, '#ffe23a'));
+      if (age < 5) ring(ctx, x, cy, 8 + age * 2, age < 3 ? '#ffffff' : '#ffe23a');
     },
   },
 
@@ -665,30 +724,29 @@ export const FX_SPRITES = {
     },
   },
 
-  // PanlGrab / AreaGrab: a red panel tile drops onto the target panel.
+  // PanlGrab / AreaGrab: a red panel tile drops onto the target panel, flashes, then melts into the
+  // real panel (translucent once landed so whoever stands there stays visible).
   panelfall: {
-    duration: 22,
+    duration: 20,
     draw(ctx, fx, x, y, age) {
       const px0 = x - PANEL_W / 2;
-      const land = 13;
+      const land = 11;
       const k = Math.min(1, age / land);
       const drop = Math.round((1 - k * k) * 80);
       const top = y - 18 - drop;
-      const a = age > 18 ? Math.max(0, 1 - (age - 18) / 4) : 1;
-      if (age < land) withAlpha(ctx, 0.3 + 0.4 * k, () => ellipse(ctx, x, y - 8, Math.round(10 + 8 * k), Math.round(3 + 4 * k), '#000000'));
+      const a = age < land ? 0.9 : Math.max(0, 0.65 - (age - land) * 0.08);
+      if (age < land) withAlpha(ctx, 0.25 + 0.35 * k, () => ellipse(ctx, x, y - 8, Math.round(10 + 8 * k), Math.round(3 + 4 * k), '#000000'));
       withAlpha(ctx, a, () => {
         rect(ctx, px0, top, PANEL_W, PANEL_H, '#4a0c10');
         rect(ctx, px0 + 1, top + 1, PANEL_W - 2, 17, '#d84a4a');
         rect(ctx, px0 + 4, top + 3, PANEL_W - 8, 12, '#ee7070');
         rect(ctx, px0 + 1, top + 1, PANEL_W - 2, 1, '#ffaaa4');
         rect(ctx, px0 + 1, top + 18, PANEL_W - 2, 5, '#9a2626');
-        if (age >= land && age < land + 5) {
-          withAlpha(ctx, 1 - (age - land) / 5, () => rect(ctx, px0 + 1, top + 1, PANEL_W - 2, 17, '#ffffff'));
-        }
       });
+      if (age >= land && age < land + 4) withAlpha(ctx, 0.8 - (age - land) * 0.2, () => rect(ctx, px0 + 1, top + 1, PANEL_W - 2, 17, '#ffffff'));
       if (age >= land && age < land + 6) {
         const kk = age - land;
-        for (const s of [-1, 1]) ditherDisc(ctx, x + s * (18 + kk * 2), y + 2 - kk, 3 - (kk >> 1), '#d8c8c8', kk);
+        for (const s of [-1, 1]) dust(ctx, x + s * (18 + kk * 2), y + 2 - kk, 3 - (kk >> 1), kk);
       }
       if (age < land) for (let i = 0; i < 3; i++) rect(ctx, px0 + 8 + i * 12, top - 8 - (age % 3) * 2, 1, 6, '#ffaaa4');
     },
@@ -709,12 +767,13 @@ export const FX_SPRITES = {
         const top = y - h;
         rect(ctx, sx - 1, top + 6, 3, h - 6, '#8a5a2a');
         rect(ctx, sx - 1, top + 6, 1, h - 6, '#c89050');
-        poly(ctx, [[sx - 4, top + 8], [sx, top - 1], [sx + 4, top + 8]], '#1c742a');
-        poly(ctx, [[sx - 2, top + 7], [sx, top + 1], [sx + 2, top + 7]], '#5fd23a');
-        px(ctx, sx - 1, top + 3, '#d8ffb0');
+        poly(ctx, [[sx - 3, top + 7], [sx, top - 2], [sx + 3, top + 7], [sx, top + 9]], '#1c742a');
+        poly(ctx, [[sx - 2, top + 6], [sx, top], [sx + 2, top + 6], [sx, top + 8]], '#a8f07a');
+        line(ctx, sx - 1, top + 5, sx, top + 1, '#f0ffd8');
+        rect(ctx, sx - 2, top + 9, 5, 1, '#5fd23a');
       });
       if (age < 8) {
-        for (const s of [-1, 1]) ditherDisc(ctx, x + s * (12 + age), y - 2, 3, '#a89068', age);
+        for (const s of [-1, 1]) dust(ctx, x + s * (12 + age), y - 2, 3 - (age >> 2), age);
         rect(ctx, x - 14, y - 1, 28, 1, '#5a4028');
       }
     },
@@ -854,7 +913,7 @@ export const FX_SPRITES = {
         disc(ctx, Math.round(sx), Math.round(sy), r - 1, i % 2 ? '#8a92ac' : '#6a7290');
         px(ctx, Math.round(sx) - 1, Math.round(sy) - 1, '#c8d0e0');
       }
-      if (age < 10) for (const s of [-1, 1]) ditherDisc(ctx, x + s * (6 + age * 1.5), y - 3, 4 - (age >> 2), '#a8a0a8', age);
+      if (age < 12) for (const s of [-1, 1]) dust(ctx, Math.round(x + s * (6 + age * 1.5)), y - 3, 4 - (age >> 2), age);
     },
   },
 };
@@ -878,15 +937,16 @@ function gust(ctx, fx, age, pull) {
   const d = fx.dir < 0 ? -1 : 1;
   const a = age < 4 ? (age + 1) / 4 : age > 22 ? Math.max(0, 1 - (age - 22) / 8) : 1;
   withAlpha(ctx, a, () => {
-    for (let i = 0; i < 14; i++) {
-      const yy = FIELD_Y - 26 + ((i * 29) % 96);
-      const speed = 9 + (i % 4) * 3;
-      const len = 14 + (i % 3) * 10;
+    for (let i = 0; i < 20; i++) {
+      const yy = FIELD_Y - 30 + ((i * 37) % 104);
+      const speed = 10 + (i % 4) * 4;
+      const len = 18 + (i % 3) * 14;
       const head = ((age * speed + i * 53) % (SCREEN_W + len + 40)) - 20;
       const hx = d > 0 ? head : SCREEN_W - head;
       const tx = hx - d * len;
       rect(ctx, Math.min(hx, tx), yy, len, 1, i % 3 ? '#e8f4ff' : '#9ad0ff');
-      if (i % 4 === 0) rect(ctx, d > 0 ? hx - 4 : hx, yy - 1, 4, 1, '#ffffff');
+      if (i % 3 === 0) rect(ctx, Math.min(hx, tx) + (d > 0 ? len >> 1 : 0), yy + 1, len >> 1, 1, '#bfe4ff');
+      if (i % 4 === 0) rect(ctx, d > 0 ? hx - 5 : hx, yy - 1, 5, 1, '#ffffff');
       if (pull && i % 3 === 0) ellipseRing(ctx, hx + d * 4, yy - 3, 3, 3, '#bfe4ff', 0, Math.PI * 1.3);
     }
   });

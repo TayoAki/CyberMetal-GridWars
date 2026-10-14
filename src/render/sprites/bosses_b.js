@@ -421,11 +421,11 @@ function ironPauldron(g, x, y) {
   `));
 }
 
-function ironSaw(g, cx, cy, r = 9, edge = true) {
+function ironSaw(g, cx, cy, r = 9, edge = true, phase = 0) {
   const teeth = g.mask();
   const n = r >= 9 ? 14 : 12;
   for (let i = 0; i < n; i++) {
-    const a = (i / n) * Math.PI * 2;
+    const a = ((i + phase) / n) * Math.PI * 2;
     const a2 = a + (Math.PI * 2) / n * 0.55;
     teeth.poly([
       [cx + Math.cos(a) * (r - 2), cy + Math.sin(a) * (r - 2)],
@@ -445,10 +445,17 @@ function ironLegs(g, o) {
   const lift = o.lift ?? 0; // front leg raised (stomp wind-up)
   const stepB = o.stepB ?? 0;
   const stepF = o.stepF ?? 0;
-  // back leg: a step deeper in the ramp
-  g.part(g.mask().capsule(22, 44, 21, 50 - stepB, 4.4), 'bcde', { bias: 1 });
-  g.part(g.mask().rect(14, 49 - stepB, 13, 8, 3), 'bcde', { bias: 1 });
-  g.stamp(14, 55 - stepB, art('.xxxxxxxxxxx.'));
+  // back leg: a step deeper in the ramp (raised high for the stomp tell)
+  const liftB = o.liftB ?? 0;
+  if (liftB) {
+    g.part(g.mask().capsule(22, 44, 14, 46 - liftB, 4.4), 'bcde', { bias: 1 });
+    g.part(g.mask().rect(4, 43 - liftB, 13, 8, 3), 'bcde', { bias: 1 });
+    g.stamp(4, 49 - liftB, art('.xxxxxxxxxxx.'));
+  } else {
+    g.part(g.mask().capsule(22, 44, 21, 50 - stepB, 4.4), 'bcde', { bias: 1 });
+    g.part(g.mask().rect(14, 49 - stepB, 13, 8, 3), 'bcde', { bias: 1 });
+    g.stamp(14, 55 - stepB, art('.xxxxxxxxxxx.'));
+  }
   // front leg
   const fx0 = 29 + Math.round(lift * 0.4);
   const fy0 = 49 - stepF - lift;
@@ -508,7 +515,10 @@ function ironPose(o = {}) {
     ironForearm(g, 42 + bx, 28 + dy, 46 + bx, 40 + dy);
     ironFist(g, 41 + bx, 40 + dy, 'down');
   }
-  return g.rows();
+  const rows = g.rows();
+  rows.lean = bx; // overlays (furnace light) follow the body
+  rows.dy = dy;
+  return rows;
 }
 
 const IRON = {
@@ -521,9 +531,9 @@ const IRON = {
   catch: ironPose({ arm: 'catch', dy: 1 }),
   sawwind: ironPose({ back: 'raise', lean: -1 }),
   throw: ironPose({ back: 'throw', lean: 1 }),
-  stompwind: ironPose({ lift: 7, lean: -1, mood: 'rage' }),
+  stompwind: ironPose({ liftB: 9, lean: 2, dy: -1, arm: 'catch', mood: 'rage' }),
   stomp: ironPose({ dy: 3, arm: 'slam', mood: 'rage' }),
-  hurt: ironPose({ lean: -2, mood: 'hurt' }),
+  hurt: ironPose({ lean: -3, dy: 2, arm: 'catch', mood: 'hurt' }),
   summon: ironPose({ arm: 'slam', mood: 'rage' }),
 };
 
@@ -568,6 +578,9 @@ function drawIronclad(ctx, e, x, y, t) {
       ox = k % 4 < 2 ? -1 : 1;
       break;
     case 'summon':
+      // called by the player's Navi chip: cock the fist, fire it at the foe, catch it again
+      rows = k < 12 ? IRON.windup : k < 50 ? IRON.launch : IRON.catch;
+      break;
     case 'slam':
       rows = IRON.summon;
       break;
@@ -579,8 +592,14 @@ function drawIronclad(ctx, e, x, y, t) {
   const bx = x + (flip ? -ox : ox);
   body(ctx, rows, pal, bx, y, flip);
   // furnace light through the grate
-  const sink = rows === IRON.idle2 || rows === IRON.stepA || rows === IRON.stepB || rows === IRON.catch ? 1 : rows === IRON.stomp ? 3 : 0;
-  const lean = rows === IRON.windup || rows === IRON.sawwind || rows === IRON.stompwind ? -1 : rows === IRON.throw ? 1 : rows === IRON.hurt ? -2 : 0;
+  const sink = rows.dy ?? 0;
+  const lean = rows.lean ?? 0;
+  if (rows === IRON.launch && k < 8) {
+    // rocket flare where the fist left the piston
+    const fx0 = fx(bx, 16, flip);
+    disc(ctx, fx0, y - IH + 4 - k, 3, IRON_GLOW[L - 1]);
+    disc(ctx, fx0, y - IH + 4 - k, 1, '#ffffff');
+  }
   const gx = fx(bx, 4 + lean, flip);
   const gy = y - IH + 30 + sink;
   withAlpha(ctx, 0.22 + 0.1 * Math.sin(t / 6), () => ellipse(ctx, gx, gy, 9, 6, gc));
@@ -645,7 +664,7 @@ function hexShield(g, cx, cy, rx, ry) {
   const pts = [[cx, cy - ry], [cx + rx, cy - ry / 2], [cx + rx, cy + ry / 2], [cx, cy + ry], [cx - rx, cy + ry / 2], [cx - rx, cy - ry / 2]];
   const m = g.mask().poly(pts);
   g.part(m, 'pqst');
-  const inner = g.mask().poly(pts.map(([x, y]) => [cx + (x - cx) * 0.68, cy + (y - cy) * 0.7]));
+  const inner = g.mask().poly(pts.map(([x, y]) => [cx + (x - cx) * 0.6, cy + (y - cy) * 0.64]));
   g.shade(inner, 'gGH', { cuts: [0.4, 0.75] });
   g.set(cx - 1, cy - 1, 'p');
   g.set(cx - 2, cy - 2, 'g');
@@ -705,9 +724,9 @@ function sabrePose(o = {}) {
   const hy = Y(17);
   g.part(
     g.mask()
-      .capsule(hx - 5, hy - 5, hx - 11, hy - 3 + pl, 2.6, 2.1)
-      .add(g.mask().capsule(hx - 11, hy - 3 + pl, hx - 17, hy + 2 + pl * 2, 2.1, 1.4))
-      .add(g.mask().capsule(hx - 17, hy + 2 + pl * 2, hx - 20 + pl, hy + 8 + pl * 2, 1.4, 0.5)),
+      .capsule(hx - 5, hy - 3, hx - 9, hy + pl * 0.5, 2.3, 2)
+      .add(g.mask().capsule(hx - 9, hy + pl * 0.5, hx - 12 + pl, hy + 6, 2, 1.4))
+      .add(g.mask().capsule(hx - 12 + pl, hy + 6, hx - 13 + pl * 2, hy + 12, 1.4, 0.4)),
     'pqst',
     { edge: false },
   );
@@ -716,7 +735,7 @@ function sabrePose(o = {}) {
   g.part(g.mask().capsule(X(25), Y(26), X(bArm[0][0]), Y(bArm[0][1]), 2.3), 'uvy', { bias: 1 });
   g.part(g.mask().capsule(X(bArm[0][0]), Y(bArm[0][1]), X(bArm[1][0]), Y(bArm[1][1]), 2.4, 2.2), 'abcde', { bias: 1 });
   const shield = o.shield ?? 'back';
-  if (shield === 'back') hexShield(g, X(bArm[1][0]) - 2, Y(bArm[1][1]) - 1, 5.2, 6.6);
+  if (shield === 'back') hexShield(g, X(bArm[1][0]) - 2, Y(bArm[1][1]) - 1, 6.2, 7.8);
   if (o.bladeBehind) sabreBlade(g, X(o.fArm[1][0]), Y(o.fArm[1][1]), o.blade[0], o.blade[1]);
   leg(LEGS.b, 1);
   leg(LEGS.f, 0);
@@ -817,7 +836,8 @@ function drawSabre(ctx, e, x, y, t) {
       ox = k % 4 < 2 ? -1 : 0;
       break;
     case 'summon':
-      rows = SABRE.summon;
+      // Navi chip: a salute, then the cut lands on the foe
+      rows = k < 12 ? SABRE.summon : k < 30 ? SABRE.slash : SABRE.idle;
       break;
     default:
       rows = Math.floor(t / 20) % 2 ? SABRE.idle2 : SABRE.idle;
@@ -846,7 +866,7 @@ function drawSabre(ctx, e, x, y, t) {
 
 // Materials: cloak a-d (+e deepest), chrome p q s t, core o g h, eyes r R, void x, accent k l (trim).
 const ZERO_PAL = Object.freeze({
-  a: '#4a4a72', b: '#30304e', c: '#20203a', d: '#141428', e: '#0a0a16',
+  a: '#62629a', b: '#3a3a62', c: '#262646', d: '#17172e', e: '#0b0b18',
   p: '#eef1fb', q: '#aab2ca', s: '#6c7492', t: '#3e4462',
   o: '#f0ffff', g: '#6af0ff', h: '#1a90c0',
   r: '#ff4060', R: '#ffb0bc',
@@ -856,16 +876,16 @@ const ZERO_PAL = Object.freeze({
 const ZERO_PALS = [
   ZERO_PAL,
   recolor(ZERO_PAL, {
-    a: '#5c3446', b: '#3e2232', c: '#2a1622', d: '#1a0c16', e: '#0e060c',
+    a: '#7a4258', b: '#4c2a3c', c: '#321a28', d: '#1e0e18', e: '#10060c',
     o: '#fff0d8', g: '#ff8a3a', h: '#c03a1a', k: '#d8606a', l: '#963040',
   }),
   recolor(ZERO_PAL, {
-    a: '#3e4a4e', b: '#283234', c: '#1a2224', d: '#101618', e: '#080c0c',
+    a: '#56666a', b: '#323e42', c: '#20292c', d: '#13191b', e: '#090d0e',
     p: '#fff6dc', q: '#e0c88a', s: '#a8884a', t: '#6a5428',
     o: '#fffbe0', g: '#ffd84a', h: '#c08a10', k: '#e0c060', l: '#a08030',
   }),
   recolor(ZERO_PAL, {
-    a: '#4e2c6c', b: '#341c4c', c: '#221034', d: '#140820', e: '#0a0412',
+    a: '#683a8e', b: '#40225c', c: '#2a143e', d: '#180a26', e: '#0c0414',
     p: '#f4e8ff', q: '#c0a8e0', s: '#8068a8', t: '#4a3a70',
     o: '#ffe8ff', g: '#f070ff', h: '#a030d0', r: '#ff60f0', R: '#ffd0ff', k: '#d080ff', l: '#8a40c0',
   }),
@@ -910,6 +930,15 @@ function zeroPose(o = {}) {
     cloak.poly([[x0, Y(50)], [x1, Y(50)], [tipx, Y(50 + len)]]);
   }
   g.part(cloak, 'abcde', { edge: false });
+  // fold lines down the cloak
+  for (const [fx0, fx1, len] of [[22, 18 - sp, 22], [26, 24 - sp * 0.5, 24], [40, 44 + sp, 20]]) {
+    for (let j = 0; j < len; j++) {
+      const yy = Y(29) + j;
+      const xx = Math.round(X(fx0) + ((fx1 - fx0) * j) / len);
+      if (g.get(xx, yy) !== '.' && g.get(xx, yy) !== 'x') g.set(xx, yy, 'e');
+      if (g.get(xx - 1, yy) !== '.' && g.get(xx - 1, yy) !== 'x' && j % 3) g.set(xx - 1, yy, 'b');
+    }
+  }
   // the cloak parts in front over the void
   const slit = g.mask().poly([[X(31), Y(25)], [X(35), Y(25)], [X(37) + sp * 0.3, Y(52)], [X(29) - sp * 0.3, Y(52)]]);
   g.fill(slit.and(cloak), 'x');
@@ -951,7 +980,10 @@ function zeroPose(o = {}) {
   // front claw
   const fc = o.fClaw ?? [[39, 25], [43, 39]];
   zeroClaw(g, X(fc[0][0]), Y(fc[0][1]), X(fc[1][0]), Y(fc[1][1]), o.fCurl ?? -0.2);
-  return g.rows();
+  const rows = g.rows();
+  rows.lean = L; // the core glow overlay follows the body
+  rows.dy = D;
+  return rows;
 }
 
 const ZERO = {
@@ -1015,7 +1047,8 @@ function drawZeroday(ctx, e, x, y, t) {
       ox = k % 4 < 2 ? -1 : 1;
       break;
     case 'summon':
-      rows = ZERO.summon;
+      // Giga chip: gather the void, then throw the arms wide as the storm falls
+      rows = k < 12 ? ZERO.charge : ZERO.summon;
       break;
     default:
       rows = Math.floor(t / 18) % 2 ? ZERO.idle2 : ZERO.idle;
@@ -1030,9 +1063,8 @@ function drawZeroday(ctx, e, x, y, t) {
     withAlpha(ctx, 0.5, () => body(ctx, rows, pal, bx + (k % 2 ? 2 : -2), by, flip));
   } else body(ctx, rows, pal, bx, by, flip);
   // the void core pulses
-  const cx = fx(bx, 3 + (rows === ZERO.barrage ? -1 : rows === ZERO.charge ? -1 : rows === ZERO.beam ? -3 : rows === ZERO.smash ? 2 : 0), flip);
-  const cdy = rows === ZERO.crouch ? 5 : rows === ZERO.smash ? 4 : rows === ZERO.leap ? -2 : rows === ZERO.idle2 || rows === ZERO.charge || rows === ZERO.hurt ? 1 : 0;
-  const cy = by - ZH + 32 + cdy;
+  const cx = fx(bx, 3 + (rows.lean ?? 0), flip);
+  const cy = by - ZH + 32 + (rows.dy ?? 0);
   withAlpha(ctx, 0.35 + 0.2 * Math.sin(t / 5), () => disc(ctx, cx, cy, 4 + (t % 30 < 15 ? 1 : 0), core));
   // attack glows
   if (a === 'barragewind') {
@@ -1070,36 +1102,41 @@ function drawZeroday(ctx, e, x, y, t) {
 
 // ================================================================= BRIARIX
 
-// Materials: bark a-d, leaves l m n o, rose petals p q r s, visor v y, thorns t, x dark seams, w white.
+// Materials: bark a-d, cape e f g h (evergreen), leaves l m n o, rose petals p q r s, visor v y, thorns t,
+// x dark seams, w white.
 const BRIAR_PAL = Object.freeze({
-  a: '#d6a878', b: '#a8743f', c: '#784b26', d: '#4c2c14',
-  l: '#a6ee6e', m: '#5cc040', n: '#2e8a2c', o: '#1a5a22',
-  p: '#ffc4d6', q: '#ff6a96', r: '#d02c62', s: '#7a1238',
+  a: '#e0b07a', b: '#ae7640', c: '#7c4a24', d: '#4a2a12',
+  e: '#4a7a8a', f: '#2c5466', g: '#1a3746', h: '#0e2130',
+  l: '#d2f57c', m: '#7cc845', n: '#3a8a34', o: '#1c4c22',
+  p: '#ffd0e0', q: '#ff6a9a', r: '#d42a62', s: '#7a1238',
   v: '#f6ffa8', y: '#b6e030',
-  t: '#f2e2b4',
+  t: '#f6e8c0',
   x: '#1c140c', w: '#ffffff',
 });
 const BRIAR_PALS = [
   BRIAR_PAL,
   recolor(BRIAR_PAL, {
-    a: '#b49a7a', b: '#86684a', c: '#5a422c', d: '#382616',
-    l: '#8ae0c0', m: '#3eae8a', n: '#1e7a62', o: '#0e4a3c',
-    p: '#fff0b0', q: '#ffd040', r: '#e09a10', s: '#8a5a08',
+    a: '#c8a882', b: '#94704e', c: '#64462e', d: '#3c2816',
+    e: '#7a5a8a', f: '#563c68', g: '#38264a', h: '#22162e',
+    l: '#a8f0d0', m: '#48b890', n: '#227a64', o: '#0f4a3e',
+    p: '#fff2b8', q: '#ffd040', r: '#e0960e', s: '#8a5808',
   }),
   recolor(BRIAR_PAL, {
-    a: '#a8a4b4', b: '#7a7488', c: '#524c60', d: '#322e3e',
-    l: '#c8e870', m: '#8ab83a', n: '#5a8424', o: '#36561a',
-    p: '#e4f2ff', q: '#8ac0ff', r: '#4a7ae0', s: '#24408a',
+    a: '#b8b4c4', b: '#868096', c: '#5a546a', d: '#363244',
+    e: '#7a6a3a', f: '#5a4a24', g: '#3c3016', h: '#241c0c',
+    l: '#d8f080', m: '#98c040', n: '#608a26', o: '#38561a',
+    p: '#e8f4ff', q: '#8ac2ff', r: '#4a78e0', s: '#24408a',
     v: '#e0f4ff', y: '#7ab0f0',
   }),
   recolor(BRIAR_PAL, {
-    a: '#6c5a74', b: '#4a3c52', c: '#302638', d: '#1c1422',
-    l: '#6ab07a', m: '#3a7a4e', n: '#21502e', o: '#12321c',
-    p: '#ffd8ff', q: '#f070ff', r: '#b030d0', s: '#62188a',
-    v: '#ffd0ff', y: '#e060ff', t: '#e8c8ff',
+    a: '#7a6684', b: '#54445e', c: '#382c42', d: '#221828',
+    e: '#3c2c5c', f: '#281c42', g: '#180f2c', h: '#0c0818',
+    l: '#88d098', m: '#4a9060', n: '#2a5a3a', o: '#143420',
+    p: '#ffdcff', q: '#f070ff', r: '#b030d0', s: '#62188a',
+    v: '#ffd0ff', y: '#e060ff', t: '#ecd0ff',
   }),
 ];
-const BRIAR_GLOW = ['#ff6a96', '#ffd040', '#8ac0ff', '#e060ff'];
+const BRIAR_GLOW = ['#ff6a9a', '#ffd040', '#8ac2ff', '#e060ff'];
 
 const BW = 58;
 const BH = 58;
@@ -1109,6 +1146,10 @@ function rose(g, cx, cy, r = 2.6) {
   g.set(cx, cy, 's');
   g.set(cx - 1, cy, 'r');
   g.set(cx, cy - 1, 'q');
+  if (r >= 2.8) {
+    g.set(cx + 1, cy - 1, 'p');
+    g.set(cx - 1, cy + 1, 'r');
+  }
 }
 
 function leaf(g, x0, y0, x1, y1, w = 2.4, ramp = 'lmno') {
@@ -1116,24 +1157,23 @@ function leaf(g, x0, y0, x1, y1, w = 2.4, ramp = 'lmno') {
 }
 
 function lance(g, x0, y0, x1, y1) {
-  // a thorned wooden shaft with a rosebud spearhead at (x1, y1)
+  // a thorned wooden shaft with a leaf spearhead and a rosebud at (x1, y1)
   const len = Math.hypot(x1 - x0, y1 - y0) || 1;
   const ux = (x1 - x0) / len;
   const uy = (y1 - y0) / len;
-  g.part(g.mask().capsule(x0, y0, x1 - ux * 4, y1 - uy * 4, 1.3), 'abcd');
-  for (let k = 0.15; k < 0.85; k += 0.17) {
+  g.part(g.mask().capsule(x0, y0, x1 - ux * 4, y1 - uy * 4, 1.6), 'abcd');
+  for (let k = 0.12; k < 0.86; k += 0.14) {
     const tx = x0 + (x1 - x0) * k;
     const ty = y0 + (y1 - y0) * k;
     const side = Math.round(k * 10) % 2 ? 1 : -1;
-    g.set(tx - uy * 2 * side, ty + ux * 2 * side, 't');
+    g.set(tx - uy * 2.4 * side, ty + ux * 2.4 * side, 't');
   }
-  // the head: a leaf blade + a rose bud
-  g.part(g.mask().capsule(x1 - ux * 5, y1 - uy * 5, x1 + ux * 3, y1 + uy * 3, 2.2, 0.3), 'lmno');
-  rose(g, x1 - ux * 5, y1 - uy * 5, 2.2);
+  g.part(g.mask().capsule(x1 - ux * 5, y1 - uy * 5, x1 + ux * 4, y1 + uy * 4, 2.5, 0.3), 'lmno');
+  rose(g, x1 - ux * 5, y1 - uy * 5, 2.8);
 }
 
 // Pose keys: lean, dy, legs ('stand'|'kneel'|'stepA'|'stepB'), fArm/bArm [elbow, hand], lance [x0,y0,x1,y1] | null,
-// lanceBehind, bloom (crown size), mood.
+// lanceBehind, bloom (crown size), cape (sway), mood.
 function briarPose(o = {}) {
   const g = new Grid(BW, BH);
   const L = o.lean ?? 0;
@@ -1141,99 +1181,112 @@ function briarPose(o = {}) {
   const X = (v) => v + L;
   const Y = (v) => v + D;
   const legs = o.legs ?? 'stand';
-  // leaf cape behind
-  g.part(g.mask().poly([[X(24), Y(25)], [X(20), Y(26)], [X(14), Y(47)], [X(19), Y(45)], [X(21), Y(50)], [X(25), Y(44)], [X(28), Y(36)]]), 'mno', { bias: 1, edge: false });
+  const cs = o.cape ?? 0;
+  // evergreen cape behind
+  const cape = g.mask().poly([[X(26), Y(23)], [X(20), Y(24)], [X(12) - cs, Y(48)], [X(16) - cs, Y(47)], [X(17) - cs, Y(52)], [X(22) - cs, Y(47)], [X(25), Y(51)], [X(28), Y(40)]]);
+  g.part(cape, 'efgh', { edge: false });
   // back arm
-  const ba = o.bArm ?? [[22, 32], [21, 38]];
-  g.part(g.mask().capsule(X(24), Y(26), X(ba[0][0]), Y(ba[0][1]), 2.6), 'mno', { bias: 1 });
-  g.part(g.mask().capsule(X(ba[0][0]), Y(ba[0][1]), X(ba[1][0]), Y(ba[1][1]), 2.5, 2.3), 'abcd', { bias: 1 });
+  const ba = o.bArm ?? [[21, 32], [20, 38]];
+  g.part(g.mask().capsule(X(24), Y(26), X(ba[0][0]), Y(ba[0][1]), 2.8), 'abcd', { bias: 1 });
+  g.part(g.mask().capsule(X(ba[0][0]), Y(ba[0][1]), X(ba[1][0]), Y(ba[1][1]), 2.7, 2.5), 'abcd', { bias: 1 });
+  g.part(g.mask().ellipse(X(ba[1][0]), Y(ba[1][1]) + 1, 2.6, 2.4), 'lmno', { bias: 1 });
   if (o.lance && o.lanceBehind) lance(g, ...o.lance.map((v, i) => (i % 2 ? Y(v) : X(v))));
   // legs
   const LEGS = {
-    stand: { b: [[27, 40], [25, 47], [25, 52]], f: [[33, 40], [35, 47], [35, 52]], bb: 20, fb: 31, by: 51, fy: 51 },
-    stepA: { b: [[27, 40], [25, 47], [25, 52]], f: [[33, 40], [36, 45], [36, 49]], bb: 20, fb: 32, by: 51, fy: 48 },
-    stepB: { b: [[27, 40], [24, 45], [23, 49]], f: [[33, 40], [35, 47], [35, 52]], bb: 18, fb: 31, by: 48, fy: 51 },
-    kneel: { b: [[27, 44], [22, 52], [17, 53]], f: [[33, 44], [39, 45], [39, 52]], bb: 12, fb: 35, by: 51, fy: 51 },
+    stand: { b: [[27, 40], [25, 47], [24, 52]], f: [[34, 40], [36, 47], [36, 52]], bb: 18, fb: 31, by: 51, fy: 51 },
+    stepA: { b: [[27, 40], [25, 47], [24, 52]], f: [[34, 40], [37, 45], [37, 49]], bb: 18, fb: 32, by: 51, fy: 48 },
+    stepB: { b: [[27, 40], [24, 45], [22, 49]], f: [[34, 40], [36, 47], [36, 52]], bb: 16, fb: 31, by: 48, fy: 51 },
+    kneel: { b: [[27, 44], [21, 52], [16, 53]], f: [[34, 44], [40, 45], [40, 52]], bb: 10, fb: 35, by: 51, fy: 51 },
   }[legs];
   const leg = (pts, bias) => {
     const [h, k, a] = pts;
-    g.part(g.mask().capsule(X(h[0]) - L * 0.5, Y(h[1]) - D * 0.5, k[0], k[1], 3.2, 2.8), 'abcd', { bias });
-    g.part(g.mask().capsule(k[0], k[1], a[0], a[1], 2.8, 2.4), 'abcd', { bias });
-    leaf(g, k[0] - 2, k[1] - 2, k[0] + 3, k[1] + 1, 2.2);
+    g.part(g.mask().capsule(X(h[0]) - L * 0.5, Y(h[1]) - D * 0.5, k[0], k[1], 3.5, 3), 'abcd', { bias });
+    g.part(g.mask().capsule(k[0], k[1], a[0], a[1], 3, 2.6), 'abcd', { bias });
+    leaf(g, k[0] - 2, k[1] - 2, k[0] + 4, k[1] + 1, 2.4);
   };
   leg(LEGS.b, 1);
-  g.part(g.mask().rect(LEGS.bb, LEGS.by, 10, 6, 2), 'abcd', { bias: 1 });
+  g.part(g.mask().rect(LEGS.bb, LEGS.by, 12, 6, 2), 'abcd', { bias: 1 });
   leg(LEGS.f, 0);
-  g.part(g.mask().rect(LEGS.fb, LEGS.fy, 11, 6, 2), 'abcd');
-  g.stamp(LEGS.fb + 8, LEGS.fy + 3, art('ttt'));
+  g.part(g.mask().rect(LEGS.fb, LEGS.fy, 12, 6, 2), 'abcd');
+  g.stamp(LEGS.fb + 9, LEGS.fy + 3, art('ttt'));
   // leaf skirt
-  const sk = g.mask().poly([[X(23), Y(35)], [X(38), Y(35)], [X(40), Y(43)], [X(36), Y(41)], [X(33), Y(45)], [X(30), Y(41)], [X(27), Y(45)], [X(24), Y(41)], [X(21), Y(43)]]);
+  const sk = g.mask().poly([[X(22), Y(35)], [X(39), Y(35)], [X(42), Y(44)], [X(37), Y(41)], [X(34), Y(46)], [X(30.5), Y(41)], [X(27), Y(46)], [X(24), Y(41)], [X(19), Y(44)]]);
   g.part(sk, 'lmno');
-  // bark breastplate with a rose emblem
-  const chest = g.mask().ellipse(X(30.5), Y(29), 8, 7.5).rect(X(24), Y(30), 13, 7, 3);
+  // broad bark breastplate with a rose emblem and vine tracery
+  const chest = g.mask().ellipse(X(30.5), Y(28.5), 9, 8).rect(X(23), Y(30), 15, 7, 3);
   g.part(chest, 'abcd');
-  g.stamp(X(23), Y(23), art(`
-    ...............
-    ...............
-    .......x.......
-    ......x.x......
-    ...............
-    ..........x....
-    .....x.........
-    ...............
-    ...............
-    ...............
-    ..xxxxxxxxxxx..
+  g.stamp(X(22), Y(22), art(`
+    .................
+    .................
+    ........x........
+    .......x.x.......
+    .................
+    ...n..........n..
+    ....n........n...
+    .....nn....nn....
+    .......nnnn......
+    .................
+    .................
+    ...xxxxxxxxxxx...
   `));
-  rose(g, X(32), Y(29), 2.8);
-  leaf(g, X(29), Y(31), X(25), Y(33), 1.6);
-  // pauldron of layered leaves (back)
-  leaf(g, X(26), Y(24), X(19), Y(27), 3);
+  rose(g, X(31), Y(28.5), 3.4);
+  leaf(g, X(28), Y(30.5), X(24), Y(32.5), 1.7);
+  leaf(g, X(34), Y(30.5), X(37.5), Y(32.5), 1.7);
+  // back pauldron: layered leaves
+  leaf(g, X(26), Y(23), X(17), Y(27), 3.6);
+  leaf(g, X(25), Y(25), X(19), Y(31), 2.6, 'mno');
   // helm
   const hy = Y(15);
-  const helm = g.mask().ellipse(X(31), hy, 6.8, 7).rect(X(25), hy, 13, 7, 3);
+  const helm = g.mask().ellipse(X(31), hy, 7.2, 7.2).rect(X(24.5), hy, 14, 7, 3);
   g.part(helm, 'abcd');
   const mood = o.mood ?? 'idle';
   const vis = mood === 'hurt' ? 'xyxxyx' : mood === 'fierce' ? 'vvvvvv' : 'xvvxvv';
   g.stamp(X(29), hy - 1, art(`
-    ..........
-    ..xxxxxxx.
-    ..${vis}x
-    ..xxxxxxx.
-    ..........
-    .....x.x..
+    ...........
+    ..xxxxxxxx.
+    ..${vis}xx
+    ..xxxxxxxx.
+    ...........
+    ....xx.xx..
   `));
-  // crown of roses and leaves
+  // crown: a thorn circlet of roses and leaves
   const bl = o.bloom ?? 0;
-  leaf(g, X(26), hy - 5, X(21), hy - 10 - bl, 2.2);
-  leaf(g, X(36), hy - 6, X(40), hy - 11 - bl, 2.2);
-  rose(g, X(25), hy - 7 - bl * 0.5, 2.6 + bl * 0.3);
-  rose(g, X(30), hy - 9 - bl, 2.9 + bl * 0.4);
-  rose(g, X(35.5), hy - 8 - bl * 0.6, 2.6 + bl * 0.3);
-  // front pauldron: big leaf
-  leaf(g, X(34), Y(23), X(41), Y(27), 3.2);
+  leaf(g, X(26), hy - 5, X(19), hy - 10 - bl, 2.4);
+  leaf(g, X(36), hy - 6, X(42), hy - 11 - bl, 2.4);
+  g.stamp(X(24), hy - 6, art('t.....t.....t'));
+  rose(g, X(24.5), hy - 6 - bl * 0.4, 2.8 + bl * 0.3);
+  rose(g, X(28.5), hy - 9 - bl * 0.8, 3 + bl * 0.35);
+  rose(g, X(33), hy - 9.5 - bl, 3.2 + bl * 0.4);
+  rose(g, X(37.5), hy - 7 - bl * 0.6, 2.8 + bl * 0.3);
+  // front pauldron: a big leaf over a smaller one
+  leaf(g, X(33), Y(25), X(40), Y(31), 2.8, 'mno');
+  leaf(g, X(34), Y(22), X(44), Y(27), 3.8);
   // front arm
-  const fa = o.fArm ?? [[39, 31], [40, 37]];
-  g.part(g.mask().capsule(X(37), Y(26), X(fa[0][0]), Y(fa[0][1]), 2.6), 'lmno');
-  g.part(g.mask().capsule(X(fa[0][0]), Y(fa[0][1]), X(fa[1][0]), Y(fa[1][1]), 2.6, 2.4), 'abcd');
-  g.stamp(X(fa[0][0]) - 1, Y(fa[0][1]) - 1, art('t.t'));
+  const fa = o.fArm ?? [[40, 31], [41, 37]];
+  g.part(g.mask().capsule(X(37), Y(26), X(fa[0][0]), Y(fa[0][1]), 2.8), 'abcd');
+  g.part(g.mask().capsule(X(fa[0][0]), Y(fa[0][1]), X(fa[1][0]), Y(fa[1][1]), 2.8, 2.6), 'abcd');
+  g.stamp(X(fa[0][0]) - 2, Y(fa[0][1]) - 1, art(`
+    n.n.n
+    .n.n.
+  `));
+  g.part(g.mask().ellipse(X(fa[1][0]), Y(fa[1][1]) + 1, 2.8, 2.5), 'lmno');
   if (o.lance && !o.lanceBehind) lance(g, ...o.lance.map((v, i) => (i % 2 ? Y(v) : X(v))));
   return g.rows();
 }
 
 const BRIAR = {
-  idle: briarPose({ lance: [44, 52, 44, 8] }),
-  idle2: briarPose({ lance: [44, 52, 44, 8], dy: 1, fArm: [[39, 32], [40, 38]] }),
-  stepA: briarPose({ legs: 'stepA', lance: [44, 51, 45, 8], dy: 1 }),
-  stepB: briarPose({ legs: 'stepB', lance: [44, 51, 43, 8], dy: 1 }),
-  plant: briarPose({ lean: -1, fArm: [[39, 21], [37, 14]], lance: [33, 2, 41, 40], mood: 'fierce' }),
-  stab: briarPose({ lean: 2, dy: 2, legs: 'stand', fArm: [[42, 31], [45, 38]], lance: [36, 26, 52, 55], mood: 'fierce' }),
-  bloom: briarPose({ fArm: [[40, 22], [42, 15]], bArm: [[20, 22], [18, 15]], bloom: 3, lance: null, mood: 'fierce' }),
-  storm: briarPose({ fArm: [[42, 27], [48, 25]], bArm: [[19, 27], [13, 25]], bloom: 4, lance: null, mood: 'fierce' }),
-  grow: briarPose({ legs: 'kneel', dy: 5, lean: 1, fArm: [[41, 38], [44, 50]], lance: [20, 52, 24, 14], lanceBehind: true }),
-  taunt: briarPose({ lance: [46, 52, 46, 8], fArm: [[40, 30], [44, 34]], bArm: [[20, 31], [24, 36]], bloom: 1 }),
-  hurt: briarPose({ lean: -3, dy: 1, lance: [42, 52, 46, 10], mood: 'hurt' }),
-  summon: briarPose({ fArm: [[41, 27], [46, 24]], lance: [38, 34, 56, 10], bloom: 2, mood: 'fierce' }),
+  idle: briarPose({ lance: [45, 52, 45, 6] }),
+  idle2: briarPose({ lance: [45, 52, 45, 6], dy: 1, cape: 1, fArm: [[40, 32], [41, 38]] }),
+  stepA: briarPose({ legs: 'stepA', lance: [45, 51, 46, 6], dy: 1, cape: 2 }),
+  stepB: briarPose({ legs: 'stepB', lance: [45, 51, 44, 6], dy: 1, cape: 1 }),
+  plant: briarPose({ lean: -1, fArm: [[40, 21], [38, 14]], lance: [34, 1, 42, 40], mood: 'fierce', cape: 1 }),
+  stab: briarPose({ lean: 2, dy: 2, fArm: [[43, 31], [46, 38]], lance: [37, 26, 53, 55], mood: 'fierce', cape: 3 }),
+  bloom: briarPose({ fArm: [[41, 22], [43, 15]], bArm: [[19, 22], [17, 15]], bloom: 3, lance: null, mood: 'fierce' }),
+  storm: briarPose({ fArm: [[43, 27], [49, 25]], bArm: [[18, 27], [12, 25]], bloom: 4, lance: null, mood: 'fierce', cape: 3 }),
+  grow: briarPose({ legs: 'kneel', dy: 5, lean: 1, fArm: [[42, 38], [45, 50]], lance: [20, 52, 24, 12], lanceBehind: true, cape: 2 }),
+  taunt: briarPose({ lance: [47, 52, 47, 6], fArm: [[41, 30], [45, 34]], bArm: [[19, 31], [23, 36]], bloom: 1 }),
+  hurt: briarPose({ lean: -3, dy: 1, lance: [43, 52, 47, 8], mood: 'hurt', cape: 2 }),
+  summon: briarPose({ fArm: [[42, 27], [47, 24]], lance: [39, 34, 57, 9], bloom: 2, mood: 'fierce', cape: 2 }),
 };
 
 function drawBriarix(ctx, e, x, y, t) {
@@ -1275,7 +1328,8 @@ function drawBriarix(ctx, e, x, y, t) {
       ox = k % 4 < 2 ? -1 : 1;
       break;
     case 'summon':
-      rows = BRIAR.summon;
+      // Navi chip: raise the lance, then drive it home as the roots lash out
+      rows = k < 12 ? BRIAR.plant : k < 52 ? BRIAR.stab : BRIAR.summon;
       break;
     default:
       rows = Math.floor(t / 22) % 2 ? BRIAR.idle2 : BRIAR.idle;
@@ -1363,6 +1417,553 @@ function drawThornBud(ctx, e, x, y, t) {
   if (a === 'aim' && k % 4 < 2) withAlpha(ctx, 0.6, () => disc(ctx, x, y - 24, 3, BRIAR_GLOW[L - 1]));
 }
 
+// ================================================================= spells
+
+// Floor point of panel (c, r) relative to the spell's own floor point, so per-cell drawing works both in
+// battle and on the contact sheet.
+function cellPoint(s, x, y, c, r) {
+  const a = floorPoint(c, r);
+  const b = floorPoint(s.x ?? 0, s.y ?? 0);
+  return { x: x + a.x - b.x, y: y + a.y - b.y };
+}
+
+function cellsOf(s) {
+  const cells = s.data?.cells;
+  return cells && cells.length ? cells : [[s.x ?? 0, s.y ?? 0]];
+}
+
+// --- Ironclad
+
+// The launched piston fist, seen at full size: a cylinder stub over a huge riveted gauntlet, knuckles down.
+const FIST_ROWS = (() => {
+  const g = new Grid(27, 32);
+  ironForearm(g, 13.5, 0, 13.5, 13, 3.5);
+  g.part(g.mask().rect(2, 12, 23, 18, 5), 'abcde');
+  g.stamp(2, 12, art(`
+    .......................
+    ...r..............r....
+    .......................
+    .......................
+    ..xxxxxxxxxxxxxxxxxxx..
+    .xaab.xaab.xaab.xabbx..
+    .xbbb.xbbb.xbbc.xbccx..
+    .xbbc.xbbc.xbcc.xbccx..
+    .xbbc.xbbc.xbcc.xccdx..
+    .xbcc.xbcc.xccd.xcddx..
+    .xbcc.xbcc.xccd.xcddx..
+    .xccd.xccd.xcdd.xddex..
+    .xccd.xccd.xcdd.xddex..
+    .xddd.xddd.xddd.xdeex..
+    ..xxxxxxxxxxxxxxxxxx...
+  `));
+  // thumb plate on the front side
+  g.part(g.mask().rect(20, 15, 6, 9, 2), 'abcde');
+  g.stamp(21, 16, art(`
+    ....
+    .r..
+  `));
+  return g.rows();
+})();
+const SAW_FRAMES = [0, 1 / 3, 2 / 3].map((ph) => {
+  const g = new Grid(25, 25);
+  ironSaw(g, 12.5, 12.5, 9.5, true, ph);
+  return g.rows();
+});
+
+function drawPiston(ctx, s, x, y, t) {
+  const L = lv(s.data);
+  const pal = IRON_PALS[L - 1];
+  const gc = IRON_GLOW[L - 1];
+  if (!s.data?.landed) {
+    const p = Math.max(0, Math.min(1, s.data?.progress ?? 0));
+    // the shadow of the falling fist grows; a warning ring blinks faster as it nears
+    withAlpha(ctx, 0.25 + 0.45 * p, () => ellipse(ctx, x, y - 1, 6 + Math.round(12 * p), 2 + Math.round(5 * p), '#05060c'));
+    const blink = p > 0.7 ? 2 : p > 0.4 ? 4 : 8;
+    if (Math.floor(t / blink) % 2 === 0) {
+      withAlpha(ctx, 0.85, () => {
+        ellipse(ctx, x, y - 1, 19 - Math.round(4 * p), 7 - Math.round(p), gc);
+        ellipse(ctx, x, y - 1, 17 - Math.round(4 * p), 5 - Math.round(p), '#05060c');
+      });
+    }
+    if (p > 0.72) {
+      const z = Math.round(((1 - p) / 0.28) * 120);
+      sprite(ctx, FIST_ROWS, pal, x, y - z, { anchor: 'feet', outline: OUT });
+    }
+    return;
+  }
+  const age = (s.t ?? 0) - (s.data.delay ?? 0) - 1;
+  const z = age < 6 ? 0 : (age - 6) * 14;
+  withAlpha(ctx, age < 6 ? 1 : Math.max(0, 1 - (age - 6) / 8), () => sprite(ctx, FIST_ROWS, pal, x, y - z, { anchor: 'feet', outline: OUT }));
+}
+
+function drawSawblade(ctx, s, x, y, t) {
+  const L = lv(s.data);
+  const frame = SAW_FRAMES[Math.floor((s.t ?? t) / 2) % 3];
+  const rows = (s.dir ?? -1) < 0 ? frame : flipRows(frame);
+  const z = 12 + Math.round(Math.sin((s.t ?? t) / 3));
+  // sparks off the floor
+  if ((s.t ?? t) % 3 === 0) {
+    const d = -(s.dir ?? -1);
+    px(ctx, x + d * 6, y - 2, '#ffe9a0');
+    px(ctx, x + d * 8, y - 4, IRON_GLOW[L - 1]);
+  }
+  withAlpha(ctx, 0.35, () => ellipse(ctx, x, y - 1, 7, 2, '#05060c'));
+  sprite(ctx, rows, IRON_PALS[L - 1], x, y - z + 10, { anchor: 'feet', outline: OUT });
+}
+
+// --- Sabre
+
+const SLASH_COL = [
+  ['#ff3a5e', '#ff9ac0'],
+  ['#3a9cff', '#b4ecff'],
+  ['#ffb02a', '#fff2a8'],
+  ['#d040ff', '#ffc0ff'],
+];
+
+function drawSabreWave(ctx, s, x, y, t) {
+  const [c0, c1] = SLASH_COL[lv(s.data) - 1];
+  const d = s.dir ?? -1;
+  const cy = y - 15;
+  // a crescent of light (bulging forward), a white inner edge and fading afterimages
+  for (let k = 3; k >= 1; k--) {
+    withAlpha(ctx, 0.18 * (4 - k), () => {
+      for (let i = -11; i <= 11; i++) {
+        const bow = Math.round(Math.sqrt(Math.max(0, 121 - i * i)) * 0.6);
+        rect(ctx, x + d * (bow - k * 6) - (d < 0 ? 1 : 0), cy + i, 2, 1, c0);
+      }
+    });
+  }
+  for (let i = -12; i <= 12; i++) {
+    const bow = Math.round(Math.sqrt(Math.max(0, 144 - i * i)) * 0.6);
+    const w = Math.abs(i) > 9 ? 1 : 3;
+    rect(ctx, x + d * bow - (d < 0 ? w - 1 : 0), cy + i, w, 1, c0);
+    px(ctx, x + d * (bow + (d > 0 ? w : -w)), cy + i, c1);
+    if (Math.abs(i) < 8) px(ctx, x + d * (bow + (d > 0 ? w - 1 : -w + 1)), cy + i, '#ffffff');
+  }
+}
+
+// --- ZeroDay
+
+function drawNullShot(ctx, s, x, y, t) {
+  const L = lv(s.data);
+  const core = ZERO_CORE[L - 1];
+  if (s.data?.landed) {
+    withAlpha(ctx, 0.5, () => ellipse(ctx, x, y - 1, 8, 3, '#05030a'));
+    return;
+  }
+  const p = Math.max(0, Math.min(1, s.data?.progress ?? 0));
+  // a marked panel: a spinning dark diamond and converging motes
+  const r = 9 - Math.round(4 * p);
+  const spin = Math.floor(t / 3) % 2;
+  withAlpha(ctx, 0.35 + 0.4 * p, () => ellipse(ctx, x, y - 1, r, Math.max(2, Math.round(r * 0.45)), '#0a0418'));
+  const dx = spin ? r : r - 2;
+  const dy = Math.round(dx * 0.45);
+  line(ctx, x - dx, y - 1, x, y - 1 - dy, core);
+  line(ctx, x, y - 1 - dy, x + dx, y - 1, core);
+  line(ctx, x + dx, y - 1, x, y - 1 + dy, core);
+  line(ctx, x, y - 1 + dy, x - dx, y - 1, core);
+  px(ctx, x, y - 1, '#ffffff');
+  // the bolt drops in over the last frames
+  if (p > 0.55) {
+    const k = (p - 0.55) / 0.45;
+    const top = y - 100 + Math.round(k * 92);
+    withAlpha(ctx, 0.5, () => rect(ctx, x - 1, top - 30, 3, 18, core));
+    rect(ctx, x - 3, top - 14, 7, 14, '#05020a');
+    rect(ctx, x - 3, top - 14, 1, 14, core);
+    rect(ctx, x + 3, top - 14, 1, 14, core);
+    disc(ctx, x, top, 3, '#05020a');
+    ring(ctx, x, top, 3, core);
+    px(ctx, x, top, '#ffffff');
+  }
+}
+
+function drawVoidWave(ctx, s, x, y, t) {
+  const L = lv(s.data);
+  const core = ZERO_CORE[L - 1];
+  const dark = ZERO_DARK[L - 1];
+  const k = s.t ?? t;
+  // the floor tears: a dark gash with void crystals spiking up through it
+  withAlpha(ctx, 0.6, () => ellipse(ctx, x, y - 1, 17, 4, '#06020c'));
+  const spikes = [[-12, 14], [-6, 24], [0, 18], [6, 26], [12, 15]];
+  for (let i = 0; i < spikes.length; i++) {
+    const [ox, h0] = spikes[i];
+    const h = Math.max(4, h0 - ((k + i * 5) % 9));
+    poly(ctx, [[x + ox - 4, y], [x + ox, y - h], [x + ox + 4, y]], '#08030f');
+    poly(ctx, [[x + ox - 2, y - 1], [x + ox, y - h + 3], [x + ox + 2, y - 1]], dark);
+    line(ctx, x + ox, y - h, x + ox + 3, y - 1, core);
+    px(ctx, x + ox, y - h, '#ffffff');
+  }
+  if (k % 4 < 2) {
+    px(ctx, x - 15, y - 6 - (k % 6), core);
+    px(ctx, x + 14, y - 9 - (k % 5), core);
+  }
+}
+
+function drawVoidWarn(ctx, s, x, y, t) {
+  const L = lv(s.data);
+  const core = ZERO_CORE[L - 1];
+  const p = s.data?.progress ?? 0;
+  const blink = p > 0.75 ? 2 : p > 0.45 ? 4 : 7;
+  const on = Math.floor(t / blink) % 2 === 0;
+  const d = s.data?.dir ?? -1;
+  for (const [c, r] of cellsOf(s)) {
+    const q = cellPoint(s, x, y, c, r);
+    withAlpha(ctx, (on ? 0.32 : 0.16) + 0.2 * p, () => rect(ctx, q.x - 19, q.y - 15, 38, 18, '#3a0830'));
+    if (on) {
+      // chevrons point the way the beam will travel
+      const cx = q.x + ((t * 2) % 20) * d - 10 * d;
+      line(ctx, cx, q.y - 10, cx + d * 4, q.y - 6, core);
+      line(ctx, cx + d * 4, q.y - 6, cx, q.y - 2, core);
+    }
+  }
+}
+
+function drawVoidBeam(ctx, s, x, y, t) {
+  const L = lv(s.data);
+  const core = ZERO_CORE[L - 1];
+  const dark = ZERO_DARK[L - 1];
+  const cells = cellsOf(s);
+  const d = s.data?.dir ?? -1;
+  const from = s.data?.fromCol ?? cells[0][0] + 3;
+  const row = cells[0][1];
+  const o = cellPoint(s, x, y, from, row);
+  const age = s.t ?? t;
+  const life = s.data?.frames ?? 30;
+  const grow = Math.min(1, age / 4);
+  const fade = Math.min(1, Math.max(0, (life - age) / 6));
+  const th = Math.max(1, Math.round((10 + (age % 4 < 2 ? 1 : 0)) * grow * fade));
+  const x0 = o.x + d * 10;
+  const x1 = d < 0 ? -10 : 260;
+  const cy = o.y - 13;
+  const lx = Math.min(x0, x1);
+  const w = Math.abs(x1 - x0);
+  withAlpha(ctx, 0.45, () => rect(ctx, lx, cy - th - 3, w, th * 2 + 7, dark));
+  rect(ctx, lx, cy - th, w, th * 2 + 1, '#08020f');
+  rect(ctx, lx, cy - th, w, 1, core);
+  rect(ctx, lx, cy + th, w, 1, core);
+  if (th > 3) rect(ctx, lx, cy - 1, w, 3, age % 3 ? '#160628' : core);
+  // crackle
+  for (let i = 0; i < 8; i++) {
+    const sx = x0 + d * ((i * 29 + age * 7) % 220);
+    px(ctx, sx, cy - th - 1 - ((i + age) % 3), core);
+    px(ctx, sx + 3, cy + th + 1 + ((i * 2 + age) % 3), '#ffffff');
+  }
+  // the muzzle at ZeroDay's claws
+  disc(ctx, x0, cy, th + 3, '#08020f');
+  ring(ctx, x0, cy, th + 3, core);
+  if (age % 4 < 2) ring(ctx, x0, cy, th + 5, '#ffffff');
+}
+
+// --- Briarix
+
+const PETAL_COL = [
+  ['#ff6a96', '#ffc4d6', '#d02c62'],
+  ['#ffd040', '#fff0b0', '#e09a10'],
+  ['#8ac0ff', '#e4f2ff', '#4a7ae0'],
+  ['#f070ff', '#ffd8ff', '#b030d0'],
+];
+
+function drawRoots(ctx, s, x, y, t) {
+  const L = lv(s.data);
+  const bark = ['#ae7640', '#94704e', '#868096', '#54445e'][L - 1];
+  const barkL = ['#e0b07a', '#c8a882', '#b8b4c4', '#7a6684'][L - 1];
+  const barkD = ['#4a2a12', '#3c2816', '#363244', '#221828'][L - 1];
+  const leafC = ['#7cc845', '#48b890', '#98c040', '#4a9060'][L - 1];
+  const glowC = ['#d6ff5a', '#ffe060', '#9ad8ff', '#f080ff'][L - 1];
+  if (!s.data?.landed) {
+    const p = Math.max(0, Math.min(1, s.data?.progress ?? 0));
+    // the soil heaves: a mound swells, glowing cracks spread, shoots wriggle out
+    // (wide enough to show around the feet of whoever stands there)
+    withAlpha(ctx, 0.5 + 0.3 * p, () => ellipse(ctx, x, y - 2, 8 + Math.round(10 * p), 3 + Math.round(4 * p), barkD));
+    const blink = p > 0.7 ? 2 : p > 0.4 ? 4 : 7;
+    const lit = Math.floor(t / blink) % 2 === 0;
+    for (let i = 0; i < 8; i++) {
+      const a = i * 0.785 + 0.2;
+      const len = 6 + p * 13;
+      const ex = x + Math.round(Math.cos(a) * len);
+      const ey = y - 2 + Math.round(Math.sin(a) * len * 0.42);
+      const mx = x + Math.round(Math.cos(a + 0.35) * len * 0.55);
+      const my = y - 2 + Math.round(Math.sin(a + 0.35) * len * 0.23);
+      line(ctx, x, y - 2, mx, my, lit ? glowC : barkD);
+      line(ctx, mx, my, ex, ey, lit ? glowC : barkD);
+    }
+    if (p > 0.25) {
+      for (const [ox, ph] of [[-14, 0], [13, 2], [-8, 5], [9, 3]]) {
+        const h = Math.round((p - 0.25) * 14) + (Math.floor((t + ph) / 4) % 2);
+        rect(ctx, x + ox, y - 2 - h, 1, h + 1, leafC);
+        px(ctx, x + ox + (ph % 2 ? 1 : -1), y - 2 - h, leafC);
+      }
+    }
+    if (Math.floor(t / 3) % 2 === 0) {
+      px(ctx, x - 4, y - 3 - Math.round(p * 4), bark);
+      px(ctx, x + 5, y - 2 - Math.round(p * 3), bark);
+    }
+    return;
+  }
+  const age = (s.t ?? 0) - (s.data.delay ?? 0) - 1;
+  const caught = !!s.data.caught;
+  const hold = caught ? 58 : 3;
+  const up = Math.min(1, (age + 1) / 4);
+  const down = age > hold ? Math.max(0, 1 - (age - hold) / 10) : 1;
+  const k = up * down;
+  if (k <= 0) return;
+  // thick thorned roots burst up and curl in around the panel; caught prey gets squeezed
+  const sq = caught && age > 4 ? Math.round(Math.sin(age / 4)) : 0;
+  const roots = [[-12, 22, 0.55], [-6, 30, 0.22], [5, 28, -0.25], [12, 21, -0.6]];
+  for (const [ox, h0, lean] of roots) {
+    const h = Math.round(h0 * k);
+    let tx = x + ox;
+    let ty = y;
+    for (let j = 0; j < h; j++) {
+      const sx = x + ox + Math.round(Math.sin(j / 5 + ox) * 1.5 + lean * j * (0.5 + 0.02 * j)) + (j > h0 * 0.5 ? sq * Math.sign(-ox) : 0);
+      const sy = y - j;
+      const w = j < h0 * 0.6 ? 2 : 1;
+      rect(ctx, sx - w, sy, w * 2 + 1, 1, barkD);
+      rect(ctx, sx - w + 1, sy, Math.max(1, w * 2 - 1), 1, bark);
+      px(ctx, sx - w + 1, sy, barkL);
+      if (j % 6 === 4) px(ctx, sx + (ox < 0 ? -w - 1 : w + 1), sy, '#f6e8c0');
+      tx = sx;
+      ty = sy;
+    }
+    rect(ctx, tx - 1, ty - 2, 3, 2, leafC);
+    px(ctx, tx + (ox < 0 ? 2 : -2), ty - 1, leafC);
+  }
+}
+
+function drawPetalZone(ctx, s, x, y, t, warn) {
+  const [c0, c1, c2] = PETAL_COL[lv(s.data) - 1];
+  const age = s.t ?? t;
+  for (const [c, r] of cellsOf(s)) {
+    const q = cellPoint(s, x, y, c, r);
+    if (warn) {
+      // petals gather: a slow ring on the floor and a few petals circling
+      const p = s.data?.progress ?? 0;
+      withAlpha(ctx, 0.35 + 0.35 * p, () => {
+        ellipse(ctx, q.x, q.y - 1, 15, 5, c2);
+        ellipse(ctx, q.x, q.y - 1, 13, 4, '#00000000');
+      });
+      for (let i = 0; i < 5; i++) {
+        const a = age * 0.12 + (i / 5) * Math.PI * 2 + c;
+        const px0 = q.x + Math.round(Math.cos(a) * 12);
+        const py0 = q.y - 4 - Math.round(p * 10) + Math.round(Math.sin(a) * 4);
+        rect(ctx, px0, py0, 2, 2, i % 2 ? c0 : c1);
+      }
+      continue;
+    }
+    // the storm: a whirling column of petals with white gusts
+    for (let i = 0; i < 3; i++) {
+      const a = age * 0.45 + i * 2.1;
+      const hy = q.y - 6 - i * 9;
+      const ax = q.x + Math.round(Math.cos(a) * 14);
+      const ay = hy + Math.round(Math.sin(a) * 4);
+      withAlpha(ctx, 0.7, () => line(ctx, ax, ay, ax + Math.round(Math.cos(a + 1.4) * 8), ay + Math.round(Math.sin(a + 1.4) * 3), '#ffffff'));
+    }
+    for (let i = 0; i < 16; i++) {
+      const a = age * 0.35 + (i / 16) * Math.PI * 2 * 3 + c;
+      const rad = 5 + (i % 4) * 3.5;
+      const hgt = 2 + ((i * 11 + age * 1.5) % 30);
+      const px0 = q.x + Math.round(Math.cos(a) * rad);
+      const py0 = q.y - Math.round(hgt) + Math.round(Math.sin(a) * 3);
+      const col = i % 3 === 0 ? c1 : i % 3 === 1 ? c0 : c2;
+      rect(ctx, px0, py0, 2, 2, col);
+      px(ctx, px0 + (i % 2 ? 2 : -1), py0 + 1, c2);
+    }
+  }
+}
+
+function drawBriarThorn(ctx, s, x, y, t) {
+  const L = lv(s.data);
+  const d = s.dir ?? -1;
+  const cy = y - 13;
+  const bark = ['#ae7640', '#94704e', '#868096', '#54445e'][L - 1];
+  const tip = '#f6e8c0';
+  withAlpha(ctx, 0.5, () => rect(ctx, x - d * 12 - (d < 0 ? 0 : 6), cy, 7, 1, PETAL_COL[L - 1][0]));
+  rect(ctx, x - d * 5 - (d < 0 ? 0 : 7), cy - 1, 8, 3, '#2a1608');
+  rect(ctx, x - d * 4 - (d < 0 ? 0 : 5), cy, 6, 1, bark);
+  poly(ctx, [[x + d * 2, cy - 2], [x + d * 8, cy], [x + d * 2, cy + 2]], tip);
+  px(ctx, x - d * 3, cy - 2, tip);
+  px(ctx, x - d * 1, cy + 2, tip);
+}
+
+// ================================================================= effects
+
+function fxLevel(f) {
+  return lv(f);
+}
+
+// Dust puffs: n discs drifting outward and up from (x, y).
+function dust(ctx, x, y, age, dur, n, spread, color) {
+  const k = age / dur;
+  withAlpha(ctx, Math.max(0, 0.8 * (1 - k)), () => {
+    for (let i = 0; i < n; i++) {
+      const a = Math.PI + (i / (n - 1)) * Math.PI;
+      const dx = Math.round(Math.cos(a) * spread * (0.4 + k));
+      const dy = Math.round(Math.sin(a) * spread * 0.35 * (0.4 + k)) - Math.round(k * 4);
+      disc(ctx, x + dx, y + dy, 2 + Math.round(k * 3) + (i % 2), color);
+    }
+  });
+}
+
+function debris(ctx, x, y, age, n, color, seed = 0, power = 1) {
+  for (let i = 0; i < n; i++) {
+    const vx = Math.cos(i * 2.3 + seed) * (1.2 + (i % 3) * 0.5) * power;
+    const vy = -(2.6 + (i % 4) * 0.6) * power;
+    const dx = Math.round(vx * age);
+    const dy = Math.round(vy * age + 0.25 * age * age);
+    if (dy > 2) continue;
+    rect(ctx, x + dx, y + dy, 2, 2, color);
+  }
+}
+
+const FX = {
+  pistonhit: {
+    duration: 22,
+    draw(ctx, f, x, y, age) {
+      const gc = IRON_GLOW[fxLevel(f) - 1];
+      if (age < 3) withAlpha(ctx, 0.8, () => ellipse(ctx, x, y - 2, 18, 7, '#fff4d0'));
+      withAlpha(ctx, Math.max(0, 1 - age / 14), () => ring(ctx, x, y - 1, 6 + age * 2, gc));
+      dust(ctx, x, y - 2, age, 22, 6, 20, '#b8b0a4');
+      debris(ctx, x, y - 2, age, 7, '#6a6258', 0.7);
+    },
+  },
+  ironsteam: {
+    duration: 18,
+    draw(ctx, f, x, y, age) {
+      const d = f.dir ?? 1;
+      const k = age / 18;
+      withAlpha(ctx, Math.max(0, 0.75 * (1 - k)), () => {
+        for (let i = 0; i < 4; i++) {
+          disc(ctx, x + d * (12 + i * 2) + Math.round((i - 1.5) * k * 10), y - 48 - i * 3 - Math.round(k * 12), 2 + Math.round(k * 4), '#eef2f8');
+        }
+      });
+      if (age < 6) {
+        const gc = IRON_GLOW[fxLevel(f) - 1];
+        disc(ctx, x + d * 14, y - 48 - age * 3, 3, gc);
+        disc(ctx, x + d * 14, y - 48 - age * 3, 1, '#ffffff');
+      }
+    },
+  },
+  ironquake: {
+    duration: 22,
+    draw(ctx, f, x, y, age) {
+      const big = !!f.big;
+      dust(ctx, x, y - 1, age, 22, big ? 7 : 4, big ? 24 : 14, '#a8a094');
+      debris(ctx, x, y - 1, age, big ? 8 : 4, '#5e564c', 1.3, big ? 1 : 0.6);
+      if (age < 8) withAlpha(ctx, 0.6 * (1 - age / 8), () => ellipse(ctx, x, y - 1, big ? 22 : 16, big ? 7 : 5, '#d8d0c0'));
+    },
+  },
+  sabreslash: {
+    duration: 14,
+    draw(ctx, f, x, y, age) {
+      const [c0, c1] = SLASH_COL[fxLevel(f) - 1];
+      const d = f.dir ?? 1;
+      const k = age / 14;
+      const a = Math.max(0, 1 - k);
+      if (f.shape === 'long') {
+        // a thrust: a long tapering streak across two panels
+        const x0 = x - d * 16;
+        const len = 66;
+        withAlpha(ctx, a, () => {
+          for (let i = 0; i < len; i++) {
+            const w = Math.max(0, Math.round(3 - (i / len) * 3 + (age < 3 ? 1 : 0)));
+            rect(ctx, x0 + d * i, y - 14 - w, 1, w * 2 + 1, c0);
+          }
+          line(ctx, x0, y - 14, x0 + d * (len + 4), y - 14, c1);
+          line(ctx, x0 + d * 4, y - 14, x0 + d * (len - 10), y - 14, '#ffffff');
+        });
+        return;
+      }
+      // a wide crescent sweeping the whole column
+      withAlpha(ctx, a, () => {
+        const top = y - 14 - 30;
+        for (let i = 0; i <= 60; i++) {
+          const v = (i - 30) / 30;
+          const bow = Math.round((1 - v * v) * (12 + age));
+          const w = Math.round((1 - Math.abs(v)) * 5) + 1;
+          rect(ctx, x + d * (bow - 6) - (d < 0 ? w : 0), top + i, w, 1, c0);
+          px(ctx, x + d * (bow - 6 + (d > 0 ? w : -w)), top + i, c1);
+          if (age < 5 && Math.abs(v) < 0.8) px(ctx, x + d * (bow - 6 + (d > 0 ? w - 1 : -w + 1)), top + i, '#ffffff');
+        }
+      });
+    },
+  },
+  nullburst: {
+    duration: 16,
+    draw(ctx, f, x, y, age) {
+      const L = fxLevel(f);
+      const core = ZERO_CORE[L - 1];
+      if (age < 3) disc(ctx, x, y - 6, 8 - age, '#ffffff');
+      const r = 4 + age;
+      withAlpha(ctx, Math.max(0, 1 - age / 16), () => {
+        disc(ctx, x, y - 6, Math.max(1, 9 - Math.floor(age / 2)), '#0a0414');
+        ring(ctx, x, y - 6, r, core);
+        for (let i = 0; i < 6; i++) {
+          const a = i * 1.047 + 0.3;
+          px(ctx, x + Math.round(Math.cos(a) * (r + 3)), y - 6 + Math.round(Math.sin(a) * (r + 3) * 0.7), core);
+        }
+      });
+    },
+  },
+  voidquake: {
+    duration: 26,
+    draw(ctx, f, x, y, age) {
+      const L = fxLevel(f);
+      const core = ZERO_CORE[L - 1];
+      const dark = ZERO_DARK[L - 1];
+      if (age < 4) withAlpha(ctx, 0.7, () => ellipse(ctx, x, y - 2, 26, 9, '#ffffff'));
+      withAlpha(ctx, Math.max(0, 1 - age / 20), () => {
+        ellipse(ctx, x, y - 1, 10 + age * 2, 3 + Math.round(age * 0.7), dark);
+        ring(ctx, x, y - 1, 8 + age * 2, core);
+      });
+      debris(ctx, x, y - 2, age, 8, '#140a20', 0.4, 1.2);
+    },
+  },
+  zeroaura: {
+    duration: 30,
+    draw(ctx, f, x, y, age) {
+      const L = fxLevel(f);
+      const core = ZERO_CORE[L - 1];
+      for (let i = 0; i < 3; i++) {
+        const r = (age * 1.4 + i * 8) % 30;
+        withAlpha(ctx, Math.max(0, 0.8 - r / 32), () => ring(ctx, x, y - 30, Math.round(r), i === 1 ? '#ffffff' : core));
+      }
+      for (let i = 0; i < 6; i++) {
+        const sx = x + Math.round(Math.sin(i * 2.1) * 16);
+        px(ctx, sx, y - 6 - ((age * 2 + i * 9) % 50), core);
+      }
+    },
+  },
+  rootburst: {
+    duration: 18,
+    draw(ctx, f, x, y, age) {
+      const L = fxLevel(f);
+      debris(ctx, x, y - 2, age, 8, ['#784b26', '#5a422c', '#524c60', '#302638'][L - 1], 0.9, 0.9);
+      debris(ctx, x, y - 4, age, 4, ['#5cc040', '#3eae8a', '#8ab83a', '#3a7a4e'][L - 1], 2.2, 0.7);
+      dust(ctx, x, y - 1, age, 18, 4, 12, '#8a7a5c');
+    },
+  },
+  briarbloom: {
+    duration: 20,
+    draw(ctx, f, x, y, age) {
+      const L = fxLevel(f);
+      const leafC = ['#5cc040', '#3eae8a', '#8ab83a', '#3a7a4e'][L - 1];
+      const [c0, c1] = PETAL_COL[L - 1];
+      const h = Math.min(6, age);
+      withAlpha(ctx, age > 14 ? 1 - (age - 14) / 6 : 1, () => {
+        for (let i = 0; i < 6; i++) {
+          const bx = x - 15 + i * 6;
+          rect(ctx, bx, y - 1 - h + (i % 2), 1, h - (i % 2) + 1, leafC);
+        }
+        if (age > 4) {
+          disc(ctx, x - 6, y - 7, 1, c0);
+          disc(ctx, x + 7, y - 6, 1, c1);
+          px(ctx, x + 1, y - 9, c0);
+        }
+      });
+    },
+  },
+};
+
 // ================================================================= registries
 
 export const ENTITY_SPRITES = {
@@ -1372,5 +1973,19 @@ export const ENTITY_SPRITES = {
   briarix: { draw: drawBriarix },
   thornbud: { draw: drawThornBud },
 };
-export const SPELL_SPRITES = {};
-export const FX_SPRITES = {};
+
+export const SPELL_SPRITES = {
+  piston: { draw: drawPiston },
+  sawblade: { draw: drawSawblade },
+  sabrewave: { draw: drawSabreWave },
+  nullshot: { draw: drawNullShot },
+  voidwave: { draw: drawVoidWave },
+  voidwarn: { draw: drawVoidWarn },
+  voidbeam: { draw: drawVoidBeam },
+  roots: { draw: drawRoots },
+  petalwarn: { draw: (ctx, s, x, y, t) => drawPetalZone(ctx, s, x, y, t, true) },
+  petals: { draw: (ctx, s, x, y, t) => drawPetalZone(ctx, s, x, y, t, false) },
+  briarthorn: { draw: drawBriarThorn },
+};
+
+export const FX_SPRITES = FX;

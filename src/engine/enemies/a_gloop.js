@@ -16,10 +16,10 @@ export const GLOOP = {
   levels: [
     // under: frames submerged before moving; bubble: telegraph frames at the emergence panel;
     // speed: wave frames per panel; rest: frames sitting on the surface after an attack.
-    { attack: 30, under: 40, bubble: 26, windup: 30, speed: 12, rest: 44 },
-    { attack: 60, under: 34, bubble: 24, windup: 26, speed: 10, rest: 36 },
-    { attack: 90, under: 28, bubble: 22, windup: 22, speed: 9, rest: 30 },
-    { attack: 140, under: 22, bubble: 18, windup: 18, speed: 7, rest: 24 },
+    { attack: 30, under: 48, bubble: 30, windup: 34, speed: 13, rest: 54 },
+    { attack: 60, under: 40, bubble: 26, windup: 28, speed: 11, rest: 44 },
+    { attack: 90, under: 32, bubble: 24, windup: 24, speed: 10, rest: 36 },
+    { attack: 140, under: 26, bubble: 20, windup: 20, speed: 8, rest: 28 },
   ],
   *ai(b, e) {
     const s = e.stats;

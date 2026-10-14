@@ -175,11 +175,12 @@ function* voidCollapse(b, e, s) {
   e.setAnim('beam');
   b.emit('sfx', { name: 'bigexplode' });
   b.emit('sfx', { name: 'lance' });
-  const z = zone(b, e, { damage: s.beam, flinch: true }, rowCells(), s.beamFrames, { type: 'voidbeam' });
-  z.data.fromCol = e.col;
-  z.data.dir = e.facing;
-  z.data.level = e.level;
-  z.data.frames = s.beamFrames;
+  const beam = zone(b, e, { damage: s.beam, flinch: true }, rowCells(), s.beamFrames, { type: 'voidbeam' });
+  beam.z = 1; // drawn through the bodies it scours
+  beam.data.fromCol = e.col;
+  beam.data.dir = e.facing;
+  beam.data.level = e.level;
+  beam.data.frames = s.beamFrames;
   yield* wait(s.beamFrames);
   // Spent: a long opening.
   yield* pose(e, 'idle', s.beamRecover);

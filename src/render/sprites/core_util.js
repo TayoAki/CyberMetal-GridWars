@@ -218,7 +218,7 @@ export function ellipseRing(ctx, cx, cy, rx, ry, color, from = 0, to = Math.PI *
   cx = Math.round(cx);
   cy = Math.round(cy);
   if (rx <= 0 || ry <= 0) return;
-  const steps = Math.max(12, Math.round((rx + ry) * 3));
+  const steps = Math.max(16, Math.ceil(Math.PI * 2 * Math.max(rx, ry) * 1.6 * ((to - from) / (Math.PI * 2))));
   ctx.fillStyle = color;
   let lx = null;
   let ly = null;

@@ -20,7 +20,8 @@ export const INSTRUMENTS = {
   keys: { w: 'tri', v: 0.18, a: 0.003, d: 0.35, s: 0.25, r: 0.08, layer: { w: 'p12', v: 0.18, mul: 1, det: 5 } },
   bass: { w: 'tri', v: 0.36, a: 0.002, d: 0.1, s: 0.85, r: 0.02, layer: { w: 'p12', v: 0.12, mul: 1 } },
   sub: { w: 'tri', v: 0.4, a: 0.004, d: 0.2, s: 0.9, r: 0.05 },
-  fat: { w: 'saw', v: 0.13, a: 0.004, d: 0.2, s: 0.6, r: 0.04, lp: 1500, layer: { w: 'tri', v: 1.6, mul: 0.5 } },
+  fat: { w: 'saw', v: 0.12, a: 0.004, d: 0.2, s: 0.7, r: 0.05, lp: 1200, layer: { w: 'tri', v: 1.8, mul: 1 } },
+  epic: { w: 'p25', v: 0.14, a: 0.012, d: 0.3, s: 0.72, r: 0.1, vib: [5.2, 18, 0.22], layer: { w: 'sq', v: 0.35, mul: 0.5, det: 4 } },
 };
 
 function vibrato(ctx, osc, vib, t, end) {

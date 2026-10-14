@@ -130,7 +130,7 @@ function* tideRise(b, e, s) {
   while (picks.length < s.tidePanels && rest.length) picks.push(rest.pop());
   const hit = { damage: s.tide, element: ELEMENT.AQUA, flinch: true };
   picks.forEach(([c, r], i) => {
-    const g = drop(b, e, hit, c, r, { delay: s.tideDelay + i * 4, type: 'tidegeyser', landFx: 'tidesplash', sfx: 'wave', panel: PANEL.ICE, linger: 10 });
+    const g = drop(b, e, hit, c, r, { delay: s.tideDelay + i * 4, type: 'tidegeyser', landFx: 'tidesplash', sfx: 'ice', panel: PANEL.ICE, linger: 10 });
     g.data.level = e.level;
   });
   b.emit('sfx', { name: 'wave' });

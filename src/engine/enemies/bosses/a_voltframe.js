@@ -27,7 +27,7 @@ const NEON_LAMP = {
       b.emit('sfx', { name: 'charge' });
       yield* wait(s.lampWarn);
       o.setAnim('zap');
-      b.emit('sfx', { name: 'zap' });
+      b.emit('sfx', { name: 'beam' });
       strike(b, o, cells, { damage: s.zap, element: ELEMENT.ELEC, flinch: true }, { fx: 'lampzap' });
       yield* wait(18);
       o.setAnim('idle');
@@ -55,7 +55,7 @@ function bolt(b, e, s, c, r) {
     delay: s.boltDelay,
     type: 'arcbolt',
     landFx: 'arcstrike',
-    sfx: 'thunder',
+    sfx: 'zap',
     linger: 8,
   });
 }

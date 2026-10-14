@@ -70,7 +70,7 @@ function glow(ctx, rows, pal, e, x, y, t, color, dx = 0, dy = 0) {
 }
 
 // Pick a frame from a cycle: every `rate` frames of `t`.
-const cyc = (frames, t, rate) => frames[Math.floor(Math.max(0, t) / rate) % frames.length];
+const cyc = (frames, t, rate) => frames[Math.floor(Math.max(0, t || 0) / rate) % frames.length];
 
 // ================================================================ Rivet (construction bot)
 // Hard-hatted, single-eyed construction bot with a sledgehammer. Anims: idle, move, windup, swing, hurt.
@@ -154,16 +154,16 @@ const RV_HAMMER_REST = art(`
 `);
 // Both hands up, hammer raised high behind the helmet.
 const RV_HAMMER_UP = art(`
-  .GGGGGg........
-  GGgggggq.......
-  Gggggggq.......
-  gggggqqq.......
-  .qqqqqqNn......
-  ........Nn.....
-  .........Nn....
-  ..........Nn...
-  ...........NnWM
-  ............MmD
+  GGGGGGg........
+  GWWGGGq........
+  GGggggq........
+  gggggqq........
+  qqqqqqqnN......
+  .......nNn.....
+  ........nNn....
+  .........nNn...
+  ..........nNnWM
+  ...........nMmD
 `);
 // Hammer slammed down in front, with a puff of dust.
 const RV_HAMMER_DOWN = art(`
@@ -1087,6 +1087,11 @@ const MS_SHELL = art(`
   .DDDDDDDDDDDDDDDDDDDDDD.
 `);
 // Head out (pokes from the front of the shell).
+// Shut: two eyes glinting in the dark gap at the front of the shell.
+const MS_PEEP = art(`
+  kkk
+  eke
+`);
 const MS_HEAD = art(`
   ...gggg..
   .ggggggg.
@@ -1142,7 +1147,7 @@ const MS_W = 34;
 const MORTARSHELL = {
   closed: [
     compose(MS_W, 17, [MS_SHELL, 5, 3]),
-    compose(MS_W, 17, [MS_SHELL, 5, 3]),
+    compose(MS_W, 17, [MS_SHELL, 5, 3], [MS_PEEP, 24, 11]),
   ],
   opening: compose(MS_W, 22, [MS_LEG_B, 5, 18], [MS_LEG_F, 22, 18], [MS_TUBE_LOW, 15, 2], [MS_SHELL, 5, 6], [MS_HEAD_PEEK, 27, 13]),
   open: compose(MS_W, 24, [MS_LEG_B, 5, 20], [MS_LEG_F, 22, 20], [MS_TUBE, 15, 0], [MS_SHELL, 5, 8], [MS_HEAD, 26, 13]),
@@ -1172,6 +1177,11 @@ ENTITY_SPRITES.mortarshell = {
         break;
       case 'close':
         rows = at < 5 ? MORTARSHELL.opening : MORTARSHELL.closed[0];
+        break;
+      case 'idle':
+      case undefined:
+        // Shut tight; now and then a pair of eyes glints in the gap.
+        rows = MORTARSHELL.closed[tt % 150 > 110 && tt % 150 < 140 ? 1 : 0];
         break;
       case 'hurt':
         rows = MORTARSHELL.hurt;
@@ -1842,6 +1852,38 @@ SPELL_SPRITES.mortarball = {
     sprite(ctx, MORTARBALL, MORTARBALL_LV[L - 1], x, y - z - 4, { anchor: 'center', outline: OUTLINE });
     if (L === 3 && (t ?? 0) % 4 < 2) px(ctx, x - 1, y - z - 10, '#ffd23a'); // embers trailing off a magma shell
     if (L === 2 && (t ?? 0) % 6 < 3) px(ctx, x + 3, y - z - 9, '#ffffff'); // frost glint
+  },
+};
+
+// ---- A Mortarshell mark fading off a panel: steam off cooling lava, frost sparkles off thawing ice.
+SPELL_SPRITES.mortarmark = {
+  draw(ctx, s, x, y, t) {
+    const p = s.data?.progress ?? 0;
+    if (p < 0.7) return;
+    const k = (p - 0.7) / 0.3; // 0 → 1 as it fades
+    const tt = t ?? 0;
+    const ice = s.data?.mark === 'ice';
+    for (let i = 0; i < 4; i++) {
+      const ph = ((tt + i * 9) % 24) / 24;
+      const bx = x + [-11, -3, 5, 12][i];
+      if (ice) {
+        // Twinkles that grow busier as it thaws.
+        if ((tt + i * 5) % 12 < 4 + Math.round(k * 4)) {
+          const by = y - 4 - ((i * 7) % 9);
+          px(ctx, bx, by, '#ffffff');
+          if (k > 0.4) {
+            px(ctx, bx - 1, by, '#bff4ff');
+            px(ctx, bx + 1, by, '#bff4ff');
+          }
+        }
+      } else {
+        // Wisps of steam curling up off the panel.
+        const by = y - 2 - Math.round(ph * (8 + k * 6));
+        const c = ph < 0.5 ? '#e8ecf4' : '#a8aec0';
+        px(ctx, bx + Math.round(Math.sin(ph * 6 + i) * 1.5), by, c);
+        if (ph < 0.6) px(ctx, bx + Math.round(Math.sin(ph * 6 + i) * 1.5) + 1, by + 1, c);
+      }
+    }
   },
 };
 

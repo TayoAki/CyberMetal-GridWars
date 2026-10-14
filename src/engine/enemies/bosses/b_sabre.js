@@ -129,6 +129,7 @@ function* crescent(b, e, s) {
   b.emit('sfx', { name: 'sword' });
   const w = projectile(b, e, { damage: s.wave, flinch: true }, { type: 'sabrewave', speed: s.waveSpeed });
   w.data.level = e.level;
+  w.z = 1;
   yield* wait(14);
   yield* pose(e, 'idle', s.recover);
 }

@@ -1,7 +1,7 @@
 // Spell sprites: every chip attack's moving or lingering part. (x, y) is the floor point of (s.x, s.y);
 // projectiles fly at chest height, lobbed things use s.z, zones read s.data.cells.
 import { sprite } from '../pixel.js';
-import { OUTLINE, ramp, hash, withAlpha, cellDelta, sparkle, bolt, flameTongue, ditherDisc, ellipseRing, crescent, rect, px, line, ellipse, disc, ring, poly } from './core_util.js';
+import { OUTLINE, ramp, hash, withAlpha, cellDelta, sparkle, bolt, flameTongue, ditherDisc, ellipseRing, crescent, streak, rect, px, line, ellipse, disc, ring, poly } from './core_util.js';
 
 const CHEST = 14; // projectile height above the floor
 
@@ -47,36 +47,39 @@ function floorShadow(ctx, x, y, z, base = 6) {
 
 // ---------------------------------------------------------------- ground crawlers
 
-// A rolling crest leaning toward dir. pal = [foam, light, mid, dark].
-function crestWave(ctx, x, y, d, t, pal, height, width, curl = true) {
+// A breaking wave rolling toward dir: a long back slope, a crest that curls over a hollow front face,
+// foam on the lip and spray. pal = [foam, light, mid, dark].
+const WAVE_OUTER = [[-0.5, 0], [-0.4, 0.18], [-0.26, 0.45], [-0.1, 0.72], [0.06, 0.92], [0.2, 1], [0.33, 0.97], [0.43, 0.86], [0.47, 0.72], [0.4, 0.64], [0.33, 0.69], [0.29, 0.55], [0.33, 0.3], [0.42, 0.12], [0.5, 0]];
+const WAVE_MID = [[-0.38, 0], [-0.24, 0.36], [-0.08, 0.64], [0.08, 0.82], [0.2, 0.88], [0.3, 0.84], [0.36, 0.76], [0.28, 0.62], [0.24, 0.5], [0.28, 0.26], [0.36, 0]];
+const WAVE_LIGHT = [[-0.2, 0], [-0.1, 0.3], [0.04, 0.55], [0.14, 0.66], [0.2, 0.5], [0.18, 0.28], [0.24, 0]];
+function crestWave(ctx, x, y, d, t, pal, height, width) {
   const bob = [0, 1, 2, 1][(t >> 2) % 4];
   const h = height + bob;
-  const w = width;
-  const X = (u) => x + d * u; // u: horizontal offset toward the front
-  poly(ctx, [[X(-w * 0.55), y + 1], [X(-w * 0.4), y - h * 0.35], [X(-w * 0.12), y - h * 0.75], [X(w * 0.12), y - h], [X(w * 0.34), y - h * 0.86], [X(w * 0.46), y - h * 0.45], [X(w * 0.5), y + 1]], pal[3]);
-  poly(ctx, [[X(-w * 0.42), y], [X(-w * 0.28), y - h * 0.38], [X(-w * 0.04), y - h * 0.72], [X(w * 0.14), y - h * 0.88], [X(w * 0.3), y - h * 0.74], [X(w * 0.38), y - h * 0.38], [X(w * 0.4), y]], pal[2]);
-  poly(ctx, [[X(-w * 0.2), y], [X(-w * 0.06), y - h * 0.42], [X(w * 0.1), y - h * 0.66], [X(w * 0.22), y - h * 0.52], [X(w * 0.26), y]], pal[1]);
-  if (curl) {
-    // Foam lip curling over the front.
-    const lx = X(w * 0.12);
-    const ly = y - h;
-    rect(ctx, Math.min(lx, X(w * 0.36)), ly - 1, Math.abs(X(w * 0.36) - lx) + 1, 2, pal[0]);
-    rect(ctx, d > 0 ? X(w * 0.36) : X(w * 0.36) - 1, ly, 2, 3, pal[0]);
-    px(ctx, X(w * 0.4), ly + 4, pal[0]);
-    for (let i = 0; i < 4; i++) {
-      const ph = (t + i * 5) % 12;
-      px(ctx, X(w * 0.42 + i * 1.5 + ph * 0.4), ly - 2 + ph, pal[i % 2 ? 1 : 0]);
-    }
+  const P = (pts, dy = 0) => pts.map(([u, v]) => [x + d * u * width, y - v * h + dy]);
+  poly(ctx, P(WAVE_OUTER), pal[3]);
+  poly(ctx, P(WAVE_MID), pal[2]);
+  poly(ctx, P(WAVE_LIGHT), pal[1]);
+  // Foam along the lip and its curled tip.
+  const lip = P([[0.04, 0.9], [0.14, 0.97], [0.26, 0.98], [0.36, 0.93], [0.43, 0.84], [0.45, 0.74]]);
+  for (let i = 0; i + 1 < lip.length; i++) {
+    line(ctx, lip[i][0], lip[i][1], lip[i + 1][0], lip[i + 1][1], pal[0]);
+    line(ctx, lip[i][0], lip[i][1] + 1, lip[i + 1][0], lip[i + 1][1] + 1, pal[0]);
   }
-  // Streaks inside the body.
+  // Streaks on the back slope.
   for (let i = 0; i < 3; i++) {
-    const yy = y - 3 - i * Math.round(h / 4);
-    const ph = (t + i * 4) % 8;
-    rect(ctx, d > 0 ? X(-w * 0.3 + ph) : X(-w * 0.3 + ph) - 3, yy, 4, 1, pal[1]);
+    const ph = (t + i * 4) % 10;
+    const [sx, sy] = P([[-0.3 + i * 0.12 + ph * 0.012, 0.25 + i * 0.16]])[0];
+    rect(ctx, d > 0 ? sx : sx - 3, sy, 4, 1, pal[1]);
+  }
+  // Spray falling off the front.
+  for (let i = 0; i < 5; i++) {
+    const ph = (t + i * 3) % 12;
+    const [sx, sy] = P([[0.46 + ph * 0.012 + (i % 2) * 0.03, 0.78 - ph * 0.05]])[0];
+    px(ctx, sx, sy, i % 2 ? pal[1] : pal[0]);
   }
 }
 
-const SHOCK_PAL = ['#ffffff', '#fff27a', '#ffb03a', '#a8501a'];
+const SHOCK_PAL = ['#ffffff', '#fffbd0', '#ffe08a', '#b8863a'];
 
 function shockwaveSprite(ctx, s, x, y, t, pal = SHOCK_PAL) {
   const d = s.dir < 0 ? -1 : 1;
@@ -86,10 +89,10 @@ function shockwaveSprite(ctx, s, x, y, t, pal = SHOCK_PAL) {
     const ph = (k + i * 2 + 6) % 6;
     const h = 9 + [0, 3, 7, 5, 2, 1][ph] + (i === 0 ? 5 : i > 0 ? 2 : 0);
     const bx = x + i * 6 * d;
-    poly(ctx, [[bx - 5, y + 1], [bx + d * 2, y - h], [bx + 5, y + 1]], pal[3]);
-    poly(ctx, [[bx - 3, y], [bx + d * 2, y - h + 2], [bx + 3, y]], pal[2]);
-    poly(ctx, [[bx - 1, y], [bx + d, y - h + 5], [bx + 1, y]], pal[1]);
-    px(ctx, bx + d * 2, y - h + 1, pal[0]);
+    poly(ctx, [[bx - 4, y + 1], [bx + d * 3, y - h], [bx + 4, y + 1]], pal[3]);
+    poly(ctx, [[bx - 3, y], [bx + d * 3, y - h + 2], [bx + 3, y]], pal[2]);
+    poly(ctx, [[bx - 1, y], [bx + d * 2, y - h + 5], [bx + 1, y]], pal[1]);
+    line(ctx, bx, y - 2, bx + d * 2, y - h + 4, pal[0]);
   }
   rect(ctx, x - 11, y - 1, 23, 2, pal[2]);
   rect(ctx, x - 8, y - 1, 17, 1, pal[1]);
@@ -221,30 +224,35 @@ const BIGRAT = [
   ],
 ];
 
-const BOOMER_PAL = Object.freeze({ a: '#d8f0a0', b: '#8ad04a', c: '#4a9a2a', d: '#2a5a1a', e: '#c89050', f: '#8a5a2a' });
-const BOOMER = [
-  ['a.......', 'bb......', '.bb.....', '..bc....', '...cc...', '..ffe...', '.fe.....', 'fe......'],
-  ['........', '........', 'aab..eef', '.bbcffe.', '..cfe...', '........', '........', '........'],
-  ['......ef', '.....ef.', '...eff..', '...cc...', '....cb..', '.....bb.', '......bb', '.......a'],
-  ['........', '........', '...efc..', '.effcbb.', 'feec.bba', '........', '........', '........'],
-];
-
 const FIST_PAL = Object.freeze({ W: '#ffffff', A: '#dbe5f5', B: '#a6b5d0', C: '#7180a3', D: '#475273', E: '#2b3250', 2: '#86f3ff', 3: '#27c3ee', 4: '#1281b3' });
-const FIST_SIDE = ['...AAAB.', '..AWWABC', 'AAAWAABC', '324BAABC', '324ABBCD', 'BCDBBCDD', '....CDD.'];
+const FIST_SIDE = [
+  '....AAAAB...',
+  '...AWWWABC..',
+  '..AWAAAABBC.',
+  'ABBAAAAABBCD',
+  '324AABABBBCD',
+  '324ABCBCBCCD',
+  'ABBBBBBBCCDD',
+  '.BCDCCCCCDD.',
+  '.....DDDD...',
+];
 const IRON_PAL = Object.freeze({ W: '#f4f4f8', A: '#c0c6d4', B: '#8e96aa', C: '#646c82', D: '#444a5e', E: '#2a2e3c', 2: '#ffd07a', 3: '#ff8a2a', 4: '#c0501a' });
 const FIST_DOWN = [
-  '....DDDDDD....',
-  '...D2323232D..',
-  '...CBBBBBBBC..',
-  '..ABBBBBBBBBC.',
-  '.AWAABBBBBBBCD',
-  '.AWAABBBBBBBCD',
-  '.AAABBBBBBBBCD',
-  '.ABAB.BB.BBBCD',
-  '.ABAB.BB.BCCCD',
-  '.ABABCBBCBCCCD',
-  '..BCBCBCCBCCD.',
-  '...CCCCCCCDD..',
+  '.....DDDDDDDDDD.....', // cuff
+  '....D3232323232D....',
+  '....DCCCCCCCCCCD....',
+  '...AAABBBBBBBBBCD...',
+  '..AWWAABBBBBBBBBCD..',
+  '.AWWAAABBBBBBBBBCCD.', // back of the hand
+  '.AWAAAABBBBBBBBBBCD.',
+  'AWAAAABBBBBBBBBBBCD.',
+  'AAAAABBBBBBBBBBBBCD.',
+  'ABAABBEBBBEBBBEBBCD.', // fingers
+  'ABAABBEBBBEBBBEBBCD.',
+  '.BAABEBBBBEBBBEBBCD.',
+  '.BBBCEBBBCEBBBCEBCD.',
+  '..CC.EBCBCEBCBCEBD..', // knuckles
+  '......CCC..CCC..C...',
 ];
 
 const YOYO_PAL = Object.freeze({ a: '#f0f4ff', b: '#b8c4dc', c: '#7a86a6', d: '#4a5272', r: '#ff5a7a', R: '#c02a4a', w: '#ffffff' });
@@ -331,13 +339,13 @@ export const SPELL_SPRITES = {
       }
       // Rocket fist in flight.
       const d = s.dir < 0 ? -1 : 1;
-      const yy = y - 22 - (s.z ?? 0);
+      const yy = y - 24 - (s.z ?? 0);
       const k = s.t ?? t;
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < 7; i++) {
         const c = i < 2 ? '#fff27a' : i < 4 ? '#ff9a3a' : '#e0441e';
-        rect(ctx, x - d * (5 + i) - (d < 0 ? 0 : 0), yy + 3 + (i > 3 && k % 2 ? 1 : 0), 1, i > 3 ? 1 : 2, c);
+        rect(ctx, x - d * (7 + i), yy + 4 + (i > 3 && k % 2 ? 1 : 0), 1, i > 4 ? 1 : 2, c);
       }
-      sprite(ctx, FIST_SIDE, FIST_PAL, x - 4 * d - (d < 0 ? 3 : 0), yy, { flip: d < 0, outline: OUTLINE });
+      sprite(ctx, FIST_SIDE, FIST_PAL, x, yy + 9, { anchor: 'feet', flip: d < 0, outline: OUTLINE });
     },
   },
 
@@ -427,15 +435,15 @@ export const SPELL_SPRITES = {
       const k = s.t ?? t;
       const d = s.dir < 0 ? -1 : 1;
       const rise = Math.min(1, ((k % 6) + 2) / 5);
-      const shards = [[-9, 13], [-2, 22], [6, 16]];
-      withAlpha(ctx, 0.35, () => ellipse(ctx, x, y - 1, 16, 4, '#bff0ff'));
-      shards.forEach(([ox, h], i) => {
+      const shards = [[-10, 12, 3], [-2, 22, 5], [7, 16, 4]];
+      ellipseRing(ctx, x, y - 1, 16, 3, '#bff0ff');
+      shards.forEach(([ox, h, w], i) => {
         const hh = Math.round(h * (i === 1 ? 1 : rise));
         const bx = x + ox * d;
-        poly(ctx, [[bx - 5, y + 1], [bx + d, y - hh - 1], [bx + 5, y + 1]], '#1a4a7a');
-        poly(ctx, [[bx - 4, y], [bx + d, y - hh], [bx + 4, y]], '#6ac8f0');
-        poly(ctx, [[bx - 3, y], [bx, y - hh + 2], [bx, y]], '#bff0ff');
-        line(ctx, bx - 1, y - 2, bx, y - hh + 3, '#ffffff');
+        poly(ctx, [[bx - w - 1, y + 1], [bx - w - 1, y - hh + w], [bx + d, y - hh - 1], [bx + w + 1, y - hh + w], [bx + w + 1, y + 1]], '#123a66');
+        poly(ctx, [[bx - w, y], [bx - w, y - hh + w], [bx + d, y - hh], [bx + w, y - hh + w], [bx + w, y]], '#6ac8f0');
+        poly(ctx, [[bx - w, y], [bx - w, y - hh + w], [bx + d, y - hh], [bx + d, y]], '#bff0ff');
+        line(ctx, bx - w + 1, y - 2, bx - w + 1, y - hh + w + 1, '#ffffff');
       });
       if ((k >> 1) % 3 === 0) sparkle(ctx, x + d * 2, y - 24, 2, '#e8fbff', '#ffffff');
       for (let i = 0; i < 3; i++) px(ctx, x - d * (12 + i * 3), y - 2 - ((k + i * 2) % 6), '#e8fbff');
@@ -494,10 +502,22 @@ export const SPELL_SPRITES = {
   boomer: {
     draw(ctx, s, x, y, t) {
       const k = s.t ?? t;
-      const rows = BOOMER[(k >> 1) % 4];
-      sprite(ctx, rows, BOOMER_PAL, x, y - 10, { anchor: 'center', outline: OUTLINE });
-      withAlpha(ctx, 0.5, () => ellipseRing(ctx, x, y - 10, 7, 4, '#bdf08a', Math.PI * (k % 4) * 0.5, Math.PI * (k % 4) * 0.5 + Math.PI));
-      withAlpha(ctx, 0.35, () => ellipse(ctx, x, y - 1, 5, 1, '#000000'));
+      const cy = y - 12;
+      const a = k * 0.9;
+      withAlpha(ctx, 0.35, () => ellipse(ctx, x, y - 1, 6, 2, '#000000'));
+      ellipseRing(ctx, x, cy, 10, 6, '#bdf08a', a + Math.PI, a + Math.PI * 1.6);
+      // Two arms of a V, rotating.
+      for (const off of [0, 1.9]) {
+        const ax = x + Math.cos(a + off) * 8;
+        const ay = cy + Math.sin(a + off) * 6;
+        streak(ctx, x, cy, ax, ay, 3, OUTLINE);
+        streak(ctx, x, cy, ax, ay, 2, '#c89050');
+        line(ctx, x, cy, ax, ay, '#e8c088');
+        disc(ctx, ax, ay, 2, '#3fbe3a');
+        px(ctx, ax, ay, '#d8f0a0');
+      }
+      disc(ctx, x, cy, 2, '#8a5a2a');
+      px(ctx, x, cy, '#e8c088');
     },
   },
 
@@ -536,13 +556,14 @@ export const SPELL_SPRITES = {
         const [cx, cy0] = cellPoint(s, x, y, c, r);
         const cy = cy0 - CHEST;
         const k = s.t ?? t;
-        withAlpha(ctx, 0.3 + 0.2 * ((k >> 1) % 2), () => disc(ctx, cx, cy, 11, '#ffe23a'));
+        ring(ctx, cx, cy, 9 + ((k >> 1) % 2), k % 4 < 2 ? '#fff27a' : '#ffcf1f');
         for (let i = 0; i < 5; i++) {
           const a = (i * Math.PI * 2) / 5 + k * 0.4;
           bolt(ctx, cx, cy, cx + Math.cos(a) * 15, cy + Math.sin(a) * 12, 3, 3, i % 2 ? '#ffffff' : '#ffe23a', k * 7 + i);
         }
         // An arc from the sky into the panel.
         if (k % 8 < 3) bolt(ctx, cx + 6, cy - 40, cx, cy, 5, 4, '#fff6c8', k, null);
+        disc(ctx, cx, cy, 5, '#ffcf1f');
         disc(ctx, cx, cy, 4, '#fff27a');
         disc(ctx, cx, cy, 2, '#ffffff');
       });
@@ -569,8 +590,8 @@ export const SPELL_SPRITES = {
       for (let i = 0; i < 4; i++) {
         const ph = (k + i * 5) % 14;
         const bx = x - rx + 3 + Math.round(hash(i, 2) * (rx * 2 - 6));
-        const r = ph < 7 ? 1 : 2;
-        ring(ctx, bx, y - 4 - (ph >> 1), r, ph < 12 ? '#bfe9ff' : '#ffffff');
+        if (ph < 8) px(ctx, bx, y - 4 - (ph >> 1), '#bfe9ff');
+        else ring(ctx, bx, y - 4 - (ph >> 1), 1, ph < 12 ? '#bfe9ff' : '#ffffff');
       }
       if (p > 0.6 && k % 4 < 2) rect(ctx, x - 1, y - 10, 2, 4, '#e8fbff');
     },
@@ -581,13 +602,18 @@ export const SPELL_SPRITES = {
       const k = s.t ?? t;
       const la = landedAge(s);
       if (la >= 0) {
-        // Lava pillar.
-        const a = Math.max(0, 1 - la / 7);
+        // Lava pillar: a roaring column with blobs flung off the top.
+        const a = Math.max(0, 1 - la / 8);
+        const h = Math.round(48 * Math.min(1, (la + 1) / 2));
         withAlpha(ctx, a, () => {
-          rect(ctx, x - 7, y - 44, 14, 44, '#c42e18');
-          rect(ctx, x - 5, y - 44, 10, 44, '#ff7a1f');
-          rect(ctx, x - 2, y - 44, 4, 44, '#ffd23f');
-          for (let i = 0; i < 4; i++) disc(ctx, x - 6 + i * 4, y - 44, 3, i % 2 ? '#ffd23f' : '#ff7a1f');
+          flameTongue(ctx, x, y, 9, h, k, 7, ['#fff6c8', '#ffd23f', '#ff6a1f', '#a8281a']);
+          for (let i = 0; i < 5; i++) {
+            const bx = x + (i - 2) * 5 + (i - 2) * la;
+            const by = y - h + 4 - la * 2 + Math.abs(i - 2) * 3 + la * la * 0.5;
+            disc(ctx, bx, by, i === 2 ? 3 : 2, i % 2 ? '#ffd23f' : '#ff6a1f');
+          }
+          ellipse(ctx, x, y - 2, 13, 4, '#c42e18');
+          ellipse(ctx, x, y - 2, 9, 2, '#ffd23f');
         });
         return;
       }
@@ -665,7 +691,10 @@ export const SPELL_SPRITES = {
       const k = s.t ?? t;
       cellsOf(s).forEach(([c, r], i) => {
         const [cx, cy] = cellPoint(s, x, y, c, r);
-        withAlpha(ctx, 0.18 + 0.08 * ((k >> 2) % 2), () => rect(ctx, cx - 18, cy - 16, 36, 15, '#ffffff'));
+        for (let j = 0; j < 2; j++) {
+          const yy = cy - 2 - ((k + j * 8) % 16);
+          withAlpha(ctx, 0.45, () => rect(ctx, cx - 17, yy, 34, 1, '#e8eeff'));
+        }
         for (let j = 0; j < 3; j++) {
           const ph = (k + j * 5 + i * 3) % 15;
           sparkle(ctx, cx - 12 + j * 12, cy - 4 - ph, ph < 8 ? 1 : 0, '#e8eeff', '#ffffff');

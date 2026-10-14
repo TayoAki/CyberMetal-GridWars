@@ -47,7 +47,7 @@ function* rake(b, e, s) {
 function* howl(b, e, s) {
   noteMove(e, 'howl');
   b.emit('fx', { fx: 'howlwave', col: e.col, row: e.row, dir: e.facing });
-  b.emit('sfx', { name: 'howl' });
+  b.emit('sfx', { name: 'roar' });
   yield* windup(e, 'howl', s.howlWind);
   for (let k = 0; k < 2; k++) {
     e.setAnim('rake');

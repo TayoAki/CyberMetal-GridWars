@@ -36,7 +36,11 @@ function* roam(b, e, s, frames) {
 }
 
 function pistonFist(b, e, s, c, r, delay) {
-  const sp = drop(b, e, { damage: s.slam, flinch: true }, c, r, { delay, type: 'piston', breakPanel: true, landFx: 'pistonhit', sfx: 'hammer', linger: 14 });
+  // Once down, the fist is drawn over whoever it flattened (z is a draw-order hint only).
+  const onLand = (spell) => {
+    spell.z = 1;
+  };
+  const sp = drop(b, e, { damage: s.slam, flinch: true }, c, r, { delay, type: 'piston', breakPanel: true, landFx: 'pistonhit', sfx: 'hammer', linger: 14, onLand });
   sp.data.level = e.level;
   return sp;
 }
@@ -70,6 +74,7 @@ function throwSaw(b, e, hit, speed) {
   for (let c = home + d; c >= 0 && c < COLS; c += d) path.push(c);
   const s = b.addSpell({ type: 'sawblade', team: e.team, owner: e, col: path[0] ?? home, row, dir: d, hit });
   s.x = home + d * 0.4;
+  s.z = 1; // spins at chest height: drawn over bodies
   s.data.level = e.level;
   s.script = (function* () {
     function* travel(cols) {

@@ -70,6 +70,7 @@ function fireTower(b, e, s) {
       }
       const trail = zone(b, e, hit, [[col, row]], s.trail, { type: 'pyreflame' });
       trail.data.level = e.level;
+      trail.data.life = s.trail;
       if (!reaimed && b.player.row !== row) {
         // Slide to the player's row (same column), then burn there before marching on.
         reaimed = true;
@@ -130,7 +131,7 @@ function* flamethrower(b, e, s) {
 
 function* lightBraziers(b, e, s) {
   noteMove(e, 'brazier');
-  b.emit('sfx', { name: 'charge' });
+  b.emit('sfx', { name: 'roar' });
   yield* windup(e, 'roar', s.roarWind);
   const want = s.braziers - livePets(e, 'brazier').length;
   // Behind the front line when possible: they are meant to be dug out.
