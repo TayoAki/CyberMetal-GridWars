@@ -1,6 +1,10 @@
 // Controls for the open world: keyboard + mouse (pointer lock when the page allows it, otherwise drag with the
-// right or middle button to look), gamepad, and touch (a move stick, drag-to-look and buttons).
+// right button to look), gamepad, and touch (a move stick, drag-to-look and buttons).
 // sample() returns held states for one simulation step; consumeLook() returns the look delta since last call.
+//
+// Kingdom Hearts 2-style layout: attack, shoot (hold to charge), jump, dodge, lock-on, switch target, the
+// reaction command, and chip shortcuts (number keys; on a gamepad hold LB and press a face button, like KH2's
+// shortcut menu).
 
 const MOVE_KEYS = {
   up: ['KeyW', 'ArrowUp'],
@@ -8,51 +12,77 @@ const MOVE_KEYS = {
   left: ['KeyA', 'ArrowLeft'],
   right: ['KeyD', 'ArrowRight'],
 };
-const FIRE_KEYS = ['KeyJ', 'KeyF', 'Enter'];
-const JUMP_KEYS = ['Space', 'KeyK'];
-const DASH_KEYS = ['ShiftLeft', 'ShiftRight', 'KeyL'];
-const TURN_LEFT = ['KeyQ'];
+// Mouse buttons count as keys named Mouse0 (left), Mouse1 (middle), Mouse2 (right).
+const ATTACK_KEYS = ['KeyJ', 'Enter', 'Mouse0'];
+const SHOOT_KEYS = ['KeyK', 'Mouse2'];
+const JUMP_KEYS = ['Space'];
+const DASH_KEYS = ['ShiftLeft', 'ShiftRight'];
+const LOCK_KEYS = ['KeyR', 'KeyL', 'Mouse1'];
+const REACT_KEYS = ['KeyF'];
+const CHIP_KEYS = ['Digit1', 'Digit2', 'Digit3', 'Digit4'];
+const TURN_LEFT = ['KeyQ']; // switch target left while locked on
 const TURN_RIGHT = ['KeyE'];
+// Standard gamepad buttons.
+const PAD = { a: 0, b: 1, x: 2, y: 3, lb: 4, rb: 5, lt: 6, rt: 7, left: 14, right: 15 };
+// LB + face button -> chip slot (X, Y, B, A like KH2's square, triangle, circle, cross).
+const PAD_CHIPS = [PAD.x, PAD.y, PAD.b, PAD.a];
 
 export class WorldInput {
-  constructor(canvas, touchRoot = null) {
+  // win: the window to listen on (a stand-in in tests).
+  constructor(canvas, touchRoot = null, win = globalThis) {
     this.canvas = canvas;
-    this.keys = new Set();
-    this.mouseFire = false;
+    this.keys = new Set(); // held keys and mouse buttons
+    this.tapped = new Set(); // pressed since the last sample: a tap that ends between two steps still counts
     this.dragLook = false;
+    this.isLocked = () => false; // set by the game: is the player locked on? (Q/E and the wheel switch targets)
+    this.pulse = { next: 0, prev: 0 }; // queued one-step presses from the wheel and stick flicks
+    this.pulsed = { next: false, prev: false }; // pressed by a pulse last step (so the next one releases first)
+    this.flick = 0;
     this.look = { dx: 0, dy: 0 };
     this.zoom = 0;
     this.locked = false;
     this.lockFailed = false;
-    this.touch = { move: null, look: null, fire: false, jump: false, dash: false, stick: { x: 0, y: 0 } };
+    this.touch = { move: null, look: null, held: new Set(), chip: 0, stick: { x: 0, y: 0 } };
     this.usedTouch = false;
     this.usedPad = false;
 
-    const isGameKey = (code) => [...Object.values(MOVE_KEYS).flat(), ...FIRE_KEYS, ...JUMP_KEYS, ...DASH_KEYS, ...TURN_LEFT, ...TURN_RIGHT].includes(code);
-    addEventListener('keydown', (e) => {
+    const GAME_KEYS = new Set([...Object.values(MOVE_KEYS).flat(), ...ATTACK_KEYS, ...SHOOT_KEYS, ...JUMP_KEYS, ...DASH_KEYS, ...LOCK_KEYS, ...REACT_KEYS, ...CHIP_KEYS, ...TURN_LEFT, ...TURN_RIGHT]);
+    const isGameKey = (code) => GAME_KEYS.has(code);
+    const press = (code) => {
+      this.keys.add(code);
+      this.tapped.add(code);
+    };
+    win.addEventListener('keydown', (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return; // leave browser shortcuts (reload, find...) alone
       if (isGameKey(e.code)) e.preventDefault();
-      this.keys.add(e.code);
+      if (e.repeat) return;
+      press(e.code);
     });
-    addEventListener('keyup', (e) => this.keys.delete(e.code));
-    addEventListener('blur', () => {
+    win.addEventListener('keyup', (e) => this.keys.delete(e.code));
+    win.addEventListener('blur', () => {
       this.keys.clear();
-      this.mouseFire = false;
       this.dragLook = false;
     });
 
+    // Left button attacks, middle locks on. The right button shoots while the mouse is captured; without
+    // capture it drags the camera instead (K still shoots).
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     canvas.addEventListener('mousedown', (e) => {
-      canvas.focus();
+      canvas.focus?.();
       if (e.button === 0) {
         if (!this.locked && !this.lockFailed) this.requestLock();
-        this.mouseFire = true;
-      } else this.dragLook = true;
+        press('Mouse0');
+      } else if (e.button === 1) {
+        e.preventDefault();
+        press('Mouse1');
+      } else if (this.locked) press('Mouse2');
+      else this.dragLook = true;
     });
-    addEventListener('mouseup', (e) => {
-      if (e.button === 0) this.mouseFire = false;
-      else this.dragLook = false;
+    win.addEventListener('mouseup', (e) => {
+      this.keys.delete(`Mouse${Math.min(2, e.button)}`);
+      if (e.button >= 2) this.dragLook = false;
     });
-    addEventListener('mousemove', (e) => {
+    win.addEventListener('mousemove', (e) => {
       if (this.locked || this.dragLook) {
         this.look.dx += e.movementX;
         this.look.dy += e.movementY;
@@ -60,13 +90,17 @@ export class WorldInput {
     });
     canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
-      this.zoom += Math.sign(e.deltaY);
+      if (!e.deltaY) return;
+      // Locked on, the wheel switches targets (down = right); otherwise it zooms.
+      if (this.isLocked()) this.pulse[e.deltaY > 0 ? 'next' : 'prev']++;
+      else this.zoom += Math.sign(e.deltaY);
     }, { passive: false });
-    document.addEventListener('pointerlockchange', () => {
-      this.locked = document.pointerLockElement === canvas;
-      if (!this.locked) this.mouseFire = false;
+    const doc = win.document;
+    doc?.addEventListener('pointerlockchange', () => {
+      this.locked = doc.pointerLockElement === canvas;
+      if (!this.locked) for (const b of ['Mouse0', 'Mouse1', 'Mouse2']) this.keys.delete(b);
     });
-    document.addEventListener('pointerlockerror', () => {
+    doc?.addEventListener('pointerlockerror', () => {
       if (this.lockFailed) return;
       this.lockFailed = true;
       this.onLockFailed?.();
@@ -146,14 +180,21 @@ export class WorldInput {
 
     for (const btn of root.querySelectorAll('[data-btn]')) {
       const name = btn.dataset.btn;
+      const chip = Number(btn.dataset.chip) || 0;
       const on = (e) => {
         e.preventDefault();
         this.usedTouch = true;
-        this.touch[name] = true;
+        if (chip) this.touch.chip = chip;
+        else {
+          this.touch.held.add(name);
+          this.tapped.add(`Touch:${name}`);
+        }
         btn.classList.add('on');
       };
       const off = () => {
-        this.touch[name] = false;
+        if (chip) {
+          if (this.touch.chip === chip) this.touch.chip = 0;
+        } else this.touch.held.delete(name);
         btn.classList.remove('on');
       };
       btn.addEventListener('pointerdown', on);
@@ -163,12 +204,17 @@ export class WorldInput {
     }
   }
 
+  // Held now, or pressed since the last sample.
   any(codes) {
-    return codes.some((c) => this.keys.has(c));
+    return codes.some((c) => this.keys.has(c) || this.tapped.has(c));
+  }
+
+  touched(name) {
+    return this.touch.held.has(name) || this.tapped.has(`Touch:${name}`);
   }
 
   pad() {
-    const pads = navigator.getGamepads?.() ?? [];
+    const pads = globalThis.navigator?.getGamepads?.() ?? [];
     for (const p of pads) if (p && p.connected) return p;
     return null;
   }
@@ -182,9 +228,20 @@ export class WorldInput {
     if (this.any(MOVE_KEYS.down)) my -= 1;
     mx += this.touch.stick.x;
     my += this.touch.stick.y;
-    let fire = this.mouseFire || this.any(FIRE_KEYS) || this.touch.fire;
-    let jump = this.any(JUMP_KEYS) || this.touch.jump;
-    let dash = this.any(DASH_KEYS) || this.touch.dash;
+    const t = this.touch;
+    const lockedOn = this.isLocked();
+    const out = {
+      attack: this.any(ATTACK_KEYS) || this.touched('attack'),
+      shoot: this.any(SHOOT_KEYS) || this.touched('shoot'),
+      jump: this.any(JUMP_KEYS) || this.touched('jump'),
+      dash: this.any(DASH_KEYS) || this.touched('dash'),
+      lock: this.any(LOCK_KEYS) || this.touched('lock'),
+      react: this.any(REACT_KEYS) || this.touched('react'),
+      next: (lockedOn && this.any(TURN_RIGHT)) || this.touched('next'),
+      prev: lockedOn && this.any(TURN_LEFT),
+      chip: t.chip || CHIP_KEYS.findIndex((k) => this.keys.has(k) || this.tapped.has(k)) + 1,
+    };
+    this.tapped.clear();
     const pad = this.pad();
     if (pad) {
       const dz = (v) => (Math.abs(v) < 0.18 ? 0 : v);
@@ -194,11 +251,41 @@ export class WorldInput {
       mx += lx;
       my -= ly;
       const b = (i) => !!pad.buttons[i]?.pressed;
-      fire = fire || b(2) || b(7) || b(5); // X, right trigger, right bumper
-      jump = jump || b(0); // A
-      dash = dash || b(1) || b(4) || b(6); // B, left bumper, left trigger
+      if (pad.buttons.some((x) => x?.pressed)) this.usedPad = true;
+      const shortcut = b(PAD.lb); // KH2's shortcut menu: hold LB, press a face button for a chip
+      if (shortcut) {
+        const slot = PAD_CHIPS.findIndex((i) => b(i));
+        if (slot >= 0) out.chip = slot + 1;
+      } else {
+        out.attack ||= b(PAD.x);
+        out.jump ||= b(PAD.a);
+        out.dash ||= b(PAD.b);
+        out.react ||= b(PAD.y);
+      }
+      out.dash ||= b(PAD.lt);
+      out.shoot ||= b(PAD.rt);
+      out.lock ||= b(PAD.rb);
+      out.next ||= b(PAD.right);
+      out.prev ||= b(PAD.left);
+      // Locked on, a flick of the right stick switches targets.
+      const rx = pad.axes[2] ?? 0;
+      if (lockedOn && Math.abs(rx) > 0.65 && this.flick === 0) {
+        this.flick = Math.sign(rx);
+        this.pulse[rx > 0 ? 'next' : 'prev']++;
+      } else if (Math.abs(rx) < 0.3) this.flick = 0;
     }
-    return { move: { x: mx, y: my }, fire, jump, dash };
+    // A queued wheel tick or flick is pressed for one step and released for the next, so each one counts.
+    for (const k of ['next', 'prev']) {
+      if (this.pulsed[k]) this.pulsed[k] = false;
+      else if (this.pulse[k] > 0) {
+        this.pulse[k]--;
+        this.pulsed[k] = true;
+        out[k] = true;
+      }
+    }
+    if (!lockedOn) this.pulse = { next: 0, prev: 0 };
+    out.move = { x: mx, y: my };
+    return out;
   }
 
   consumeLook(dt) {
@@ -206,13 +293,15 @@ export class WorldInput {
     this.look.dx = 0;
     this.look.dy = 0;
     this.zoom = 0;
-    // Keyboard and right-stick turning, scaled to feel like mouse pixels.
-    const turn = (this.any(TURN_RIGHT) ? 1 : 0) - (this.any(TURN_LEFT) ? 1 : 0);
+    // Keyboard and right-stick turning, scaled to feel like mouse pixels. Locked on, the camera frames the
+    // target by itself and the same inputs switch targets instead.
+    const lockedOn = this.isLocked();
+    const turn = lockedOn ? 0 : (this.any(TURN_RIGHT) ? 1 : 0) - (this.any(TURN_LEFT) ? 1 : 0);
     out.dx += turn * 420 * dt;
     const pad = this.pad();
     if (pad) {
       const dz = (v) => (Math.abs(v) < 0.15 ? 0 : v);
-      out.dx += dz(pad.axes[2] ?? 0) * 900 * dt;
+      if (!lockedOn) out.dx += dz(pad.axes[2] ?? 0) * 900 * dt;
       out.dy += dz(pad.axes[3] ?? 0) * 600 * dt;
     }
     return out;

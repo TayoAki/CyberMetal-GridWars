@@ -3,13 +3,19 @@ import assert from 'node:assert/strict';
 import { World, PLAYER, DT } from '../src/world/sim.js';
 import { PLAY_RADIUS } from '../src/world/terrain.js';
 import { CANNONBALL } from '../src/world/enemies.js';
-import { GROUND_COMBO, AIR_COMBO, HITSTOP, LOCK, REACTIONS, CHIPS, CHIP_LEVELS, MELEE, chipLevel } from '../src/world/combat.js';
+import { GROUND_COMBO, AIR_COMBO, LAUNCHER, HITSTOP, LOCK, COMBO_GRACE, REACTIONS, CHIPS, CHIP_LEVELS, CHIP_FINISH, MELEE, chipLevel } from '../src/world/combat.js';
 import { Rng } from '../src/engine/rng.js';
 import { quiet, run, place, dummy } from './world_helpers.js';
 
 // Kingdom Hearts 2-style close combat (lock-on, combos, reaction commands) and the chips viruses teach.
 
 const press = (key, at = 0, extra = {}) => (i) => ({ ...extra, [key]: i === at });
+// Learn every chip by deleting one virus of each family far away.
+function learnAll(w) {
+  for (const type of ['rivet', 'plinker', 'dartfin']) w.killEnemy(dummy(w, type, 30));
+  run(w, 2);
+  w.pickups = [];
+}
 const types = (ev, type) => ev.filter((x) => x.type === type);
 
 test('lock-on picks the virus the camera faces, switches left and right, and lets go', () => {
@@ -55,14 +61,17 @@ test('the lock carries over to the nearest virus when its target is deleted, and
   assert.ok(types(ev2, 'unlock').some((x) => x.auto));
 });
 
-test('a ground combo lunges to its target, strikes three times and finishes with a launch', () => {
+// One on one, the combo ends in the launcher (KH2's single-target finisher); crowded, in the spin.
+const ONE_ON_ONE = [...GROUND_COMBO.slice(0, 3), LAUNCHER];
+
+test('a ground combo lunges to its target, strikes three times and finishes with a launcher', () => {
   const w = quiet();
   const e = dummy(w, 'plinker', 6);
+  e.hp = e.maxHp = 500;
   const ev = run(w, 90, (i) => ({ attack: i % 6 < 3 }));
-  assert.deepEqual(types(ev, 'swing').map((x) => x.name), GROUND_COMBO.map((s) => s.name));
+  assert.deepEqual(types(ev, 'swing').map((x) => x.name), ONE_ON_ONE.map((s) => s.name));
   const hits = types(ev, 'enemy-hit');
-  assert.deepEqual(hits.map((x) => x.amount), GROUND_COMBO.map((s) => s.dmg));
-  assert.equal(e.hp, e.maxHp - GROUND_COMBO.reduce((n, s) => n + s.dmg, 0));
+  assert.deepEqual(hits.map((x) => x.amount), ONE_ON_ONE.map((s) => s.dmg));
   assert.equal(hits.at(-1).kind, 'finisher');
   assert.ok(w.player.z > 3, `lunged in from 6 m (now ${w.player.z.toFixed(2)})`);
   assert.ok(e.z > 6.5, 'the strikes knocked it back');
@@ -76,6 +85,117 @@ test('a ground combo lunges to its target, strikes three times and finishes with
     return { attack: i % 6 < 3 };
   });
   assert.ok(flew, 'the finisher launched the rivet');
+});
+
+test('crowded by viruses, the finisher is a spin that hits all around', () => {
+  const w = quiet();
+  const foes = [dummy(w, 'rivet', 2.2), dummy(w, 'rivet', -2.4), dummy(w, 'rivet', 0, 2.6)];
+  for (const e of foes) e.hp = e.maxHp = 500;
+  const ev = run(w, 100, (i) => ({ attack: i % 6 < 3 }));
+  const fin = types(ev, 'swing').find((x) => x.finisher);
+  assert.equal(fin?.name, 'finisher');
+  const strike = types(ev, 'strike').find((x) => x.finisher);
+  assert.equal(strike.hits, 3, 'the spin hit all three');
+});
+
+test('as in KH2, a ground strike that hits nothing ends the combo', () => {
+  const w = quiet();
+  const ev = run(w, 120, (i) => ({ attack: i % 6 < 3 }));
+  const names = types(ev, 'swing').map((x) => x.name);
+  assert.ok(names.length >= 4);
+  assert.ok(names.every((n) => n === 'slash1'), names.join(' '));
+});
+
+test('a press shortly after a strike ends still continues the combo; a late one starts over', () => {
+  for (const [wait, expect] of [[0.15, 'slash2'], [COMBO_GRACE + 0.2, 'slash1']]) {
+    const w = quiet();
+    dummy(w, 'plinker', 2.5).hp = 500;
+    const ev = run(w, 1, { attack: true });
+    for (let i = 0; i < 120 && w.player.action; i++) ev.push(...run(w, 1));
+    ev.push(...run(w, Math.round(wait * 60)));
+    ev.push(...run(w, 2, (i) => ({ attack: i === 0 })));
+    assert.equal(types(ev, 'swing').at(-1).name, expect, `after ${wait}s`);
+  }
+});
+
+test('a chip cutting in after the third strike is a finisher for double damage', () => {
+  const w = quiet();
+  learnAll(w);
+  const e = dummy(w, 'rivet', 2.5);
+  e.hp = e.maxHp = 1000;
+  // Three strikes, then the ShockWave as soon as the third has landed.
+  let ev = [];
+  for (let i = 0; i < 200; i++) {
+    const a = w.player.action;
+    const third = a?.kind === 'melee' && a.step === 2 && a.hitDone;
+    w.step({ attack: !third && i % 6 < 3, chip: third ? 1 : 0 });
+    ev.push(...w.drainEvents());
+    if (types(ev, 'chip-use').length) break;
+  }
+  const use = types(ev, 'chip-use')[0];
+  assert.ok(use?.finish, 'counted as a finisher');
+  ev.push(...run(w, 40));
+  const hit = types(ev, 'enemy-hit').find((x) => x.kind === 'chip');
+  assert.equal(hit?.amount, CHIPS.shockwave.dmg[1] * CHIP_FINISH);
+  assert.equal(w.stats.chipFinishes, 1);
+});
+
+test('a chip cutting in early keeps the combo going', () => {
+  const w = quiet();
+  learnAll(w);
+  dummy(w, 'plinker', 2.5).hp = 1000;
+  let ev = [];
+  for (let i = 0; i < 60; i++) {
+    const a = w.player.action;
+    const first = a?.kind === 'melee' && a.step === 0 && a.hitDone;
+    w.step({ attack: i === 0, chip: first ? 2 : 0 });
+    ev.push(...w.drainEvents());
+    if (types(ev, 'chip-use').length) break;
+  }
+  assert.equal(types(ev, 'chip-use')[0]?.finish, false);
+  for (let i = 0; i < 120 && w.player.action; i++) ev.push(...run(w, 1));
+  ev = run(w, 2, (i) => ({ attack: i === 0 }));
+  assert.equal(types(ev, 'swing')[0]?.name, 'slash2', 'picked up after the Cannon');
+});
+
+test('a chip cutting into the finisher ends the combo; the next press starts over', () => {
+  const w = quiet();
+  learnAll(w);
+  dummy(w, 'plinker', 2.5).hp = 1000;
+  let ev = [];
+  for (let i = 0; i < 200; i++) {
+    const a = w.player.action;
+    const fin = a?.kind === 'melee' && a.def.finisher && a.hitDone;
+    w.step({ attack: !fin && i % 6 < 3, chip: fin ? 3 : 0 });
+    ev.push(...w.drainEvents());
+    if (types(ev, 'chip-use').length) break;
+  }
+  assert.equal(types(ev, 'chip-use').length, 1);
+  for (let i = 0; i < 120 && w.player.action; i++) run(w, 1);
+  ev = run(w, 2, (i) => ({ attack: i === 0 }));
+  assert.equal(types(ev, 'swing')[0]?.name, 'slash1');
+});
+
+test('the soft target is what the next strike homes in on; locking on hides it', () => {
+  const w = quiet();
+  const ahead = dummy(w, 'rivet', 5);
+  dummy(w, 'rivet', -5); // behind
+  run(w, 2);
+  assert.equal(w.player.soft, ahead.id);
+  run(w, 2, press('lock'));
+  assert.equal(w.player.soft, null);
+  assert.equal(w.player.lock, ahead.id);
+});
+
+test('the lock never jumps to a virus behind the camera when its target is deleted', () => {
+  const w = quiet();
+  const a = dummy(w, 'rivet', 8);
+  dummy(w, 'rivet', -6); // behind the camera, closer than the retarget range
+  run(w, 2, press('lock'));
+  assert.equal(w.player.lock, a.id);
+  w.killEnemy(a);
+  run(w, 2);
+  assert.equal(w.player.lock, null);
 });
 
 test('a lone press swings once; a strike with nothing in reach still swings', () => {
@@ -265,12 +385,6 @@ test('deleting a virus teaches its chip; more deletes level it up', () => {
   assert.equal(chipLevel(0), 0);
   assert.equal(chipLevel(CHIP_LEVELS[3]), 3);
 });
-
-function learnAll(w) {
-  for (const type of ['rivet', 'plinker', 'dartfin']) w.killEnemy(dummy(w, type, 30));
-  run(w, 2);
-  w.pickups = [];
-}
 
 test('ShockWave chip: a ring that hits every virus around you once', () => {
   const w = quiet();

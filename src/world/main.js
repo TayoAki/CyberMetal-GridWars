@@ -21,17 +21,31 @@ if (coarse) document.body.classList.add('touch');
 const world = new World({ seed });
 const view = await createView(canvas, world, await loadMechaBuffer(), { low });
 const input = new WorldInput(canvas, document.getElementById('touch'));
-const hud = new Hud(world, view);
+input.isLocked = () => world.player.lock != null;
+const hud = new Hud(world, view, { input });
 const bot = auto ? makeBot(world) : null;
-input.onLockFailed = () => hud.toast('MOUSE LOCK UNAVAILABLE · RIGHT-DRAG OR Q/E TO TURN', '#ffd84a', 4);
+input.onLockFailed = () => hud.toast('MOUSE LOCK UNAVAILABLE · RIGHT-DRAG OR Q/E TO TURN · K TO SHOOT', '#ffd84a', 4);
 
-// Sounds from the grid game's synth, mapped onto open-world events.
+// Sounds from the grid game's synth, mapped onto open-world events (a name, [name, options], or a list).
+const SWING_PITCH = [1, 1.12, 1.24, 0.85];
 const SFX = {
   shot: (e) => (e.kind === 'buster' ? 'buster' : 'chargeshot'),
   'charge-start': 'charge',
   'charge-full': 'chargefull',
-  impact: (e) => (e.team === 'enemy' || e.kind === 'charge' ? 'explode' : e.surface === 'enemy' ? 'hit' : null),
-  'enemy-hit': (e) => (e.counter ? 'counter' : null),
+  impact: (e) => (e.team === 'enemy' || ['charge', 'cannon', 'deflect'].includes(e.kind) ? 'explode' : e.surface === 'enemy' ? 'hit' : null),
+  'enemy-hit': (e) => (e.counter ? 'counter' : e.kind === 'finisher' || e.kind === 'react' ? 'hammer' : e.kind === 'melee' ? 'punch' : null),
+  swing: (e) => ['sword', { pitch: e.finisher ? 0.85 : SWING_PITCH[e.step] ?? 1 }],
+  lock: (e) => (e.auto ? null : 'cursor'),
+  unlock: (e) => (e.auto ? null : 'deselect'),
+  'lock-none': 'cancel',
+  reaction: ['flash', 'counter'],
+  armor: 'guardup',
+  'chip-learn': (e) => (e.level === 1 ? 'pa' : 'gaugefull'),
+  'chip-use': (e) => {
+    const s = { shockwave: 'shockwave', cannon: 'cannon', findash: 'lance' }[e.chip];
+    return e.finish ? [s, 'pa'] : s; // a chip finisher gets Battle Network's Program Advance fanfare
+  },
+  'chip-denied': 'buzz',
   delete: 'delete',
   hurt: 'hurt',
   down: 'playerdelete',
@@ -51,13 +65,17 @@ const SFX = {
 };
 function sound(ev) {
   const s = SFX[ev.type];
-  const name = typeof s === 'function' ? s(ev) : s;
-  if (!name) return;
+  let out = typeof s === 'function' ? s(ev) : s;
+  if (!out) return;
   // Distant enemy events are quieter.
   const p = world.player;
   const d = ev.x !== undefined ? Math.hypot(ev.x - p.x, ev.z - p.z) : 0;
   const volume = Math.max(0.15, 1 - d / 60);
-  audio.play(name, { volume });
+  if (typeof out === 'string' || (Array.isArray(out) && typeof out[1] === 'object')) out = [out];
+  for (const one of out) {
+    const [name, opts] = typeof one === 'string' ? [one, {}] : one;
+    audio.play(name, { volume, ...opts });
+  }
 }
 
 // Exploration music, switching to battle music while viruses are close.
@@ -94,6 +112,7 @@ ro?.observe(canvas);
 addEventListener('resize', () => view.resize());
 
 let paused = false;
+let held = false; // paused from outside (window.__world.hold), for scripted captures
 document.addEventListener('visibilitychange', () => {
   paused = document.hidden;
 });
@@ -130,7 +149,8 @@ function frame(now) {
     fpsAcc = 0;
     fpsFrames = 0;
   }
-  if (!paused) {
+  const stopped = paused || held;
+  if (!stopped) {
     view.applyLook(input.consumeLook(dt));
     acc += dt;
     let steps = 0;
@@ -151,11 +171,38 @@ function frame(now) {
     if (steps === 5) acc = 0;
     music(dt);
   }
-  view.render(acc / DT, paused ? 0 : dt);
-  hud.update(paused ? 0 : dt);
+  if (!held) {
+    view.render(acc / DT, stopped ? 0 : dt);
+    hud.update(stopped ? 0 : dt);
+  }
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 
-window.__world = { world, view, input };
+// Scripted capture: hold the loop, then advance exactly n steps (one render each, at 60 fps) with the given
+// input, or else what the loop would use (the bot, or the real controls), handling events as the loop does.
+function advance(n, given = null) {
+  for (let i = 0; i < n; i++) {
+    const aim = view.aimInfo();
+    const pad = given ?? (bot ? bot(view) : started ? input.sample() : { move: { x: 0, y: 0 } });
+    view.beforeStep();
+    world.step({ ...pad, ...aim });
+    for (const ev of world.drainEvents()) {
+      view.onEvent(ev);
+      hud.onEvent(ev);
+      if (ev.type === 'respawn') view.faceCamera(0);
+    }
+    view.render(1, DT);
+    hud.update(DT);
+  }
+}
+
+window.__world = {
+  world, view, input, hud,
+  hold: (v) => {
+    held = v;
+    last = performance.now();
+  },
+  advance,
+};
 window.__ready = true;

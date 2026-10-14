@@ -43,6 +43,34 @@
   #crosshair { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; border: 2px solid rgba(255, 255, 255, 0.85); border-radius: 50%; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5); }
   #crosshair::after { content: ""; position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px; border-radius: 50%; background: #fff; }
   #crosshair.lock { border-color: var(--bad); transform: scale(0.8); }
+  #crosshair.off { display: none; }
+  /* Lock-on target (top centre), KH2's command panel (bottom left): reaction command and chip shortcuts. */
+  #target { position: absolute; left: 50%; top: 12px; width: min(300px, calc(100% - 420px)); min-width: 180px; transform: translateX(-50%); padding: 7px 10px 8px; background: var(--panel); border: 1px solid rgba(255, 216, 74, 0.6); border-radius: 10px; opacity: 0; transition: opacity 0.15s; }
+  #target.on { opacity: 1; }
+  #target .top { display: flex; justify-content: space-between; gap: 8px; font: 800 12px/1 ui-monospace, Menlo, monospace; letter-spacing: 0.08em; }
+  #target .top span:last-child { color: var(--muted); font-variant-numeric: tabular-nums; }
+  #target .bar { margin-top: 6px; height: 8px; }
+  #tgFill { background: linear-gradient(90deg, #d8a020, var(--gold)); }
+  #tgState { margin-top: 5px; font: 800 11px/1 system-ui, sans-serif; letter-spacing: 0.08em; color: var(--bad); min-height: 11px; }
+  .cmd { position: absolute; left: 12px; bottom: 12px; width: 236px; display: grid; gap: 6px; }
+  .box { padding: 6px 8px; background: var(--panel); border: 1px solid var(--edge); border-radius: 10px; }
+  .box h2 { margin: 0 0 4px; font: 700 10px/1 ui-monospace, Menlo, monospace; letter-spacing: 0.14em; color: var(--muted); }
+  kbd { display: inline-block; min-width: 18px; padding: 2px 4px; border-radius: 5px; background: rgba(255, 255, 255, 0.12); border: 1px solid rgba(255, 255, 255, 0.25); font: 800 11px/1.2 ui-monospace, Menlo, monospace; color: var(--ink); text-align: center; }
+  #react { display: flex; align-items: center; gap: 8px; min-height: 26px; color: var(--muted); font: 800 15px/1 system-ui, sans-serif; letter-spacing: 0.1em; }
+  #react.ready { color: var(--gold); text-shadow: 0 0 12px rgba(255, 216, 74, 0.6); animation: pulse 0.5s ease-in-out infinite alternate; }
+  #react.ready kbd { background: var(--gold); color: #1a1400; border-color: var(--gold); }
+  @keyframes pulse { from { transform: scale(1); } to { transform: scale(1.04); } }
+  .chip { position: relative; display: flex; align-items: center; gap: 8px; padding: 4px 4px; border-radius: 7px; overflow: hidden; font-size: 13px; font-weight: 700; }
+  .chip + .chip { margin-top: 2px; }
+  .chip .nm { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chip .lv { font: 800 10px/1 ui-monospace, Menlo, monospace; letter-spacing: 0.1em; color: var(--chip, var(--cyan)); }
+  .chip::after { content: ""; position: absolute; inset: 0 0 0 auto; width: calc(var(--cd, 0) * 100%); background: rgba(5, 7, 15, 0.62); pointer-events: none; }
+  .chip.unknown { color: var(--muted); font-weight: 600; }
+  .chip.unknown .nm { font-size: 11px; }
+  .chip.denied { animation: deny 0.25s; }
+  @keyframes deny { 0%, 100% { transform: none; } 30% { transform: translateX(-4px); } 60% { transform: translateX(4px); } }
+  #callout { position: absolute; left: 50%; top: 31%; transform: translate(-50%, 6px) scale(0.96); font: 900 26px/1 system-ui, sans-serif; letter-spacing: 0.16em; text-shadow: 0 2px 0 #000, 0 0 22px rgba(0, 0, 0, 0.6); opacity: 0; transition: opacity 0.12s, transform 0.12s; white-space: nowrap; }
+  #callout.show { opacity: 1; transform: translate(-50%, 0) scale(1); }
   #toast { position: absolute; left: 50%; top: 22%; transform: translate(-50%, -8px); font: 800 22px/1.1 system-ui, sans-serif; letter-spacing: 0.12em; text-shadow: 0 2px 0 #000, 0 0 18px rgba(0, 0, 0, 0.6); opacity: 0; transition: opacity 0.2s, transform 0.2s; white-space: nowrap; }
   #toast.show { opacity: 1; transform: translate(-50%, 0); }
   #nums { position: absolute; inset: 0; overflow: hidden; }
@@ -50,7 +78,8 @@
   .num.big { font-size: 22px; color: var(--pink); }
   .num.counter { font-size: 20px; color: var(--gold); }
   .num.hurt { color: var(--bad); }
-  #hint { position: absolute; left: 12px; bottom: 12px; padding: 8px 10px; max-width: calc(100% - 24px); background: var(--panel); border: 1px solid var(--edge); border-radius: 8px; font-size: 12px; color: var(--muted); }
+  .num.armor { font-size: 13px; color: #ff9a4a; letter-spacing: 0.1em; }
+  #hint { position: absolute; right: 12px; bottom: 12px; padding: 8px 10px; max-width: calc(100% - 290px); background: var(--panel); border: 1px solid var(--edge); border-radius: 8px; font-size: 12px; color: var(--muted); }
   #hint b { color: var(--ink); font-weight: 600; }
   #start { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; background: radial-gradient(ellipse at center, rgba(5, 7, 15, 0.55), rgba(5, 7, 15, 0.88)); cursor: pointer; }
   #start[hidden] { display: none; }
@@ -58,27 +87,54 @@
   .card h1 { margin: 0; font: 900 28px/1 system-ui, sans-serif; letter-spacing: 0.04em; text-wrap: balance; }
   .card h1 span { color: var(--cyan); }
   .card .tag { margin: 8px 0 14px; color: var(--muted); }
-  .keys { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 13px; }
+  .keys { display: grid; grid-template-columns: auto 1fr; gap: 5px 14px; font-size: 13px; }
   .keys dt { font: 700 12px/1.4 ui-monospace, Menlo, monospace; color: var(--cyan); }
   .keys dd { margin: 0; color: var(--ink); }
   .go { margin-top: 16px; padding: 10px 14px; text-align: center; border-radius: 10px; background: linear-gradient(90deg, #1b3a8a, #3a1b8a); font-weight: 800; letter-spacing: 0.1em; }
   /* Touch controls (shown on touch screens). */
   #touch { display: none; position: absolute; inset: 0; pointer-events: none; }
   body.touch #touch { display: block; }
-  body.touch #hint { display: none; }
+  body.touch #hint, body.touch .cmd { display: none; }
   #touch [data-look] { position: absolute; top: 0; right: 0; width: 55%; height: 70%; pointer-events: auto; touch-action: none; }
   .stick { position: absolute; left: 18px; bottom: 18px; width: 120px; height: 120px; border-radius: 50%; background: rgba(255, 255, 255, 0.07); border: 1px solid var(--edge); pointer-events: auto; touch-action: none; }
   .stick i { position: absolute; left: 50%; top: 50%; width: 48px; height: 48px; margin: -24px 0 0 -24px; border-radius: 50%; background: rgba(106, 232, 255, 0.35); border: 1px solid var(--cyan); }
-  .btns { position: absolute; right: 18px; bottom: 18px; display: grid; grid-template-columns: repeat(2, 64px); gap: 10px; pointer-events: auto; }
-  .btns button { width: 64px; height: 64px; border-radius: 50%; border: 1px solid var(--edge); background: rgba(8, 12, 28, 0.6); color: var(--ink); font: 800 12px/1 system-ui, sans-serif; letter-spacing: 0.06em; touch-action: none; }
+  .btns { --b: 58px; position: absolute; right: 18px; bottom: 18px; display: grid; grid-template-columns: repeat(3, var(--b)); grid-auto-rows: var(--b); gap: 8px; pointer-events: auto; }
+  .btns button { position: relative; width: var(--b); height: var(--b); padding: 0; border-radius: 50%; border: 1px solid var(--edge); background: rgba(8, 12, 28, 0.6); color: var(--ink); font: 800 11px/1 system-ui, sans-serif; letter-spacing: 0.05em; touch-action: none; overflow: hidden; }
   .btns button.on { background: rgba(106, 232, 255, 0.35); }
-  .btns .fire { grid-column: 2; grid-row: 1 / span 2; height: 138px; border-radius: 32px; color: var(--cyan); }
+  .btns .atk { grid-column: 3; grid-row: 2 / span 2; height: calc(var(--b) * 2 + 8px); border-radius: 29px; color: var(--cyan); font-size: 13px; }
+  .btns .chipb { height: calc(var(--b) * 0.72); align-self: end; border-radius: 12px; font-size: 10px; color: var(--chip, var(--muted)); }
+  .btns .chipb::after { content: ""; position: absolute; inset: 0 0 0 auto; width: calc(var(--cd, 0) * 100%); background: rgba(5, 7, 15, 0.7); }
+  .btns .chipb.unknown { opacity: 0.45; }
+  .btns .react { display: none; position: absolute; right: 0; bottom: calc(100% + 10px); width: calc(var(--b) * 2.4); height: 50px; border-radius: 14px; background: var(--gold); border-color: var(--gold); color: #1a1400; font-size: 15px; letter-spacing: 0.1em; animation: pulse 0.5s ease-in-out infinite alternate; }
+  .btns .react.ready { display: block; }
+  .btns .sw { display: none; position: absolute; right: calc(100% + 8px); top: calc(var(--b) * 0.72 + 8px); }
+  .btns .sw.ready { display: block; }
+  .btns .lock.ready { border-color: var(--gold); color: var(--gold); }
+  @media (max-width: 860px) {
+    #target { top: 64px; width: min(260px, calc(100% - 32px)); }
+    #toast { top: 34%; }
+    #callout { top: 42%; }
+  }
+  /* Short landscape screens: smaller map, and the reaction button sits left of the buttons, not above them. */
+  @media (max-height: 500px) {
+    #minimap { width: 104px; height: 104px; }
+    #toast { top: 41%; }
+    #callout { top: 51%; }
+    .btns .react { right: calc(100% + 10px); bottom: 0; }
+  }
   @media (max-width: 560px) {
     .panel { min-width: 0; max-width: calc(100% - 130px); }
     #minimap { width: 104px; height: 104px; }
     #toast { font-size: 16px; }
+    #callout { font-size: 19px; }
+    #target { top: 124px; }
+    .stick { left: 12px; bottom: 12px; width: 104px; height: 104px; }
+    .btns { --b: 48px; right: 12px; bottom: 12px; gap: 6px; }
+    .btns .atk { height: calc(var(--b) * 2 + 6px); font-size: 10px; letter-spacing: 0; }
+    .btns .chipb { font-size: 9.5px; letter-spacing: 0; }
+    .btns .sw { top: calc(var(--b) * 0.72 + 6px); right: calc(100% + 6px); }
   }
-  @media (prefers-reduced-motion: reduce) { #toast, .bar i { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { #toast, #callout, .bar i { transition: none; } #react.ready, .btns .react { animation: none; } }
 </style>
 <script type="importmap">{"imports":{"three":"../node_modules/three/build/three.module.js","three/addons/":"../node_modules/three/examples/jsm/"}}</script>
 </head>
@@ -92,32 +148,47 @@
       <div class="stats"><span id="data">DATA 0</span><span id="rifts">RIFTS 0/6</span></div>
     </div>
     <canvas id="minimap" width="300" height="300"></canvas>
+    <div id="target"><div class="top"><span id="tgName">—</span><span id="tgHp"></span></div><div class="bar"><i id="tgFill"></i></div><div id="tgState"></div></div>
     <div id="crosshair"></div>
     <div id="toast"></div>
+    <div id="callout"></div>
     <div id="nums"></div>
-    <div id="hint"><b>WASD</b> move · <b>Mouse</b> aim · <b>Click / J</b> blast, hold to charge · <b>Space</b> jump · <b>Shift</b> dash · <b>Q/E</b> turn</div>
+    <div class="cmd">
+      <div class="box"><h2>REACTION</h2><div id="react"><kbd data-key="react">F</kbd><span id="reactName">—</span></div></div>
+      <div class="box"><h2>CHIPS</h2><div id="deck"></div></div>
+    </div>
+    <div id="hint"><b>Click</b> attack · <b>Right-click / K</b> shoot, hold to charge · <b>R</b> lock on · <b>Q/E</b> switch target · <b>F</b> reaction · <b>1-3</b> chips · <b>Space</b> jump · <b>Shift</b> dodge</div>
   </div>
   <div id="touch" aria-hidden="true">
     <div data-look></div>
     <div class="stick" data-stick><i data-knob></i></div>
     <div class="btns">
+      <button class="react" data-btn="react">REACT</button>
+      <button class="sw" data-btn="next" aria-label="Switch target">⇄</button>
+      <button class="chipb" data-btn="chip" data-chip="1">1</button>
+      <button class="chipb" data-btn="chip" data-chip="2">2</button>
+      <button class="chipb" data-btn="chip" data-chip="3">3</button>
+      <button class="lock" data-btn="lock">LOCK</button>
+      <button data-btn="shoot">SHOOT</button>
+      <button class="atk" data-btn="attack">ATTACK</button>
+      <button data-btn="dash">DODGE</button>
       <button data-btn="jump">JUMP</button>
-      <button class="fire" data-btn="fire">BLAST</button>
-      <button data-btn="dash">DASH</button>
     </div>
   </div>
   <div id="start" hidden>
     <div class="card">
       <h1>CYBERMETAL <span>OPEN WORLD</span></h1>
-      <p class="tag">Viruses are leaking out of the net into the real world. Find the six rifts, blast what comes out and seal them.</p>
+      <p class="tag">Viruses are leaking out of the net into the real world. Find the six rifts and seal them. Lock on, slash and blast, turn their attacks around, and learn each virus's skill as a chip by deleting it.</p>
       <dl class="keys">
         <dt>WASD</dt><dd>Move (the camera decides forward)</dd>
-        <dt>Mouse</dt><dd>Aim and look (click locks the mouse, Esc frees it)</dd>
-        <dt>Click / J</dt><dd>Blast · hold, then release for a charge shot</dd>
-        <dt>Space</dt><dd>Jump over shockwaves</dd>
-        <dt>Shift</dt><dd>Dash (you can't be hit mid-dash)</dd>
-        <dt>Q / E</dt><dd>Turn the camera · wheel to zoom</dd>
-        <dt>Gamepad</dt><dd>Sticks · A jump · B dash · X or RT blast</dd>
+        <dt>Mouse</dt><dd>Look (click captures the mouse, Esc frees it)</dd>
+        <dt>Click / J</dt><dd>Attack · mash for a combo; it homes in on viruses</dd>
+        <dt>Right-click / K</dt><dd>Buster · tap to shoot, hold to charge</dd>
+        <dt>R / Middle</dt><dd>Lock on · Q / E or the wheel switch target</dd>
+        <dt>F</dt><dd>Reaction command when a gold prompt appears</dd>
+        <dt>1 2 3</dt><dd>Chips learned from viruses you deleted</dd>
+        <dt>Space · Shift</dt><dd>Jump · Dodge (you can't be hit mid-dodge)</dd>
+        <dt>Gamepad</dt><dd>X attack · RT shoot · RB lock · Y reaction · hold LB + a face button for chips · A jump · B dodge</dd>
       </dl>
       <div class="go">CLICK TO PLAY</div>
     </div>

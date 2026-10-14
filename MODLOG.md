@@ -210,3 +210,62 @@ smallest strict-CSP-safe option that reaches ~97% of browsers).
   page error. Checked on desktop and at phone size with touch controls.
 - Not verified: real-GPU frame rate. Headless Chromium renders in software. F3 shows FPS, and slow
   frames lower the resolution automatically.
+
+### 6b. Kingdom Hearts 2-style combat
+
+The owner asked to make the gameplay "more like Kingdom Hearts 2", with a lock-on, and with attacks that
+come from enemies' skills so the chip system stays. A research pass on KH2, Birth by Sleep and
+Re:Chain of Memories drew on the PS2 manual, the KH wiki and OpenKH's attack-table docs. Its notes are
+kept locally, not committed. Ideas taken from it:
+- KH2's two-tier targeting: a soft target that attacks go to, plus a hard lock.
+- 3 hits plus a finisher, chosen by the situation.
+- A whiff ends the combo.
+- Revenge value.
+- Reaction prompts tied to enemy wind-ups.
+- BBS-style command cooldowns and chips that keep a combo going.
+- A spell finisher worth ×2.
+- Re:CoM's enemy cards as the precedent for learning chips from deletes.
+
+Route: the combat is data in `src/world/combat.js` and runs inside the same deterministic step. The view
+only reads the state:
+- the saber grows out of the buster hand;
+- slash trails are Catmull-Rom ribbons;
+- strike, chip and reaction poses are procedural bone targets;
+- hit-stop freezes the pose with the world.
+
+#### Gotchas
+1. **Symptom:** the bot sweep crashed with `s.finisher` undefined. **Cause:** a chip that cut into the
+   finisher stored "continue the combo at step 4", and there is no step 4. **Fix:** a chip only resumes
+   the combo before the finisher; regression test added. The fuzz test missed it, so sweep after every
+   rule change.
+2. **Symptom:** locked on in melee, the player hid the target. **Cause:** the camera aimed along the
+   player-to-target line, so the over-the-shoulder offset moved both by the same amount. **Fix:** aim
+   from the shoulder pivot and look further down while locked.
+3. **Symptom:** slash trails were invisible in headless screenshots. **Cause:** software rendering ran
+   at a few frames per second, so each 0.1 s swing got one or two trail samples. **Fix (tooling):**
+   `window.__world.hold()` and `advance(n)` step the game and render at an exact 60 fps for scripted
+   captures.
+4. **Symptom:** horizontal slashes barely showed from behind. **Cause:** the trail ribbon was edge-on to
+   the camera. **Fix:** steeper diagonal swings.
+5. **Symptom:** in the ShockWave test, the hit "never happened". **Cause:** it happened in the same step
+   as the press, in the batch of events already read. **Fix:** collect every batch.
+6. **Input:** a tap that starts and ends between two steps used to be lost (held-state sampling). Taps
+   are now remembered until the next sample, as in the grid game. Ctrl/Cmd shortcuts are left to the
+   browser.
+
+#### Oracles
+- `tests/world_combat.test.js` (29 tests):
+  - lock-on pick, switch, wrap-around and on-screen retarget;
+  - the soft target;
+  - combos, the launcher and the spin;
+  - whiffs, the grace window, hit-stop, cancels, the air combo and revenge armor;
+  - BREAK, REVERSAL and DEFLECT;
+  - chip learning, levels, the three chips, cooldowns, chip finishers and combo carry-over;
+  - a 9,000-frame fuzz with every button, and determinism.
+- `tests/world_input.test.js` (6 tests): taps between steps, mouse buttons, chips, Q/E in both modes,
+  wheel pulses, and leaving Ctrl+R alone.
+- **Bot sweep** (4 seeds × 5 min): 66-74 deletes, 22-37 reactions, 49-58 chips, no knockdowns, all chips
+  at level 3. A bot that never misses a prompt wins easily. Humans will find it harder, but that is the
+  next balance question.
+- **Scripted captures** (SwiftShader) of every strike, chip and reaction, plus phone portrait and
+  landscape layouts. No page errors.

@@ -1,24 +1,73 @@
 import { WORLD_SIZE, WATER_LEVEL } from './terrain.js';
 import { CHARGE } from './sim.js';
+import { CHIPS, CHIP_LEVELS } from './combat.js';
 
 // The open world's HUD, in plain DOM over the 3D canvas: HP and charge bars, data and rift counters, the
-// crosshair, floating damage numbers, toasts and a rotating minimap centred on the player.
+// crosshair, floating damage numbers, toasts and a rotating minimap centred on the player; and, for close
+// combat, the lock-on target's panel and a KH2-style command panel (the reaction command and chip shortcuts).
 
 const MAP_RADIUS = 80; // metres shown from the centre to the edge of the minimap
+const NAMES = { rivet: 'RIVET', plinker: 'PLINKER', dartfin: 'DARTFIN' };
+const FAMILY = { rivet: 'a Rivet', plinker: 'a Plinker', dartfin: 'a Dartfin' };
+const CHIP_KEYS = Object.keys(CHIPS);
+// Key labels: keyboard, or a gamepad (hold LB and press X, Y, B for chips 1-3).
+const LABELS = {
+  kb: { react: 'F', chip: ['1', '2', '3', '4'] },
+  pad: { react: 'Y', chip: ['LB+X', 'LB+Y', 'LB+B', 'LB+A'] },
+  touch: { react: 'REACT', chip: ['1', '2', '3', '4'] },
+};
+const css = (hex) => `#${hex.toString(16).padStart(6, '0')}`;
 
 export class Hud {
-  constructor(world, view, root = document) {
+  constructor(world, view, { root = document, input = null } = {}) {
     this.world = world;
     this.view = view;
+    this.input = input;
     const $ = (id) => root.getElementById(id);
     this.el = {
       hpFill: $('hpFill'), hpNum: $('hpNum'), chFill: $('chFill'), chRow: $('chRow'), data: $('data'), rifts: $('rifts'),
       cross: $('crosshair'), toast: $('toast'), nums: $('nums'), map: $('minimap'), hint: $('hint'),
+      target: $('target'), tgName: $('tgName'), tgHp: $('tgHp'), tgFill: $('tgFill'), tgState: $('tgState'),
+      react: $('react'), reactName: $('reactName'), deck: $('deck'), callout: $('callout'),
     };
     this.nums = [];
     this.toastT = 0;
+    this.calloutT = 0;
     this.dataShown = -1;
+    this.mode = 'kb';
     this.mapBg = this.renderMapBackground();
+    // One row per virus family's chip, in the order they are learned.
+    this.slots = CHIP_KEYS.map((_, i) => {
+      const row = document.createElement('div');
+      row.className = 'chip unknown';
+      row.innerHTML = `<kbd>${i + 1}</kbd><span class="nm"></span><span class="lv"></span>`;
+      this.el.deck?.appendChild(row);
+      return { row, key: row.firstChild, nm: row.children[1], lv: row.children[2], shown: '' };
+    });
+    this.touchChips = [...(root.querySelectorAll?.('[data-chip]') ?? [])];
+    this.touchReact = root.querySelector?.('#touch .react');
+    this.touchSwitch = root.querySelector?.('#touch .sw');
+    this.touchLock = root.querySelector?.('#touch .lock');
+  }
+
+  // Which key labels to show: the last thing the player used.
+  pickMode() {
+    if (document.body.classList.contains('touch') || this.input?.usedTouch) return 'touch';
+    return this.input?.usedPad ? 'pad' : 'kb';
+  }
+
+  callout(text, color = '#ffffff', time = 0.9) {
+    const c = this.el.callout;
+    if (!c) return;
+    c.textContent = text;
+    c.style.color = color;
+    c.classList.add('show');
+    this.calloutT = time;
+  }
+
+  chipKey(key) {
+    const i = this.world.deck.indexOf(key);
+    return LABELS[this.mode].chip[i] ?? '';
   }
 
   renderMapBackground() {
@@ -76,6 +125,34 @@ export class Hud {
       case 'enemy-hit':
         this.number(ev.x, ev.y, ev.z, ev.counter ? `${ev.amount} COUNTER!` : String(ev.amount), ev.counter ? 'counter' : ev.amount >= 40 ? 'big' : '');
         break;
+      case 'armor':
+        this.number(ev.x, ev.y + 0.4, ev.z, 'ARMOR', 'armor');
+        break;
+      case 'reaction':
+        this.callout(`${ev.label}!`, '#ffd84a');
+        break;
+      case 'chip-use':
+        this.callout(`${CHIPS[ev.chip].name.toUpperCase()}${ev.level > 1 ? ` LV${ev.level}` : ''}${ev.finish ? ' · FINISH ×2' : ''}`, css(CHIPS[ev.chip].color), ev.finish ? 1.1 : 0.8);
+        break;
+      case 'chip-denied': {
+        const slot = this.slots[this.world.deck.indexOf(ev.chip)];
+        if (slot) {
+          slot.row.classList.remove('denied');
+          void slot.row.offsetWidth; // restart the shake
+          slot.row.classList.add('denied');
+        }
+        break;
+      }
+      case 'chip-learn': {
+        const name = CHIPS[ev.chip].name.toUpperCase();
+        const how = this.mode === 'touch' ? 'TAP' : 'PRESS';
+        if (ev.level === 1) this.toast(`NEW CHIP · ${name} · ${how} ${this.chipKey(ev.chip)}`, css(CHIPS[ev.chip].color), 3.2);
+        else this.toast(`${name} LV${ev.level}`, css(CHIPS[ev.chip].color), 2.4);
+        break;
+      }
+      case 'lock-none':
+        this.toast('NO TARGET IN RANGE', '#8a9cc8', 1.2);
+        break;
       case 'hurt':
         this.number(ev.x, ev.y, ev.z, `-${ev.amount}`, 'hurt');
         break;
@@ -116,11 +193,20 @@ export class Hud {
     }
     const sealed = w.zones.filter((z) => z.state === 'cleared').length;
     el.rifts.textContent = `RIFTS ${sealed}/${w.zones.length}${w.wave > 1 ? ` · WAVE ${w.wave}` : ''}`;
+    const target = w.lockTarget();
     el.cross.classList.toggle('lock', !!this.view.aimTarget);
+    el.cross.classList.toggle('off', !!target); // locked on, the reticle on the target takes over
     if (this.toastT > 0) {
       this.toastT -= dt;
       if (this.toastT <= 0) el.toast.classList.remove('show');
     }
+    if (this.calloutT > 0) {
+      this.calloutT -= dt;
+      if (this.calloutT <= 0) el.callout.classList.remove('show');
+    }
+    this.mode = this.pickMode();
+    this.updateTarget(target);
+    this.updateCommands();
     // Damage numbers float up from where they happened.
     for (const n of this.nums) {
       n.age += dt;
@@ -140,6 +226,66 @@ export class Hud {
       return true;
     });
     this.drawMap();
+  }
+
+  // The lock-on target: name, HP, and a warning while it winds up an attack (hit it then for a counter).
+  updateTarget(t) {
+    const el = this.el;
+    if (!el.target) return;
+    el.target.classList.toggle('on', !!t);
+    if (!t) return;
+    el.tgName.textContent = NAMES[t.type] ?? t.type.toUpperCase();
+    el.tgHp.textContent = `${Math.max(0, Math.ceil(t.hp))} / ${t.maxHp}`;
+    el.tgFill.style.width = `${Math.max(0, t.hp / t.maxHp) * 100}%`;
+    el.tgState.textContent = t.state === 'windup' ? 'ATTACKING · HIT IT NOW TO COUNTER' : t.armor > 0 ? 'ARMORED · DODGE AND WAIT' : '';
+  }
+
+  // The reaction command and chip shortcuts (desktop panel and touch buttons).
+  updateCommands() {
+    const w = this.world;
+    const el = this.el;
+    const L = LABELS[this.mode];
+    const r = w.player.alive ? w.player.reaction : null;
+    if (el.react) {
+      el.react.classList.toggle('ready', !!r);
+      el.reactName.textContent = r ? `${r.label}!` : '—';
+      el.react.firstChild.textContent = L.react;
+    }
+    if (this.touchReact) {
+      this.touchReact.classList.toggle('ready', !!r);
+      this.touchReact.textContent = r ? r.label : 'REACT';
+    }
+    const locked = !!w.lockTarget();
+    this.touchSwitch?.classList.toggle('ready', locked);
+    this.touchLock?.classList.toggle('ready', locked);
+    // Learned chips first, then the families still to delete.
+    const unknown = CHIP_KEYS.filter((k) => !w.deck.includes(k));
+    this.slots.forEach((slot, i) => {
+      const key = w.deck[i];
+      const c = key && w.chips[key];
+      const cd = c ? (w.chipCd[key] ?? 0) / CHIPS[key].cooldown : 0;
+      const label = c ? `${key}:${c.level}:${L.chip[i]}` : `?${unknown[i - w.deck.length]}:${L.chip[i]}`;
+      if (label !== slot.shown) {
+        slot.shown = label;
+        slot.row.classList.toggle('unknown', !c);
+        slot.key.textContent = L.chip[i];
+        const btn = this.touchChips[i];
+        btn?.classList.toggle('unknown', !c);
+        if (btn) btn.textContent = c ? CHIPS[key].short : '???';
+        if (c) {
+          slot.nm.textContent = CHIPS[key].name;
+          slot.lv.textContent = '●'.repeat(c.level) + '○'.repeat(CHIP_LEVELS.length - 1 - c.level);
+          slot.row.style.setProperty('--chip', css(CHIPS[key].color));
+          btn?.style.setProperty('--chip', css(CHIPS[key].color));
+        } else {
+          const from = CHIPS[unknown[i - w.deck.length]]?.from;
+          slot.nm.textContent = from ? `??? · delete ${FAMILY[from]}` : '???';
+          slot.lv.textContent = '';
+        }
+      }
+      slot.row.style.setProperty('--cd', cd.toFixed(3));
+      this.touchChips[i]?.style.setProperty('--cd', cd.toFixed(3));
+    });
   }
 
   drawMap() {
@@ -190,7 +336,7 @@ export class Hud {
       g.stroke();
       g.fill();
     }
-    // Viruses.
+    // Viruses; the lock-on target is ringed in gold.
     g.fillStyle = '#ff4a4a';
     for (const e of this.world.enemies) {
       if (!e.alive) continue;
@@ -198,6 +344,15 @@ export class Hud {
       g.beginPath();
       g.arc(x, y, 6, 0, Math.PI * 2);
       g.fill();
+    }
+    const t = this.world.lockTarget();
+    if (t) {
+      const [x, y] = toMap(t.x, t.z);
+      g.strokeStyle = '#ffd84a';
+      g.lineWidth = 3;
+      g.beginPath();
+      g.arc(x, y, 11, 0, Math.PI * 2);
+      g.stroke();
     }
     g.restore();
     // The player: an arrow for its facing (relative to the camera).

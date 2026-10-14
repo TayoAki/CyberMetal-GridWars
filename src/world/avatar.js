@@ -4,10 +4,36 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 // The player's mech: the rigged GLB (Mixamo bone names, rest pose = T-pose with identity bone rotations, facing
 // +z, the character's left arm along +x), animated procedurally from the simulation state. Every pose is a set
 // of bone rotations layered on the T-pose; bones ease toward their targets each frame.
+//
+// Close combat turns the buster arm into an energy saber (like Battle Network's Sword chips). A sword-arm
+// direction is written as [around, up]: `around` sweeps it horizontally (0 = out to the right, PI/2 = straight
+// ahead, PI = across to the left) and `up` raises it; see swingArm().
 
 export const AVATAR_HEIGHT = 1.78; // metres
+const PIVOT_Y = 0.95; // spins and flips turn around the hips
+const BLADE = { len: 1.15, base: 0.1 };
+
+// Each strike sweeps the sword arm from `from` to `to` as the strike's clock passes its hit time, turning the
+// torso through `twist`. `spin`: whole-body turns; `flip`: front flips; `hop`: a little lift.
+const SWINGS = {
+  slash1: { from: [0.3, 0.75], to: [2.3, -0.55], twist: [-0.45, 0.5] },
+  slash2: { from: [2.3, -0.45], to: [0.25, 0.7], twist: [0.5, -0.45] },
+  slash3: { from: [1.25, -0.95], to: [1.75, 1.35], twist: [0.15, -0.2], hop: 0.18 },
+  finisher: { from: [0.35, 0.05], to: [0.35, 0.05], twist: [0, 0], spin: 1 },
+  launcher: { from: [1.35, -1.1], to: [1.75, 1.5], twist: [0.25, -0.3], hop: 0.55 },
+  air1: { from: [0.3, 0.8], to: [2.3, -0.5], twist: [-0.45, 0.5] },
+  air2: { from: [2.3, -0.45], to: [0.3, 0.75], twist: [0.5, -0.45] },
+  airFinisher: { from: [1.57, 1.5], to: [1.57, -1.05], twist: [0, 0], flip: 1 },
+  // Reaction commands.
+  break: { from: [1.57, 1.45], to: [1.57, -0.9], twist: [0, 0], hop: 0.35 },
+  reversal: { from: [0.3, 0.1], to: [0.3, 0.1], twist: [0, 0], spin: -1 },
+  deflect: { from: [2.4, 0.1], to: [0.3, 0.35], twist: [0.55, -0.5] },
+};
+const REACT_HIT = 0.1; // where in a reaction the blade connects (s)
 
 const E = (x = 0, y = 0, z = 0) => ({ x, y, z });
+const smooth = (k) => (k <= 0 ? 0 : k >= 1 ? 1 : k * k * (3 - 2 * k));
+const mix = (a, b, k) => a + (b - a) * k;
 const BONES = ['Hips', 'Spine', 'Spine1', 'Spine2', 'Neck', 'Head', 'LeftArm', 'LeftForeArm', 'LeftHand', 'RightArm', 'RightForeArm', 'RightHand', 'LeftUpLeg', 'LeftLeg', 'LeftFoot', 'RightUpLeg', 'RightLeg', 'RightFoot'];
 
 export async function loadAvatar(buffer) {
@@ -29,13 +55,17 @@ class Avatar {
         }
       }
     });
-    // Feet on the origin, centred, scaled to height.
+    // Feet on the origin, centred, scaled to height. The model hangs from a pivot at the hips so spins and
+    // flips turn around the body's centre.
     const box = new THREE.Box3().setFromObject(model);
     const size = box.getSize(new THREE.Vector3());
     const scale = AVATAR_HEIGHT / size.y;
     model.scale.setScalar(scale);
-    model.position.set(-((box.min.x + box.max.x) / 2) * scale, -box.min.y * scale, -((box.min.z + box.max.z) / 2) * scale);
-    this.group.add(model);
+    model.position.set(-((box.min.x + box.max.x) / 2) * scale, -box.min.y * scale - PIVOT_Y, -((box.min.z + box.max.z) / 2) * scale);
+    this.pivot = new THREE.Group();
+    this.pivot.position.y = PIVOT_Y;
+    this.pivot.add(model);
+    this.group.add(this.pivot);
     this.bones = {};
     for (const name of BONES) this.bones[name] = model.getObjectByName('mixamorig' + name) ?? model.getObjectByName('mixamorig:' + name);
     for (const b of Object.values(this.bones)) if (b) b.userData.target = new THREE.Quaternion();
@@ -48,6 +78,142 @@ class Avatar {
     this.hipsBase = this.bones.Hips ? this.bones.Hips.position.clone() : new THREE.Vector3();
     this.tmpE = new THREE.Euler();
     this.tmpQ = new THREE.Quaternion();
+    this.bladeK = 0; // 0 hidden .. 1 fully drawn
+    this.ahead = 0;
+    this.bladeColor = new THREE.Color(0x4adfff);
+    this.buildBlade();
+  }
+
+  // An energy saber growing out of the right hand, along the arm (the hand bone's -x in the T-pose).
+  buildBlade() {
+    const hand = this.bones.RightHand;
+    if (!hand) return;
+    this.group.updateMatrixWorld(true);
+    const ws = hand.getWorldScale(new THREE.Vector3());
+    this.bladeScale = 1 / (ws.x || 1);
+    const { len, base } = BLADE;
+    const core = new THREE.CylinderGeometry(0.014, 0.05, len, 6, 1).translate(0, len / 2 + base, 0).rotateZ(Math.PI / 2);
+    const shell = new THREE.CylinderGeometry(0.05, 0.13, len * 1.05, 10, 1, true).translate(0, len / 2 + base, 0).rotateZ(Math.PI / 2);
+    this.bladeGlow = new THREE.MeshBasicMaterial({ color: this.bladeColor, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false });
+    const blade = new THREE.Group();
+    blade.add(new THREE.Mesh(core, new THREE.MeshBasicMaterial({ color: 0xf0ffff })));
+    blade.add(new THREE.Mesh(shell, this.bladeGlow));
+    for (const m of blade.children) {
+      m.frustumCulled = false;
+      m.renderOrder = 2;
+    }
+    blade.visible = false;
+    hand.add(blade);
+    this.blade = blade;
+  }
+
+  // World positions of the saber's base and tip (for the slash trail); false while it is put away.
+  bladeEnds(base, tip) {
+    if (!this.blade || this.bladeK < 0.5) return false;
+    this.blade.updateMatrixWorld(true);
+    base.set(-BLADE.base, 0, 0).applyMatrix4(this.blade.matrixWorld);
+    tip.set(-(BLADE.base + BLADE.len), 0, 0).applyMatrix4(this.blade.matrixWorld);
+    return true;
+  }
+
+  setBladeColor(hex) {
+    this.bladeColor.setHex(hex);
+  }
+
+  // Sword arm pointing [around, up] (see the top of the file), elbow nearly straight.
+  swingArm(t, around, up) {
+    // Rz raises/lowers the arm from the T-pose, then Ry sweeps it around the body (Euler order XYZ applies Z
+    // first): direction = (-cos(up) cos(around), sin(up), cos(up) sin(around)).
+    t.RightArm = E(0, around, -up);
+    t.RightForeArm = E(0, 0.12, 0);
+    t.RightHand = E(0, 0, 0);
+  }
+
+  // Pose for a strike, reaction or chip in progress. Returns { spin, flip, hop, blade } extras.
+  actionPose(t, a) {
+    const out = { spin: 0, flip: 0, hop: 0, blade: false, fast: true };
+    if (a.kind === 'melee' || a.kind === 'react') {
+      const name = a.kind === 'melee' ? a.def.name : a.name;
+      const sw = SWINGS[name];
+      if (!sw) return out;
+      const hit = a.kind === 'melee' ? a.def.hit : REACT_HIT;
+      const time = a.t + this.ahead;
+      out.blade = true;
+      if (time < 0) {
+        // Lunging in: lean forward, sword drawn back.
+        t.Spine.x = 0.45;
+        t.Spine1.x = 0.1;
+        this.swingArm(t, sw.from[0] - 0.3, sw.from[1] * 0.5);
+        t.LeftArm = E(0.8, 0, -1.0);
+        t.LeftUpLeg.x = -0.6;
+        t.LeftLeg.x = 0.8;
+        t.RightUpLeg.x = 0.5;
+        t.RightLeg.x = 0.4;
+        return out;
+      }
+      // Wind-up to the start, a fast sweep through the hit, then follow-through.
+      const k = smooth((time - hit * 0.45) / (hit * 1.0));
+      const around = mix(sw.from[0], sw.to[0], k);
+      const up = mix(sw.from[1], sw.to[1], k);
+      this.swingArm(t, around, up);
+      t.Spine1.y = mix(sw.twist[0], sw.twist[1], k);
+      t.Spine.x = 0.12 + 0.12 * Math.sin(k * Math.PI);
+      // The free arm balances against the swing; legs brace in a wide stance.
+      t.LeftArm = E(-0.2, 0, -0.75 - 0.3 * k);
+      t.LeftForeArm = E(0, -0.6, 0);
+      t.LeftUpLeg = E(-0.35, 0, -0.12);
+      t.LeftLeg.x = 0.45;
+      t.RightUpLeg = E(0.25, 0, 0.12);
+      t.RightLeg.x = 0.25;
+      if (a.air || (a.kind === 'react' && name === 'reversal')) {
+        t.LeftUpLeg.x = -0.8;
+        t.LeftLeg.x = 1.2;
+        t.RightUpLeg.x = -0.3;
+        t.RightLeg.x = 0.9;
+      }
+      if (sw.spin) out.spin = sw.spin * Math.PI * 2 * smooth((time - hit * 0.2) / (hit * 1.6));
+      if (sw.flip) out.flip = Math.PI * 2 * smooth((time - hit * 0.1) / (hit * 1.3));
+      if (sw.hop) out.hop = sw.hop * Math.sin(Math.min(1, time / (hit * 2)) * Math.PI);
+      return out;
+    }
+    if (a.kind === 'chip') {
+      const time = a.t + this.ahead;
+      if (a.name === 'shockwave') {
+        // Arms up, then both fists slam the ground.
+        const k = smooth(time / 0.12);
+        const up = mix(1.4, -1.25, k);
+        t.RightArm = E(0, Math.PI / 2 - 0.2, -up);
+        t.LeftArm = E(0, -(Math.PI / 2 - 0.2), up);
+        t.Spine.x = mix(-0.1, 0.65, k);
+        t.LeftUpLeg.x = -0.9 * k;
+        t.RightUpLeg.x = -0.9 * k;
+        t.LeftLeg.x = 1.5 * k;
+        t.RightLeg.x = 1.5 * k;
+        out.hop = -0.32 * k;
+      } else if (a.name === 'cannon') {
+        // Both hands on the buster, big recoil.
+        const kick = Math.max(0, 1 - time / 0.25);
+        t.RightArm = E(0.25 * kick, Math.PI / 2 - 0.05, 0);
+        t.RightForeArm = E(0, 0.3 * kick, 0);
+        t.LeftArm = E(0, -(Math.PI / 2 + 0.35), 0.05); // reaching across to steady the buster
+        t.LeftForeArm = E(0, -0.5, 0);
+        t.Spine.x = -0.25 * kick;
+        t.Spine1.y = -0.3;
+      } else if (a.name === 'findash') {
+        // A Dartfin's dive: body flat, saber out in front like a fin.
+        out.blade = true;
+        t.Spine.x = 0.9;
+        t.Spine1.x = 0.2;
+        t.Head.x = -0.6;
+        this.swingArm(t, Math.PI / 2, 0.15);
+        t.LeftArm = E(0.9, 0, -1.1);
+        t.LeftUpLeg.x = 0.35;
+        t.RightUpLeg.x = 0.5;
+        t.LeftLeg.x = 0.2;
+        t.RightLeg.x = 0.3;
+      }
+    }
+    return out;
   }
 
   // World position of the right hand (the buster), for effects.
@@ -64,9 +230,11 @@ class Avatar {
     this.hurt = 0.45;
   }
 
-  // p: the simulation's player; aimPitch: the camera's pitch; dt: real frame time.
-  update(p, aimPitch, dt) {
+  // p: the simulation's player; aimPitch: the camera's pitch; dt: real frame time; ahead: how far (s) the
+  // render is past the last simulation step, so fast swings draw smoothly between steps.
+  update(p, aimPitch, dt, ahead = 0) {
     this.time += dt;
+    this.ahead = ahead;
     this.hurt = Math.max(0, this.hurt - dt);
     this.shootKick = Math.max(0, this.shootKick - dt * 6);
     const run = Math.min(1, p.speed / 9.5);
@@ -75,7 +243,8 @@ class Avatar {
     const c = Math.cos(this.phase);
     const air = !p.onGround && p.dash <= 0;
     const dash = p.dash > 0;
-    const aiming = p.charging || p.aimHold > 0;
+    const act = p.action;
+    const aiming = (p.charging || p.aimHold > 0) && !act;
     const t = {};
     for (const n of BONES) t[n] = E();
 
@@ -133,6 +302,8 @@ class Avatar {
       t.Spine2.x = -pitch * 0.25;
       t.Head.x = -pitch * 0.5;
     }
+    let extra = { spin: 0, flip: 0, hop: 0, blade: false, fast: false };
+    if (act) extra = this.actionPose(t, act);
     if (this.hurt > 0) {
       const k = this.hurt / 0.45;
       t.Spine.x = -0.5 * k;
@@ -141,7 +312,7 @@ class Avatar {
       t.RightArm = E(-0.8 * k, 0, 0.6);
     }
 
-    const ease = 1 - Math.exp(-dt * (dash ? 30 : 16));
+    const ease = 1 - Math.exp(-dt * (extra.fast ? 55 : dash ? 30 : 16));
     for (const n of BONES) {
       const b = this.bones[n];
       if (!b) continue;
@@ -153,6 +324,19 @@ class Avatar {
     if (this.bones.Hips) {
       const bob = p.onGround && !dash ? Math.abs(s) * 0.012 * run : 0;
       this.bones.Hips.position.y = this.hipsBase.y + bob;
+    }
+    // Spins, flips and hops turn the whole body around the hips.
+    this.pivot.rotation.set(extra.flip, extra.spin, 0);
+    this.pivot.position.y = PIVOT_Y + extra.hop;
+    // The saber: drawn for strikes and lingers a moment after.
+    this.bladeLinger = extra.blade ? 0.3 : Math.max(0, (this.bladeLinger ?? 0) - dt);
+    const want = extra.blade || this.bladeLinger > 0 ? 1 : 0;
+    this.bladeK += (want - this.bladeK) * (1 - Math.exp(-dt * (want ? 40 : 14)));
+    if (this.blade) {
+      const k = this.bladeK;
+      this.blade.visible = k > 0.03;
+      this.blade.scale.set(this.bladeScale * k, this.bladeScale * (0.6 + 0.4 * k), this.bladeScale * (0.6 + 0.4 * k));
+      this.bladeGlow.opacity = 0.35 + 0.25 * Math.sin(this.time * 40) * 0.5 + 0.15 * k;
     }
   }
 

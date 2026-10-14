@@ -13,19 +13,26 @@ from the owner's own BN3 ROM. None of the ROM's bytes ship in this repo.
 ## New: open-world prototype
 
 The next direction for the project: the same kind of fights, taken off the grid into a 3D world (think
-Palworld's open landscapes, with Mega Man X-style shooting). Viruses are leaking out of the net into the
-real world; find the six rifts, blast what comes out and seal them.
+Palworld's open landscapes), fought like Kingdom Hearts 2 with Mega Man X's buster on top. Viruses are
+leaking out of the net into the real world; find the six rifts, fight what comes out and seal them. Every
+virus family you delete teaches you its signature attack as a chip, so Battle Network's chips live on.
 
 - **Run it:** `npm install`, `npm run serve`, then open http://127.0.0.1:8123/world/. Or `npm run build` and
   open `dist/world.html` (one file, works offline). Add `?auto=1` to watch the demo pilot play.
 - **Controls:**
-  - **Keyboard and mouse:**
-    - WASD to move (the camera decides forward), mouse to aim (click locks the mouse).
-    - Click or J to blast: hold, then release for a charge shot.
-    - Space to jump, Shift to dash (invincible mid-dash), Q/E to turn the camera, wheel to zoom.
-  - **Gamepad:** sticks, A to jump, B to dash, X or RT to blast.
-  - **Touch:** a stick, drag to look, and buttons.
-  - **F3** shows the frame rate.
+
+  | | Keyboard and mouse | Gamepad | Touch |
+  |---|---|---|---|
+  | Move / look | WASD / mouse (click captures it) | Sticks | Stick / drag |
+  | Attack (mash for a combo) | Left click or J | X | ATTACK |
+  | Buster (hold to charge) | Right click or K | RT | SHOOT |
+  | Lock on / switch target | R or middle click / Q, E or wheel | RB / flick the right stick or D-pad | LOCK / ⇄ |
+  | Reaction command | F (when a gold prompt shows) | Y | The gold button |
+  | Chips | 1, 2, 3 | Hold LB + X, Y, B | Chip buttons |
+  | Jump / dodge | Space / Shift | A / B | JUMP / DODGE |
+
+  Without mouse capture (some embedded pages), drag with the right button or use Q/E to turn and K to
+  shoot. **F3** shows the frame rate.
 - **What's in it:**
   - **Your mech:** the rigged model you made, animated in code (idle, run, jump, dash, aim, recoil, hurt).
   - **The world:** a seeded landscape with lakes, a forest, wind-blown grass and a mountain rim.
@@ -34,12 +41,34 @@ real world; find the six rifts, blast what comes out and seal them.
     - Rivet slams the ground and sends out a shockwave you jump over;
     - Plinker aims a laser, then fires a cannonball;
     - Dartfin marks a line on the ground and dives along it.
+  - **Kingdom Hearts 2-style combat** (from a research pass on KH2, Birth by Sleep and Re:Chain of
+    Memories):
+    - **Lock-on:** a soft marker shows what your next strike will home in on. Lock on to make the camera
+      frame the target, and switch left or right. When the target is deleted, the lock moves to the
+      nearest virus on screen.
+    - **Combos:**
+      - Three slashes and a finisher that depends on the fight: a spin when you're crowded, otherwise a
+        launcher you can follow into a 3-hit air combo that slams the virus down.
+      - Strikes lunge at viruses up to 9 m away, and the world freezes for a few frames on solid hits.
+      - A swing that hits nothing ends the combo.
+      - Dodge or jump to cancel a strike once it has landed.
+      - Viruses get "revenge armor" if you hit them non-stop.
+    - **Reaction commands:** a gold prompt when an attack can be turned around. BREAK smashes a Rivet's
+      slam, REVERSAL warps behind a diving Dartfin, DEFLECT bats a cannonball back.
+  - **Chips from enemies:**
+    - The first Rivet, Plinker and Dartfin you delete teach you ShockWave, Cannon and FinDash, which go
+      on 6-8 s cooldowns.
+    - Deleting more of the same family levels a chip up, at 5 and 15 deletes.
+    - Using a chip right after the third hit of a combo is a finisher for double damage. Using one
+      earlier keeps the combo going.
   - **Rewards:** data drops that heal you.
   - **Progression:** six rifts; sealing all six starts a tougher wave.
-  - **HUD:** a rotating minimap, damage numbers and the grid game's synth sounds and music.
+  - **HUD:** the lock-on target's health, a command panel with the reaction prompt and chip deck, a
+    rotating minimap, damage numbers, and the grid game's synth sounds and music.
 - **How it's built:** like the grid game, a deterministic 60 Hz simulation (`src/world/sim.js`, no
-  rendering) is drawn by a separate view (`src/world/view.js`, three.js r186 on WebGL2). The simulation
-  has its own tests (`tests/world.test.js`) and a headless bot plays it for balance checks.
+  rendering; combat data in `src/world/combat.js`) is drawn by a separate view (`src/world/view.js`,
+  three.js r186 on WebGL2). The simulation has its own tests (`tests/world*.test.js`), and a headless bot
+  that locks on, combos, reacts and uses chips plays it for balance checks.
 - **The model:** `assets/mecha.glb` was generated by the project owner with Tripo AI. Tripo's export had
   a broken skeleton (every bone at the origin, garbage bind matrices); `tools/repair_glb.py` rebuilds
   the joints from the skin weights and slims the texture. Tripo's terms decide commercial use: free-plan

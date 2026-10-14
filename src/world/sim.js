@@ -2,7 +2,8 @@ import { Rng } from '../engine/rng.js';
 import { makeTerrain, PLAY_RADIUS, WATER_LEVEL } from './terrain.js';
 import { ENEMY_TYPES, AI } from './enemies.js';
 import {
-  GROUND_COMBO, AIR_COMBO, MELEE, HITSTOP, LOCK, REACTIONS, CHIPS, CHIP_OF, DECK_SIZE, chipLevel, pickTarget, switchTarget,
+  GROUND_COMBO, AIR_COMBO, LAUNCHER, CROWD, MELEE, HITSTOP, LOCK, COMBO_GRACE, REACTIONS, CHIPS, CHIP_OF, CHIP_FINISH, DECK_SIZE,
+  chipLevel, pickTarget, switchTarget, onScreen,
 } from './combat.js';
 
 // The open-world simulation: a fixed 60 Hz step with no rendering, like the grid game's engine. The view sends
@@ -61,7 +62,7 @@ export class World {
     this.player = this.newPlayer();
     this.prev = {};
     this.prevChip = 0;
-    this.stats = { shots: 0, hits: 0, kills: 0, damageTaken: 0, data: 0, counters: 0, reactions: 0, chipsUsed: 0, strikes: 0 };
+    this.stats = { shots: 0, hits: 0, kills: 0, damageTaken: 0, data: 0, counters: 0, reactions: 0, chipsUsed: 0, chipFinishes: 0, strikes: 0 };
   }
 
   newPlayer() {
@@ -71,7 +72,7 @@ export class World {
       onGround: true, airDash: true, hp: PLAYER.maxHp, maxHp: PLAYER.maxHp, alive: true, respawn: 0,
       iframes: 0, flinch: 0, dash: 0, dashDir: { x: 0, z: 1 }, dashCd: 0, fireCd: 0, aimHold: 0,
       charge: 0, charging: false, chargeFull: false, speed: 0, wading: false,
-      lock: null, action: null, airCombo: 0, reaction: null, attackQueue: 0,
+      lock: null, soft: null, action: null, airCombo: 0, reaction: null, attackQueue: 0, comboNext: 0, comboT: 0,
     };
   }
 
@@ -159,6 +160,7 @@ export class World {
     this.updateReaction(edges);
     if (edges.chip) this.useChip(edges.chip, input);
     p.attackQueue = Math.max(0, p.attackQueue - dt);
+    if (!p.action) p.comboT = Math.max(0, p.comboT - dt);
     if (edges.attack && p.flinch <= 0) this.attack(input);
     else if (p.attackQueue > 0 && p.dash <= 0 && !p.action && p.flinch <= 0) {
       p.attackQueue = 0;
@@ -183,6 +185,7 @@ export class World {
     const canCancel = !p.action || (p.action.kind === 'melee' && p.action.hitDone);
     if (edges.dash && canCancel && p.dashCd <= 0 && p.flinch <= 0 && (p.onGround || p.airDash)) {
       p.action = null;
+      p.comboT = 0; // dodging ends the combo
       let ddx = dx;
       let ddz = dz;
       if (len < 0.2) {
@@ -221,6 +224,7 @@ export class World {
 
     if (edges.jump && p.onGround && p.flinch <= 0 && (!p.action || (p.action.kind === 'melee' && p.action.hitDone))) {
       p.action = null;
+      p.comboT = 0;
       p.vy = PLAYER.jump;
       p.onGround = false;
       this.emit('jump', at(p));
@@ -269,6 +273,8 @@ export class World {
       p.yaw = wrap(p.yaw + clamp(diff, -rate, rate));
     }
     p.speed = Math.hypot(p.vx, p.vz);
+    // KH2's soft target: what the next strike would home in on when nothing is locked (the view marks it).
+    p.soft = p.lock ? null : this.meleeTarget(input)?.id ?? null;
 
     // Buster and charge shot (not mid-strike).
     if (p.flinch > 0) {
@@ -343,11 +349,11 @@ export class World {
     }
     if (!p.lock) return;
     if (!target || !target.alive || Math.hypot(target.x - p.x, target.z - p.z) > LOCK.keep) {
-      // Carry the lock to the nearest virus close by, otherwise let go.
+      // Carry the lock to the nearest virus on screen close by (never one behind the camera), otherwise let go.
       let near = null;
       let nd = LOCK.retarget;
       for (const e of this.enemies) {
-        if (!e.alive || e.spawnT > 0) continue;
+        if (!e.alive || e.spawnT > 0 || !onScreen(p, e, camYaw)) continue;
         const d = Math.hypot(e.x - p.x, e.z - p.z);
         if (d < nd) {
           nd = d;
@@ -388,7 +394,8 @@ export class World {
     if (!p.onGround) {
       if (p.airCombo >= AIR_COMBO.length) return; // the air combo is spent until you land
       this.startStrike(p.airCombo, true, input);
-    } else this.startStrike(0, false, input);
+    } else this.startStrike(p.comboT > 0 && p.comboNext < GROUND_COMBO.length ? p.comboNext : 0, false, input);
+    p.comboT = 0;
   }
 
   // The strike's target: the lock-on target, else the nearest virus roughly in front (camera or facing).
@@ -396,7 +403,12 @@ export class World {
     const p = this.player;
     const locked = this.lockTarget();
     if (locked && Math.hypot(locked.x - p.x, locked.z - p.z) <= MELEE.magnet + 1) return locked;
-    const look = input.camYaw ?? p.yaw;
+    // Directions that count as "in front": the camera's, the facing, and where the stick is pushed.
+    const cy = input.camYaw ?? p.yaw;
+    const dirs = [cy, p.yaw];
+    const mx = input.move?.x ?? 0;
+    const my = input.move?.y ?? 0;
+    if (Math.hypot(mx, my) > 0.3) dirs.push(Math.atan2(-Math.cos(cy) * mx + Math.sin(cy) * my, Math.sin(cy) * mx + Math.cos(cy) * my));
     let best = null;
     let bestScore = Infinity;
     for (const e of this.enemies) {
@@ -404,7 +416,8 @@ export class World {
       const d = Math.hypot(e.x - p.x, e.z - p.z);
       if (d > MELEE.magnet) continue;
       const toward = Math.atan2(e.x - p.x, e.z - p.z);
-      const a = Math.min(Math.abs(wrap(toward - look)), Math.abs(wrap(toward - p.yaw)));
+      let a = Infinity;
+      for (const dir of dirs) a = Math.min(a, Math.abs(wrap(toward - dir)));
       if (a > 1.0 && d > 2.5) continue;
       const score = d + a * 3;
       if (score < bestScore) {
@@ -418,9 +431,14 @@ export class World {
   startStrike(step, air, input) {
     const p = this.player;
     const list = air ? AIR_COMBO : GROUND_COMBO;
-    const s = list[step];
+    let s = list[step];
     const target = this.meleeTarget(input);
-    const a = { kind: 'melee', step, air, def: s, t: 0, hitDone: false, buffered: false, target: target?.id ?? null, lunge: 0 };
+    if (s.finisher && !air) {
+      // Crowded: the spin; one on one: the launcher.
+      const near = this.enemies.filter((e) => e.alive && e.spawnT <= 0 && Math.hypot(e.x - p.x, e.z - p.z) < CROWD.radius).length;
+      if (near < CROWD.count) s = LAUNCHER;
+    }
+    const a = { kind: 'melee', step, air, def: s, t: 0, hitDone: false, hits: 0, buffered: false, target: target?.id ?? null, lunge: 0 };
     p.action = a;
     if (air) {
       p.airCombo = step + 1;
@@ -482,12 +500,20 @@ export class World {
         this.strikeHit(s);
       }
       const list = a.air ? AIR_COMBO : GROUND_COMBO;
+      // On the ground, a strike that hit nothing ends the combo (KH2): the next press starts over.
+      const next = a.air || a.hits ? a.step + 1 : 0;
       if (a.buffered && a.t >= s.cancel && a.step + 1 < list.length) {
         if (a.air && p.onGround) this.startStrike(0, false, input);
-        else this.startStrike(a.step + 1, a.air, input);
+        else this.startStrike(next, a.air, input);
         return a.air ? PLAYER.gravity * 0.2 : PLAYER.gravity;
       }
-      if (a.t >= s.dur) p.action = null;
+      if (a.t >= s.dur) {
+        p.action = null;
+        if (!a.air && next < list.length && next > 0) {
+          p.comboNext = next;
+          p.comboT = COMBO_GRACE;
+        }
+      }
       if (a.air) {
         // Air strikes hang in the air; the air finisher drops you after the hit.
         if (s.finisher && a.hitDone) return PLAYER.gravity * 1.4;
@@ -512,7 +538,14 @@ export class World {
       p.vx = approach(p.vx, 0, 60 * DT);
       p.vz = approach(p.vz, 0, 60 * DT);
     }
-    if (a.t >= a.dur) p.action = null;
+    if (a.t >= a.dur) {
+      p.action = null;
+      if (a.comboNext) {
+        // A chip that cut into a combo keeps it going (BBS): the next press picks up where it left off.
+        p.comboNext = a.comboNext;
+        p.comboT = COMBO_GRACE;
+      }
+    }
     return a.kind === 'chip' && a.name === 'findash' ? 0 : PLAYER.gravity;
   }
 
@@ -532,6 +565,7 @@ export class World {
       this.hitEnemy(e, s.dmg, { kind: s.finisher ? 'finisher' : 'melee', dirX: dx / (d || 1), dirZ: dz / (d || 1), push: s.push, launch: s.launch, slam: s.slam });
       hits++;
     }
+    if (p.action?.kind === 'melee') p.action.hits = hits;
     this.emit('strike', { name: s.name, hits, finisher: !!s.finisher, air: !!s.air, x: p.x + fx * 1.4, y: p.y + 1.1, z: p.z + fz * 1.4 });
     if (hits) this.hitstop = Math.max(this.hitstop, s.finisher ? HITSTOP.finisher : HITSTOP.slash);
   }
@@ -677,17 +711,23 @@ export class World {
       this.emit('chip-denied', { chip: key });
       return;
     }
-    if (p.action && !(p.action.kind === 'melee' && p.action.hitDone)) return;
+    const cut = p.action;
+    if (cut && !(cut.kind === 'melee' && cut.hitDone)) return;
     const def = CHIPS[key];
-    const dmg = def.dmg[c.level];
+    // Cutting in after the third strike (or the second in the air) landed: a chip finisher. Earlier in the
+    // combo, the combo carries on after the chip.
+    const finish = !!cut && cut.hits > 0 && cut.step === (cut.air ? 1 : 2);
+    const comboNext = cut && !cut.air && !finish && cut.hits > 0 && cut.step + 1 < GROUND_COMBO.length ? cut.step + 1 : 0;
+    const dmg = Math.round(def.dmg[c.level] * (finish ? CHIP_FINISH : 1));
+    if (finish) this.stats.chipFinishes++;
     const target = this.lockTarget() ?? this.meleeTarget(input) ?? null;
     this.chipCd[key] = def.cooldown;
     this.stats.chipsUsed++;
     if (key === 'shockwave') {
-      p.action = { kind: 'chip', name: key, t: 0, dur: 0.5 };
+      p.action = { kind: 'chip', name: key, t: 0, dur: 0.5, comboNext };
       this.hazards.push({ kind: 'ring', team: 'player', x: p.x, y: p.y, z: p.z, r: 0.8, speed: 14, max: 9 + 2 * c.level, thick: 1.4, dmg, hitIds: new Set() });
     } else if (key === 'cannon') {
-      p.action = { kind: 'chip', name: key, t: 0, dur: 0.35 };
+      p.action = { kind: 'chip', name: key, t: 0, dur: 0.35, comboNext };
       const yaw = target ? Math.atan2(target.x - p.x, target.z - p.z) : input.aimYaw ?? p.yaw;
       p.yaw = yaw;
       const m = this.muzzle(p, yaw);
@@ -709,10 +749,10 @@ export class World {
         dz = (target.z - p.z) / l;
       }
       p.yaw = Math.atan2(dx, dz);
-      p.action = { kind: 'chip', name: key, t: 0, dur: 0.4, dx, dz, dmg, hitIds: new Set() };
+      p.action = { kind: 'chip', name: key, t: 0, dur: 0.4, dx, dz, dmg, hitIds: new Set(), comboNext };
       p.iframes = Math.max(p.iframes, 0.5);
     }
-    this.emit('chip-use', { chip: key, level: c.level, name: def.name, ...at(p) });
+    this.emit('chip-use', { chip: key, level: c.level, name: def.name, finish, ...at(p) });
   }
 
   // ------------------------------------------------------------------ shooting
@@ -805,6 +845,7 @@ export class World {
     p.flinch = PLAYER.flinch;
     p.dash = 0;
     p.action = null;
+    p.comboT = 0;
     this.stats.damageTaken += dmg;
     const dx = p.x - fromX;
     const dz = p.z - fromZ;

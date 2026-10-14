@@ -175,3 +175,124 @@ export class Particles {
     }
   }
 }
+
+// A sword trail: a ribbon between the blade's base and tip over the last few frames, fading with age. Samples
+// are subdivided (Catmull-Rom between frames) so a fast swing still draws a smooth arc.
+const TRAIL_MAX = 48;
+const TRAIL_LIFE = 0.17; // s a sample stays visible
+
+export class SlashTrail {
+  constructor(scene) {
+    this.samples = []; // newest first: { b: Vector3, t: Vector3, age }
+    this.pos = new Float32Array(TRAIL_MAX * 2 * 3);
+    this.fade = new Float32Array(TRAIL_MAX * 2);
+    const geo = new THREE.BufferGeometry();
+    this.aPos = new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage);
+    this.aFade = new THREE.BufferAttribute(this.fade, 1).setUsage(THREE.DynamicDrawUsage);
+    geo.setAttribute('position', this.aPos);
+    geo.setAttribute('fade', this.aFade);
+    const idx = [];
+    for (let i = 0; i < TRAIL_MAX - 1; i++) {
+      const a = i * 2;
+      idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+    }
+    geo.setIndex(idx);
+    geo.setDrawRange(0, 0);
+    this.color = new THREE.Color(0x6ae8ff);
+    this.mat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      uniforms: { color: { value: this.color } },
+      vertexShader: 'attribute float fade; varying float vF; void main(){ vF = fade; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+      // White-hot near the newest edge, the blade colour further back.
+      fragmentShader: 'uniform vec3 color; varying float vF; void main(){ float a = vF * vF; gl_FragColor = vec4(mix(color, vec3(1.0), a * 0.6) * a * 1.4, a); }',
+    });
+    this.mesh = new THREE.Mesh(geo, this.mat);
+    this.mesh.frustumCulled = false;
+    this.mesh.renderOrder = 3;
+    scene.add(this.mesh);
+    this.last = null;
+  }
+
+  setColor(hex) {
+    this.color.setHex(hex);
+  }
+
+  // Add the blade's current base and tip (world space); call once per rendered frame while swinging.
+  push(base, tip) {
+    const s = this.samples;
+    if (s.length >= 2) {
+      // Two in-between samples on a curve through the previous points.
+      const [p1, p0] = [s[0], s[1]];
+      for (const k of [1 / 3, 2 / 3]) {
+        s.unshift({ b: catmull(p0.b, p1.b, base, base, k), t: catmull(p0.t, p1.t, tip, tip, k), age: p1.age * (1 - k) });
+      }
+    }
+    s.unshift({ b: base.clone(), t: tip.clone(), age: 0 });
+    if (s.length > TRAIL_MAX) s.length = TRAIL_MAX;
+  }
+
+  // Stop joining the next swing onto this one.
+  cut() {
+    this.samples.length = 0;
+  }
+
+  update(dt) {
+    const s = this.samples;
+    for (const p of s) p.age += dt;
+    while (s.length && s[s.length - 1].age > TRAIL_LIFE) s.pop();
+    const n = s.length;
+    for (let i = 0; i < n; i++) {
+      const p = s[i];
+      const f = Math.max(0, 1 - p.age / TRAIL_LIFE);
+      this.pos.set([p.b.x, p.b.y, p.b.z, p.t.x, p.t.y, p.t.z], i * 6);
+      this.fade[i * 2] = f * 0.35; // the base edge is fainter than the tip
+      this.fade[i * 2 + 1] = f;
+    }
+    this.aPos.needsUpdate = true;
+    this.aFade.needsUpdate = true;
+    this.mesh.geometry.setDrawRange(0, n >= 2 ? (n - 1) * 6 : 0);
+  }
+}
+
+function catmull(p0, p1, p2, p3, t) {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  const f = (a, b, c, d) => 0.5 * (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (-a + 3 * b - 3 * c + d) * t3);
+  return new THREE.Vector3(f(p0.x, p1.x, p2.x, p3.x), f(p0.y, p1.y, p2.y, p3.y), f(p0.z, p1.z, p2.z, p3.z));
+}
+
+// The lock-on reticle: a ring with four inward ticks, drawn once into a texture and shown as a sprite.
+let reticleTex = null;
+export function reticleTexture() {
+  if (reticleTex) return reticleTex;
+  const N = 128;
+  const c = document.createElement('canvas');
+  c.width = c.height = N;
+  const g = c.getContext('2d');
+  g.translate(N / 2, N / 2);
+  g.strokeStyle = '#ffffff';
+  g.fillStyle = '#ffffff';
+  g.lineWidth = 6;
+  g.shadowColor = 'rgba(0,0,0,0.6)';
+  g.shadowBlur = 4;
+  for (let k = 0; k < 4; k++) {
+    g.save();
+    g.rotate((k * Math.PI) / 2);
+    g.beginPath();
+    g.arc(0, 0, 44, 0.25, Math.PI / 2 - 0.25);
+    g.stroke();
+    g.beginPath();
+    g.moveTo(0, -60);
+    g.lineTo(-9, -46);
+    g.lineTo(9, -46);
+    g.closePath();
+    g.fill();
+    g.restore();
+  }
+  reticleTex = new THREE.CanvasTexture(c);
+  reticleTex.colorSpace = THREE.SRGBColorSpace;
+  return reticleTex;
+}

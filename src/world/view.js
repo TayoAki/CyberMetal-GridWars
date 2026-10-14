@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { WORLD_SIZE, WATER_LEVEL } from './terrain.js';
 import { DT } from './sim.js';
-import { Particles, glowSprite } from './fx.js';
+import { Particles, glowSprite, SlashTrail, reticleTexture } from './fx.js';
 import { makeEnemyModel } from './models.js';
 import { loadAvatar } from './avatar.js';
+import { CHIPS } from './combat.js';
 
 // The open world's view: reads the simulation and draws it with three.js. It owns everything purely visual
 // (camera, effects, telegraph markers) and never changes the simulation. It also turns the camera into the
@@ -13,6 +14,13 @@ const SUN_DIR = new THREE.Vector3(-0.45, 0.82, 0.35).normalize();
 const SKY_TOP = new THREE.Color(0x3b7fd6);
 const SKY_HORIZON = new THREE.Color(0xc4e4ff);
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const wrap = (a) => {
+  while (a > Math.PI) a -= Math.PI * 2;
+  while (a < -Math.PI) a += Math.PI * 2;
+  return a;
+};
+const BLADE_COLOR = 0x4adfff;
+const FINISH_COLOR = 0xffd84a;
 const reduceMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 export async function createView(canvas, world, avatarBuffer, opts = {}) {
@@ -37,7 +45,7 @@ class WorldView {
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.Fog(SKY_HORIZON, 80, 290);
     this.camera = new THREE.PerspectiveCamera(62, 1, 0.1, 900);
-    this.cam = { yaw: 0, pitch: -0.2, dist: 6.4, pos: new THREE.Vector3(), ready: false, shake: 0 };
+    this.cam = { yaw: 0, pitch: -0.2, dist: 6.4, pos: new THREE.Vector3(), ready: false, shake: 0, lockK: 0 };
     this.time = 0;
     this.prevPlayer = { x: world.player.x, y: world.player.y, z: world.player.z };
     this.particles = new Particles(this.scene);
@@ -49,6 +57,22 @@ class WorldView {
     this.hazardIds = new WeakMap(); // sim hazard -> view key, without touching the sim's objects
     this.telegraphs = new Map();
     this.tmp = new THREE.Vector3();
+    this.tb = new THREE.Vector3();
+    this.tt = new THREE.Vector3();
+    this.trail = new SlashTrail(this.scene);
+    this.trailAction = null;
+    this.flashes = []; // pooled glow pops for hits
+    this.reticle = new THREE.Sprite(new THREE.SpriteMaterial({ map: reticleTexture(), color: 0xffd84a, depthTest: false, depthWrite: false, transparent: true }));
+    this.reticle.renderOrder = 10;
+    this.reticle.visible = false;
+    this.scene.add(this.reticle);
+    this.reticleK = 0;
+    this.reticleId = null;
+    // KH2's soft target: a small pale marker on the virus the next strike will home in on.
+    this.softMark = new THREE.Sprite(new THREE.SpriteMaterial({ map: reticleTexture(), color: 0xf4ecd0, depthTest: false, depthWrite: false, transparent: true, opacity: 0.55 }));
+    this.softMark.renderOrder = 9;
+    this.softMark.visible = false;
+    this.scene.add(this.softMark);
     this.buildSky();
     this.buildLights();
     this.buildTerrain();
@@ -328,6 +352,40 @@ class WorldView {
     this.cam.dist = clamp(this.cam.dist + zoom * 0.7, 3.6, 12);
   }
 
+  // Locked on, the camera turns to keep the target ahead (KH2-style); the mouse can still nudge it. It aims from
+  // over the player's shoulder, so the target sits in the middle of the screen with the player to its left,
+  // and looks down a little so the target shows above the player's head.
+  updateLockCamera(px, py, pz, dt) {
+    const t = this.world.lockTarget();
+    if (!t) return;
+    const side = this.shoulder();
+    let ox = px - Math.cos(this.cam.yaw) * side;
+    let oz = pz + Math.sin(this.cam.yaw) * side;
+    let dx = t.x - ox;
+    let dz = t.z - oz;
+    if (Math.hypot(dx, dz) < 2) {
+      // Too close to aim from the shoulder: aim from the player.
+      ox = px;
+      oz = pz;
+      dx = t.x - px;
+      dz = t.z - pz;
+    }
+    const d = Math.hypot(dx, dz);
+    if (d < 0.6) return;
+    // Ease toward the target, but never faster than ~240 degrees a second, so the view doesn't spin.
+    const rate = 5 * clamp(d / 5, 0.3, 1);
+    const turn = wrap(Math.atan2(dx, dz) - this.cam.yaw) * (1 - Math.exp(-dt * rate));
+    this.cam.yaw += clamp(turn, -4.2 * dt, 4.2 * dt);
+    const dy = t.y + t.def.height * 0.5 - (py + 1.55);
+    const want = clamp(Math.atan2(dy, Math.max(d, 3)) - 0.22, -0.75, 0.4);
+    this.cam.pitch += (want - this.cam.pitch) * (1 - Math.exp(-dt * 4));
+  }
+
+  // How far right of the player the camera's pivot sits (further while locked on).
+  shoulder() {
+    return 0.7 + this.cam.lockK * 0.9;
+  }
+
   // Swing the camera behind the player (used on respawn).
   faceCamera(yaw) {
     this.cam.yaw = yaw;
@@ -344,8 +402,10 @@ class WorldView {
 
   updateCamera(px, py, pz, dt) {
     const { fwd, right } = this.cameraBasis();
-    const pivot = new THREE.Vector3(px, py + 1.55, pz).addScaledVector(right, 0.7);
-    const want = pivot.clone().addScaledVector(fwd, -this.cam.dist);
+    // Locked on, pull back, up and further over the shoulder so the target stays in view past the player.
+    const k = (this.cam.lockK += ((this.world.lockTarget() ? 1 : 0) - this.cam.lockK) * (1 - Math.exp(-dt * 4)));
+    const pivot = new THREE.Vector3(px, py + 1.55 + k * 0.45, pz).addScaledVector(right, this.shoulder());
+    const want = pivot.clone().addScaledVector(fwd, -(this.cam.dist + k * 1.6));
     // Keep the camera out of the ground (check a few points back from the pivot).
     for (let k = 0.5; k <= 1.001; k += 0.25) {
       const x = pivot.x + (want.x - pivot.x) * k;
@@ -447,8 +507,8 @@ class WorldView {
       }
       case 'impact': {
         const enemy = ev.team === 'enemy';
-        const big = ev.kind === 'charge' || ev.kind === 'cannonball';
-        const color = enemy ? 0xff9a3a : ev.kind === 'charge' ? 0xff7ae8 : 0x7af0ff;
+        const big = ['charge', 'cannonball', 'cannon', 'deflect'].includes(ev.kind);
+        const color = enemy ? 0xff9a3a : ({ charge: 0xff7ae8, cannon: 0xffc83a }[ev.kind] ?? 0x7af0ff);
         P.burst(ev.x, ev.y, ev.z, big ? 46 : ev.kind === 'mid' ? 18 : 9, color, { speed: big ? 11 : 6, size: big ? 0.7 : 0.35, life: big ? 0.7 : 0.35 });
         if (big) {
           P.burst(ev.x, ev.y, ev.z, 14, 0xffffff, { speed: 4, size: 1.2, life: 0.25 });
@@ -459,9 +519,61 @@ class WorldView {
         if (ev.surface === 'ground') this.dust.burst(ev.x, ev.y, ev.z, 6, 0x9a8a6a, { speed: 3, size: 0.6, life: 0.6, up: 2, grav: 6, grow: 1.2 });
         break;
       }
-      case 'enemy-hit':
+      case 'enemy-hit': {
         this.enemyViews.get(ev.id)?.hit();
+        if (['melee', 'finisher', 'react', 'chip'].includes(ev.kind)) {
+          const big = ev.kind === 'finisher' || ev.kind === 'react';
+          P.burst(ev.x, ev.y, ev.z, big ? 34 : 16, ev.armored ? 0xffa050 : 0xd8fbff, { speed: big ? 12 : 8, size: big ? 0.6 : 0.4, life: 0.3 });
+          this.flash(ev.x, ev.y, ev.z, big ? 0xffe9a0 : 0xffffff, big ? 4.2 : 2.6, 0.12);
+          if (big) this.shakeAt(ev, 0.3);
+        }
+        if (ev.counter) this.flash(ev.x, ev.y, ev.z, 0xffd84a, 5, 0.18);
         break;
+      }
+      case 'reaction': {
+        // A flash of gold where the reaction lands; BREAK and REVERSAL warp the player, so don't slide there.
+        P.burst(ev.x, ev.y, ev.z, 36, 0xffd84a, { speed: 12, size: 0.5, life: 0.45 });
+        P.ring(ev.x, ev.y, ev.z, 24, 0xffffff, { speed: 11, size: 0.4, life: 0.3 });
+        this.flash(ev.x, ev.y, ev.z, 0xffffff, 4.5, 0.18);
+        this.cam.shake = Math.max(this.cam.shake, 0.35);
+        if (ev.kind !== 'deflect') {
+          const o = this.prevPlayer;
+          for (let k = 0; k < 20; k++) P.emit(o.x + (Math.random() - 0.5), o.y + Math.random() * 1.8, o.z + (Math.random() - 0.5), 0, 2, 0, 0x6ae8ff, 0.45, 0.4);
+          const p = this.world.player;
+          Object.assign(this.prevPlayer, { x: p.x, y: p.y, z: p.z });
+          this.trail.cut();
+        }
+        break;
+      }
+      case 'armor':
+        P.ring(ev.x, ev.y, ev.z, 24, 0xff7a3a, { speed: 6, size: 0.5, life: 0.4 });
+        break;
+      case 'chip-use': {
+        P.burst(ev.x, ev.y + 1, ev.z, 26, CHIPS[ev.chip]?.color ?? 0xffffff, { speed: 6, size: 0.45, life: 0.45 });
+        if (ev.chip === 'shockwave') {
+          this.dust.ring(ev.x, ev.y, ev.z, 26, 0xb8ad90, { speed: 10, size: 1.0, life: 0.6 });
+          P.ring(ev.x, ev.y + 0.2, ev.z, 30, 0x6ae8ff, { speed: 13, size: 0.6, life: 0.5 });
+          this.cam.shake = Math.max(this.cam.shake, 0.3);
+        } else if (ev.chip === 'cannon') {
+          this.avatar.onShot();
+          this.muzzleT = 0.16;
+          this.muzzleSize = 3.4;
+        }
+        break;
+      }
+      case 'chip-learn': {
+        // Data swirls into the player.
+        const p = this.world.player;
+        for (let k = 0; k < 60; k++) {
+          const a = Math.random() * Math.PI * 2;
+          const r = 2.5 + Math.random();
+          const ox = Math.cos(a) * r;
+          const oz = Math.sin(a) * r;
+          const oy = Math.random() * 2.4;
+          P.emit(p.x + ox, p.y + oy, p.z + oz, -ox * 3, (1 - oy) * 1.5, -oz * 3, CHIPS[ev.chip]?.color ?? 0xffffff, 0.4, 0.5, { drag: 0 });
+        }
+        break;
+      }
       case 'delete':
         P.burst(ev.x, ev.y, ev.z, 50, 0xffa040, { speed: 10, size: 0.8, life: 0.7 });
         P.burst(ev.x, ev.y, ev.z, 24, 0xffffff, { speed: 6, size: 1.1, life: 0.25 });
@@ -530,6 +642,68 @@ class WorldView {
     }
   }
 
+  // A brief glow pop (hit flashes).
+  flash(x, y, z, color, size, life) {
+    let f = this.flashes.find((x) => x.age >= x.life);
+    if (!f) {
+      f = { sprite: glowSprite(color, 0.01), age: 0, life };
+      f.sprite.renderOrder = 4;
+      this.scene.add(f.sprite);
+      this.flashes.push(f);
+    }
+    f.sprite.material.color.setHex(color);
+    f.sprite.position.set(x, y, z);
+    f.age = 0;
+    f.life = life;
+    f.size = size;
+  }
+
+  updateFlashes(dt) {
+    for (const f of this.flashes) {
+      if (f.age >= f.life) {
+        f.sprite.visible = false;
+        continue;
+      }
+      f.age += dt;
+      const k = Math.min(1, f.age / f.life);
+      f.sprite.visible = true;
+      f.sprite.scale.setScalar(f.size * (0.6 + 0.7 * k));
+      f.sprite.material.opacity = 1 - k;
+    }
+  }
+
+  // The lock-on reticle: pops onto a new target, spins, and turns red while the target winds up an attack.
+  updateReticle(dt) {
+    const soft = this.world.player.soft != null ? this.world.enemy(this.world.player.soft) : null;
+    this.softMark.visible = !!soft?.alive && this.world.player.alive;
+    if (this.softMark.visible) {
+      this.softMark.position.set(soft.x, soft.y + soft.def.height * 0.5, soft.z);
+      this.softMark.scale.setScalar(soft.def.radius * 1.9 + 0.4);
+      this.softMark.material.rotation = 0.785; // turned 45 degrees: reads as a different mark from the lock
+    }
+    const t = this.world.lockTarget();
+    const sp = this.reticle;
+    if (!t) {
+      this.reticleK = Math.max(0, this.reticleK - dt * 8);
+      sp.material.opacity = this.reticleK;
+      sp.visible = this.reticleK > 0;
+      if (!sp.visible) this.reticleId = null;
+      return;
+    }
+    if (t.id !== this.reticleId) {
+      this.reticleId = t.id;
+      this.reticleK = 0;
+    }
+    this.reticleK = Math.min(1, this.reticleK + dt * 6);
+    const danger = t.state === 'windup';
+    sp.visible = true;
+    sp.position.set(t.x, t.y + t.def.height * 0.5, t.z);
+    sp.scale.setScalar((t.def.radius * 2.4 + 0.6) * (1 + (1 - this.reticleK) * 1.5));
+    sp.material.rotation += dt * (danger ? 5 : 1.6);
+    sp.material.color.setHex(danger ? 0xff4a4a : 0xffd84a);
+    sp.material.opacity = this.reticleK;
+  }
+
   shakeAt(ev, amount) {
     const p = this.world.player;
     const d = Math.hypot(ev.x - p.x, ev.z - p.z);
@@ -547,15 +721,35 @@ class WorldView {
     const py = this.prevPlayer.y + (p.y - this.prevPlayer.y) * a;
     const pz = this.prevPlayer.z + (p.z - this.prevPlayer.z) * a;
 
-    // Player.
+    // Player. During hit-stop the pose holds still with the world.
+    const frozen = w.hitstop > 0;
     const av = this.avatar;
     av.group.position.set(px, py, pz);
     av.group.rotation.y = p.yaw;
-    const blink = p.iframes > 0 && p.dash <= 0 && Math.floor(this.time * 18) % 2 === 0;
+    const act = p.action;
+    const blink = p.iframes > 0 && p.dash <= 0 && !act && Math.floor(this.time * 18) % 2 === 0;
     av.setVisible(p.alive && !blink);
-    av.update(p, this.lastAimPitch ?? 0, dt);
+    av.update(p, this.lastAimPitch ?? 0, frozen ? dt * 0.05 : dt, frozen ? 0 : a * DT);
+    this.updateLockCamera(px, py, pz, dt);
     this.updateCamera(px, py, pz, dt);
     av.group.updateMatrixWorld(true);
+    // Saber trail: one ribbon per strike, gold for finishers and reactions.
+    const swinging = act && ((act.kind === 'melee' && act.t >= 0) || act.kind === 'react' || (act.kind === 'chip' && act.name === 'findash'));
+    if (swinging && !frozen && av.bladeEnds(this.tb, this.tt)) {
+      if (act !== this.trailAction) {
+        this.trail.cut();
+        this.trailAction = act;
+        const gold = act.kind === 'react' || act.def?.finisher;
+        this.trail.setColor(gold ? FINISH_COLOR : act.kind === 'chip' ? CHIPS.findash.color : BLADE_COLOR);
+        av.setBladeColor(gold ? FINISH_COLOR : BLADE_COLOR);
+      }
+      this.trail.push(this.tb, this.tt);
+    }
+    this.trail.update(frozen ? 0 : dt);
+    // FinDash leaves fins of light behind.
+    if (act?.kind === 'chip' && act.name === 'findash' && !frozen) {
+      for (let k = 0; k < 3; k++) this.particles.emit(px + (Math.random() - 0.5) * 0.8, py + 0.6 + Math.random() * 0.9, pz + (Math.random() - 0.5) * 0.8, -p.vx * 0.15, 0.5, -p.vz * 0.15, 0x5af0ff, 0.5, 0.3);
+    }
     const hand = av.handPosition(this.tmp.clone());
     // Charge glow and particles spiralling into the buster.
     if (p.alive && p.charging) {
@@ -588,6 +782,8 @@ class WorldView {
     this.updateHazards();
     this.updateTelegraphs();
     this.updateRifts(dt);
+    this.updateReticle(dt);
+    this.updateFlashes(dt);
     this.particles.update(dt);
     this.dust.update(dt);
 
@@ -634,6 +830,10 @@ class WorldView {
     for (const s of this.world.shots) {
       seen.add(s.id);
       let v = this.shotViews.get(s.id);
+      if (v && v.userData.look !== s.team + s.kind) {
+        this.scene.remove(v); // a deflected cannonball changes sides
+        v = null;
+      }
       if (!v) {
         v = this.makeShot(s);
         this.shotViews.set(s.id, v);
@@ -641,7 +841,7 @@ class WorldView {
       }
       v.position.set(s.x + s.vx * lead, s.y + s.vy * lead, s.z + s.vz * lead);
       // Trail.
-      const color = s.team === 'enemy' ? 0xff8a30 : s.kind === 'charge' ? 0xff7ae8 : 0x6ae8ff;
+      const color = s.team === 'enemy' ? 0xff8a30 : ({ charge: 0xff7ae8, cannon: 0xffc83a }[s.kind] ?? 0x6ae8ff);
       const n = s.kind === 'buster' ? 1 : 3;
       for (let k = 0; k < n; k++) this.particles.emit(v.position.x, v.position.y, v.position.z, (Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 0.6, color, s.r * 2.2, 0.18, { drag: 4 });
     }
@@ -655,15 +855,18 @@ class WorldView {
 
   makeShot(s) {
     const g = new THREE.Group();
-    if (s.team === 'enemy') {
-      g.add(new THREE.Mesh(new THREE.SphereGeometry(s.r * 0.85, 10, 8), new THREE.MeshBasicMaterial({ color: 0x3a1c10 })));
-      g.add(glowSprite(0xff7a20, s.r * 4));
+    g.userData.look = s.team + s.kind;
+    if (s.team === 'enemy' || s.kind === 'deflect') {
+      // A cannonball: dark iron in an orange glow, or a cyan one once it has been batted back.
+      g.add(new THREE.Mesh(new THREE.SphereGeometry(s.r * 0.85, 10, 8), new THREE.MeshBasicMaterial({ color: s.team === 'enemy' ? 0x3a1c10 : 0x10283a })));
+      g.add(glowSprite(s.team === 'enemy' ? 0xff7a20 : 0x6ae8ff, s.r * (s.team === 'enemy' ? 4 : 5.5)));
     } else {
-      const core = { buster: 0xe8ffff, mid: 0xd8ffff, charge: 0xffffff }[s.kind];
-      const glow = { buster: 0x40d8ff, mid: 0x5ae8ff, charge: 0xff5ae0 }[s.kind];
+      const core = { buster: 0xe8ffff, mid: 0xd8ffff, charge: 0xffffff, cannon: 0xfffbe8 }[s.kind] ?? 0xffffff;
+      const glow = { buster: 0x40d8ff, mid: 0x5ae8ff, charge: 0xff5ae0, cannon: 0xffc83a }[s.kind] ?? 0x6ae8ff;
       g.add(new THREE.Mesh(new THREE.SphereGeometry(s.r * 0.6, 10, 8), new THREE.MeshBasicMaterial({ color: core })));
       g.add(glowSprite(glow, s.r * 5));
       if (s.kind === 'charge') g.add(glowSprite(0x9a8bff, s.r * 7.5));
+      if (s.kind === 'cannon') g.add(glowSprite(0xff8a3a, s.r * 7));
     }
     return g;
   }
@@ -699,13 +902,14 @@ class WorldView {
       live.add(vid);
       let v = this.hazardViews.get(vid);
       if (!v) {
-        const ringMat = new THREE.MeshBasicMaterial({ color: 0xffb040, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+        const mine = h.team === 'player';
+        const ringMat = new THREE.MeshBasicMaterial({ color: mine ? 0x8af4ff : 0xffb040, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
         const wallMat = new THREE.ShaderMaterial({
           transparent: true,
           depthWrite: false,
           blending: THREE.AdditiveBlending,
           side: THREE.DoubleSide,
-          uniforms: { color: { value: new THREE.Color(0xff9a30) }, fade: { value: 1 } },
+          uniforms: { color: { value: new THREE.Color(mine ? 0x40c8ff : 0xff9a30) }, fade: { value: 1 } },
           vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
           fragmentShader: 'varying vec2 vUv; uniform vec3 color; uniform float fade; void main(){ float a = pow(1.0 - vUv.y, 1.5) * fade * 1.6; gl_FragColor = vec4(color * a, a); }',
         });
