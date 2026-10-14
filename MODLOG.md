@@ -160,3 +160,21 @@ The next agent could measure all of these with mGBA's Lua scripting and a save s
 4. **Symptom:** a data field set by the engine was silently replaced. **Cause:** a pack wrote its own
    value (`'plus'`, a string) to `data.blast` on the same spell. **Fix:** engine-owned spell data uses
    names packs don't (`data.landing`); `docs/CONTRACT.md` lists the engine's keys.
+5. **Symptom:** one Lv3 Cinderkite (void2) beat the autopilot every time. **Cause:** every meteor
+   cracked its panel and stepping off a cracked panel breaks it, so within a minute the player's area
+   was holes and the bot had nowhere to go. **Fix:** only the Ω kite's aimed meteors crack the floor.
+   Lesson: a hazard that removes panels needs a budget (lava already had one: at most 2).
+6. **Symptom:** after teaching the bot exact blast shapes, Cold Shells (cool2) went from 100% to 25%.
+   **Cause:** the bot planned one-panel steps, but on ice a step slides to the next non-ice panel, so
+   "step off the target" carried it back into the mortar's landing cell. **Fix:** plan in real steps:
+   a step's landing cell follows the slide. Fixing one blind spot exposed another, so rerun the whole
+   sweep after every bot change, not just the encounter you were fixing.
+7. **Symptom:** Scurrier bombs hit the bot about every 5 seconds. **Cause:** the bomb runs along its row
+   and turns once, toward anyone in the column it is crossing; the bot watched only the row ahead.
+   **Fix:** the bomb's current column counts as unsafe until it has passed. The dodge is a sidestep.
+
+### Balance sweep (autopilot, 6 seeds per encounter)
+Every Gauntlet encounter now wins 83-100%; before these fixes Dead Signal (void2) and Hunt Pack (riv3)
+were at 0%. The bot reads every telegraph perfectly but never heals or plans chip combos, so this
+measures fairness ("can it be dodged at all?") more than difficulty. The Gauntlet bosses (V1) win
+83-100%; the boss packs report that their V3 and Ω versions beat the bot, as intended.

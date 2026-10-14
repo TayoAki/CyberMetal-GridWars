@@ -23,17 +23,25 @@ from the owner's own BN3 ROM. None of the ROM's bytes ship in this repo.
 | Use chip / confirm | X or K | A / Y | A |
 | Open Custom Screen (gauge full) | Q / E / Shift | LB / RB / triggers | L / R |
 | Pause (SELECT in pause = retreat) | Enter | Start | START |
+| Shield (Shield style) | Back + Z | Back + B | Back + B |
 
 ## What's in it
 
 **Modes**
 - **Gauntlet:** eight areas. Each has three designed virus battles, then a boss duel. HP carries between
-  an area's battles; losing resets the area.
+  an area's battles; losing resets the area. Each boss's first defeat gives its Navi chip, a stat or
+  program, and +80 max HP.
 - **Free Battle:** replay any battle you've reached, rematch bosses at V2, V3 and Ω, or roll a random
   mixed battle.
 - **Folder:** edit your 30-chip folder from everything you've won. BN-style limits apply.
+- **Chip Shop:** spend the Bits that battles drop on chips from the areas you've reached, or on HP Memory.
 - **Programs:** equip passive parts (SuperArmor, UnderShirt, FloatShoes, AirShoes, Custom+1/+2) within a
   memory budget, a light take on BN3's Navi Customizer.
+- **Style Change:** beating bosses unlocks styles, and you can wear one type and one element at a time.
+  - Types: Guts (double buster, no flinch), Custom (+1 chip on the Custom Screen), Shield (Back+B
+    reflects) and Team (+2 Mega chips).
+  - Elements: Heat, Aqua, Elec and Wood. Each changes your body's element and your charge shot.
+- **How to Play:** six short pages in the title menu covering the rules.
 
 **The battle system**, recreated:
 - **Field:** a 6x3 grid. Red area vs blue area, with ownership that moves: AreaGrab/PanlGrab steal panels,

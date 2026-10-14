@@ -53,7 +53,8 @@ Bodies standing on panels. All are in `b.entities`; `b.player` is the player.
 Attacks without HP (shots, waves, bombs, meteors, reticles), in `b.spells`.
 Fields: `type team owner col row x y z dir t hit hitIds data element`.
 - `x, y` are continuous panel coordinates for drawing.
-- `z` is the height in pixels.
+- `z` is the height in pixels. A spell with `z > 0` is drawn after (over) every body; `z = 0` draws on
+  the floor under them, so a landed fist or a beam that should cover the player sets `z = 1`.
 - `t` is the frame count.
 - `data.progress` is 0..1 for telegraphs.
 - Engine-owned `data` keys (don't reuse them for something else):
@@ -64,6 +65,12 @@ Fields: `type team owner col row x y z dir t hit hitIds data element`.
 - Content callbacks (`cells`, `onPanel`, `onHit`, ...) may draw from `b.rng`. The engine calls each one
   exactly when the effect happens, never speculatively, because an extra call shifts the seeded
   sequence.
+- Hints the autopilot reads to dodge (optional, but set them when they apply):
+  - `blast: 'single' | 'plus'` on a lob, or a mortar's `effect` (`'blast'` means a plus); a lob with
+    neither is assumed to burst in a plus;
+  - `dc, dr` (heading) and `turned` on a crawler that turns once toward its target's row.
+- A guard that blocks a hit doesn't call the guard owner's `onHit`. A body that needs to know (an aura
+  breaking, a shield that reflects only once) checks its own state each frame.
 
 ### Events (`b.emit(type, data)`, drained by the view each frame)
 | type | payload | meaning |
