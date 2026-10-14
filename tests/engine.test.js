@@ -297,3 +297,38 @@ test('boss battles use the navi time table', () => {
   assert.equal(b.phase, 'results');
   assert.equal(b.result.bustingLevel, 'S'); // 10 (<30 s) + 1 + 1
 });
+
+test('Style Change: element sets weakness and charge shot; Guts doubles the buster', () => {
+  const b = makeBattle({ enemies: [{ type: 'dummy', level: 1, col: 4, row: 1 }], player: { style: { type: 'guts', element: 'fire' }, attack: 2 } });
+  assert.equal(b.player.element, 'fire');
+  assert.ok(b.player.superArmor);
+  toFight(b);
+  press(b, 'b');
+  assert.equal(enemy(b, 'dummy').hp, 1000 - 4); // Guts: 2 x attack 2
+  // Heat charge shot: flames 3 panels ahead (player at col 1 -> cols 2..4), 10 x attack.
+  run(b, 30);
+  const hold = TIMING.CHARGE_START + TIMING.CHARGE_TIME[1];
+  run(b, hold, { b: true });
+  b.step({});
+  run(b, 30);
+  assert.equal(enemy(b, 'dummy').hp, 1000 - 4 - 4 - 20);
+  // Aqua beats Fire: an aqua hit on the player doubles.
+  b.applyHit(b.player, { damage: 10, element: 'aqua' }, { team: 'blue', owner: null });
+  assert.equal(b.player.hp, 80);
+});
+
+test('Custom style adds a chip to the hand; Shield style reflects with Back+B', () => {
+  const folder = [];
+  for (let i = 0; i < 30; i++) folder.push({ key: 'cannon', code: 'A' });
+  const b = makeBattle({ enemies: [{ type: 'dummy', level: 1, col: 4, row: 1 }], folder, player: { style: { type: 'custom' } } });
+  toCustom(b);
+  assert.equal(b.custom.hand.length, 6);
+
+  const s = makeBattle({ enemies: [{ type: 'dummy', level: 1, col: 4, row: 1 }], player: { style: { type: 'shield' } } });
+  toFight(s);
+  s.step({ left: true });
+  s.step({ left: true, b: true });
+  assert.ok(s.player.guardTimer > 0);
+  const res = s.applyHit(s.player, { damage: 30, flinch: true }, { team: 'blue', owner: null });
+  assert.ok(res.reflected);
+});

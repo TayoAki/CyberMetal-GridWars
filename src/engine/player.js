@@ -1,6 +1,6 @@
-import { TIMING, PANEL } from './constants.js';
+import { TIMING, PANEL, ELEMENT, COLS } from './constants.js';
 import { runChip } from './chips/behaviors.js';
-import { busterShot } from './combat.js';
+import { busterShot, hitscan, source, zone, inside } from './combat.js';
 
 // Turns pad input into the player's navi actions, BN-style:
 // - a step per direction press, repeating while held; presses during a lock are buffered briefly;
@@ -26,6 +26,8 @@ export class PlayerController {
     this.chargeFrames = 0;
     this.busterCooldown = 0;
     this.chipsUsed = 0;
+    this.style = stats.style ?? { type: null, element: ELEMENT.NULL };
+    this.shieldCooldown = 0;
   }
 
   get chargeTime() {
@@ -75,6 +77,7 @@ export class PlayerController {
     const b = this.b;
     if (!e.alive) return;
     if (this.busterCooldown > 0) this.busterCooldown--;
+    if (this.shieldCooldown > 0) this.shieldCooldown--;
     if (this.actionLock > 0) this.actionLock--;
     if (this.moveTimer > 0) this.moveTimer--;
     this.sinceStep++;
@@ -112,7 +115,7 @@ export class PlayerController {
       const full = this.chargeFrames >= this.chargeTime;
       this.chargeFrames = 0;
       if (full) {
-        this.startAction(chargeShot(b, e, this.attack));
+        this.startAction(chargeShot(b, e, this.attack, this.style.element));
         return;
       }
     }
@@ -126,8 +129,17 @@ export class PlayerController {
       return;
     }
 
+    // Shield style: hold Back and press B to raise a reflecting shield.
+    const back = e.facing > 0 ? 'left' : 'right';
+    if (this.style.type === 'shield' && pad.pressed.b && pad.held[back] && this.shieldCooldown === 0) {
+      this.shieldCooldown = 90;
+      this.chargeFrames = 0;
+      this.startAction(shield(b, e, 10 * this.attack));
+      return;
+    }
+
     if (pad.pressed.b && this.busterCooldown === 0) {
-      busterShot(b, e, this.attack);
+      busterShot(b, e, this.style.type === 'guts' ? this.attack * 2 : this.attack);
       this.busterCooldown = TIMING.BUSTER_COOLDOWN[this.rapid];
       this.actionLock = Math.min(8, this.busterCooldown);
       e.setAnim('shoot');
@@ -176,9 +188,57 @@ function clampLevel(n) {
   return Math.max(1, Math.min(5, n | 0 || 1));
 }
 
-function* chargeShot(b, e, attack) {
+// The charge shot follows the Style element, as in BN3: Heat breathes fire 3 panels ahead, Aqua fires
+// a bursting bubble, Elec a paralysing zap, Wood a tornado 2 panels ahead. Null is the plain blast.
+function* chargeShot(b, e, attack, element = ELEMENT.NULL) {
   e.setAnim('charged');
   b.emit('sfx', { name: 'chargeshot' });
-  busterShot(b, e, attack, true);
+  const damage = 10 * attack;
+  const d = e.facing;
+  const hit = { damage, element, flinch: true, isCharge: true };
+  switch (element) {
+    case ELEMENT.FIRE: {
+      b.emit('sfx', { name: 'flame' });
+      zone(b, e, hit, [[e.col + d, e.row], [e.col + 2 * d, e.row], [e.col + 3 * d, e.row]], 22, { type: 'flames' });
+      break;
+    }
+    case ELEMENT.AQUA: {
+      b.emit('sfx', { name: 'bubble' });
+      const t = b.firstTarget(e.team, e.col + d, e.row, d);
+      b.emit('fx', { fx: 'gunshot', col: e.col, row: e.row, dir: d, element, toCol: t ? t.col : d > 0 ? COLS : -1 });
+      if (t) {
+        const src = source(e, hit);
+        for (const [c, r] of [[t.col, t.row], [t.col + d, t.row]]) {
+          if (!inside(c, r)) continue;
+          b.emit('fx', { fx: 'bubble', col: c, row: r });
+          b.hitPanel(src, c, r, hit);
+        }
+      }
+      break;
+    }
+    case ELEMENT.ELEC: {
+      b.emit('sfx', { name: 'zap' });
+      const t = hitscan(b, e, { ...hit, flinch: false, stun: 60 });
+      b.emit('fx', { fx: 'chargeshot', col: e.col, row: e.row, dir: d, element, toCol: t ? t.col : d > 0 ? COLS : -1, hit: !!t });
+      break;
+    }
+    case ELEMENT.WOOD: {
+      b.emit('sfx', { name: 'wind' });
+      zone(b, e, { ...hit, damage: Math.ceil(damage / 2), flinch: false }, [[e.col + 2 * d, e.row]], 24, { type: 'tornado', rehit: 8 });
+      break;
+    }
+    default:
+      busterShot(b, e, attack, true);
+  }
   for (let i = 0; i < 16; i++) yield;
+}
+
+function* shield(b, e, reflect) {
+  e.setAnim('guard');
+  e.guardTimer = 36;
+  e.guard = { reflect };
+  b.emit('sfx', { name: 'guardup' });
+  for (let i = 0; i < 36; i++) yield;
+  e.guardTimer = 0;
+  e.guard = null;
 }

@@ -47,6 +47,9 @@ export class Battle {
     // Player
     const p = config.player ?? {};
     const maxHp = p.maxHp ?? PLAYER_BASE_HP;
+    // BN3 Style Change: an element (changes weakness and the charge shot) and a type (Guts, Custom,
+    // Shield, Team).
+    this.style = { type: p.style?.type ?? null, element: p.style?.element ?? ELEMENT.NULL };
     this.player = new Entity(this, {
       kind: 'player',
       type: 'player',
@@ -56,24 +59,26 @@ export class Battle {
       row: 1,
       hp: Math.min(p.hp ?? maxHp, maxHp),
       maxHp,
-      element: p.element ?? ELEMENT.NULL,
-      superArmor: !!p.programs?.superArmor,
+      element: this.style.element,
+      superArmor: !!p.programs?.superArmor || this.style.type === 'guts',
       floatShoes: !!p.programs?.floatShoes,
       airShoes: !!p.programs?.airShoes,
       underShirt: !!p.programs?.underShirt,
     });
     this.entities.push(this.player);
+    this.player.data.style = this.style;
     this.controller = new PlayerController(this, this.player, {
       attack: p.attack ?? 1,
       rapid: p.rapid ?? 1,
       charge: p.charge ?? 1,
+      style: this.style,
     });
 
     // Enemies
     for (const en of this.encounter.enemies ?? []) this.spawnEnemy(en.type, en.level ?? 1, en.col, en.row, en);
 
     // Custom Screen
-    const handBonus = (p.programs?.custom1 ? 1 : 0) + (p.programs?.custom2 ? 2 : 0);
+    const handBonus = (p.programs?.custom1 ? 1 : 0) + (p.programs?.custom2 ? 2 : 0) + (this.style.type === 'custom' ? 1 : 0);
     this.custom = new CustomScreen(this, p.folder ?? [], Math.min(LIMITS.HAND_MAX, LIMITS.HAND_BASE + handBonus), { shuffle: config.shuffle !== false });
   }
 

@@ -25,6 +25,20 @@ export const PROGRAMS = {
 
 export const FOLDER_RULES = { size: 30, maxStandard: 5, maxMegaEach: 1, maxMega: 5, maxGiga: 1 };
 
+// Style Change (BN3): beating a boss unlocks the style it teaches.
+export const STYLE_TYPES = {
+  guts: { name: 'Guts', boss: 'feralis', desc: 'Buster hits twice as hard; hits never make you flinch.' },
+  custom: { name: 'Custom', boss: 'sabre', desc: 'See 1 more chip on the Custom Screen.' },
+  shield: { name: 'Shield', boss: 'ironclad', desc: 'Hold Back + B: a shield that reflects attacks.' },
+  team: { name: 'Team', boss: 'zeroday', desc: 'Carry up to 7 Mega chips in your folder.' },
+};
+export const STYLE_ELEMENTS = {
+  fire: { name: 'Heat', boss: 'pyreclaw', desc: 'Fire body. Charge shot breathes flame 3 panels.' },
+  aqua: { name: 'Aqua', boss: 'tidecaller', desc: 'Aqua body. Charge shot is a bursting bubble.' },
+  elec: { name: 'Elec', boss: 'voltframe', desc: 'Elec body. Charge shot paralyses.' },
+  wood: { name: 'Wood', boss: 'briarix', desc: 'Wood body. Charge shot is a tornado; heal on grass.' },
+};
+
 function expand(list) {
   const out = [];
   for (const [key, code, n] of list) for (let i = 0; i < n; i++) out.push({ key, code });
@@ -45,6 +59,7 @@ function freshData() {
     library,
     stats: { hpMem: 0, attack: 1, rapid: 1, charge: 1 },
     programs: { owned: ['underShirt'], equipped: [] },
+    style: { type: null, element: 'null' },
     progress: { area: 0, step: 0, hp: null, cleared: {}, bosses: {}, encounters: {}, finished: false },
     bits: 0,
     options: { sfx: 0.8, music: 0.55, numbers: true },
@@ -93,6 +108,18 @@ export class SaveData {
     return PLAYER_BASE_HP + 20 * this.data.stats.hpMem;
   }
 
+  unlockedStyles() {
+    const beaten = this.data.progress.bosses;
+    return {
+      types: Object.keys(STYLE_TYPES).filter((k) => beaten[STYLE_TYPES[k].boss]),
+      elements: Object.keys(STYLE_ELEMENTS).filter((k) => beaten[STYLE_ELEMENTS[k].boss]),
+    };
+  }
+
+  get maxMega() {
+    return FOLDER_RULES.maxMega + (this.data.style?.type === 'team' ? 2 : 0);
+  }
+
   get programCapacity() {
     const bosses = Object.keys(this.data.progress.bosses).length;
     return Math.min(6, 3 + Math.floor(bosses / 2));
@@ -115,6 +142,7 @@ export class SaveData {
       rapid: d.stats.rapid,
       charge: d.stats.charge,
       programs,
+      style: { ...(d.style ?? { type: null, element: 'null' }) },
       folder: d.folder.map((c) => ({ ...c })),
     };
   }
@@ -140,7 +168,7 @@ export class SaveData {
     if (sameId >= this.ownedCount(chip.key, chip.code)) return false;
     if (def.klass === 'mega') {
       if (folder.some((c) => c.key === chip.key)) return false;
-      if (folder.filter((c) => CHIPS[c.key]?.klass === 'mega').length >= FOLDER_RULES.maxMega) return false;
+      if (folder.filter((c) => CHIPS[c.key]?.klass === 'mega').length >= this.maxMega) return false;
     } else if (def.klass === 'giga') {
       if (folder.filter((c) => CHIPS[c.key]?.klass === 'giga').length >= FOLDER_RULES.maxGiga) return false;
     } else if (folder.filter((c) => c.key === chip.key).length >= FOLDER_RULES.maxStandard) return false;
