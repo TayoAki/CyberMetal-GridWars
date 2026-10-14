@@ -204,6 +204,17 @@ export class WorldInput {
     }
   }
 
+  // Forget everything held or tapped (when a menu closes, so its key presses don't leak into the game).
+  reset() {
+    this.keys.clear();
+    this.tapped.clear();
+    this.touch.held.clear();
+    this.touch.chip = 0;
+    this.pulse = { next: 0, prev: 0 };
+    this.pulsed = { next: false, prev: false };
+    this.dragLook = false;
+  }
+
   // Held now, or pressed since the last sample.
   any(codes) {
     return codes.some((c) => this.keys.has(c) || this.tapped.has(c));

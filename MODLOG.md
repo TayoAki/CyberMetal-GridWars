@@ -269,3 +269,53 @@ only reads the state:
   next balance question.
 - **Scripted captures** (SwiftShader) of every strike, chip and reaction, plus phone portrait and
   landscape layouts. No page errors.
+
+### 6c. Parts decide the moves
+
+The owner asked for "the parts system so parts decide my attacks", the Medabots / Custom Robo idea from the
+design talks. Route:
+- **Slots and parts:** four slots, each with four parts, all pure data in `src/world/parts.js`.
+  - **Arm:** the combo, its reach, lunge and finishers.
+  - **Gun:** tap and charged shots.
+  - **Legs:** speed, jump, dodges, air dodges, weight, glide, steadiness.
+  - **Core:** HP and a passive.
+- **Kit:** `buildKit()` folds a loadout into one object, and the World reads it wherever it used to read
+  constants.
+- **Gun arm:** guns moved to the left arm, so the right hand holds the melee part, like Medabots' left and
+  right arm parts.
+- **Getting parts:** sealing a rift turns up a missing part (Medabots' "winner takes a part" spirit). DATA
+  buys the rest.
+- **Garage commands:** they travel in the step input (`input.garage`), so recordings and determinism tests
+  cover them. The World refuses them with a virus within 30 m.
+
+#### Gotchas
+1. **Symptom:** one Spreader blast made a virus armored at once. **Cause:** revenge value counted every
+   hit as 1, and a blast is 5-11 pellets. **Fix:** hits are weighted (pellet 0.15, buster 0.4, Breaker
+   0.5, strikes 1).
+2. **Symptom:** the Lance whiffed from 13 m. **Cause:** the lunge was capped at 0.2 s, too short for that
+   distance. **Fix:** lunge time scales with the arm's lunge distance.
+3. **Symptom:** shots leaked GPU memory, with every shot building its own sphere geometry. It got worse
+   with up to 11 pellets a shot. **Fix:** shared geometry and materials per size and colour; railgun beams
+   dispose theirs.
+4. **Tooling:** a scripted capture showed the old garage panel after a purchase, because its stepping path
+   skipped the menu refresh. **Fix:** one event handler for the game loop and scripted steps.
+5. **Visual:** the Breaker's box head read as a slab; it became a drum with glowing faces.
+6. **Visual (not a bug):** a dark rod behind the mech's left hip is part of the owner's model.
+
+#### Oracles
+- `tests/world_parts.test.js` (19 tests):
+  - the catalog;
+  - buying, equipping and combat refusals, and HP carry-over;
+  - rift finds and the wallet;
+  - every arm's combo, Breaker armor breaks, the Lance's 13 m lunge and pierce, Claws air hits;
+  - the Spreader's fan, the Railgun's line hits, the Bomber's arc;
+  - leg speeds, Hover glide and air dodges, Treads steadiness and knockback weight;
+  - Link and Overclock;
+  - saves (including junk saves);
+  - a determinism and NaN fuzz with random loadouts.
+- **Per-part bot sweep** (4 seeds × 3 min each, starter parts elsewhere): 164-199 deletes per part, no
+  knockdowns, no part far ahead or behind. The bot plays one style, so this only shows each part works in
+  real fights.
+- **Scripted captures:** every arm mid-swing, the quake and pierce, all four guns, Hover glide,
+  Sprinters, Treads, garage close-ups of four loadouts, and the garage on desktop and on phone portrait
+  and landscape, bought by keyboard and by touch. No page errors.

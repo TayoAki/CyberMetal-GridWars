@@ -1,7 +1,11 @@
 // A demo pilot for the open world (?auto=1): heads for the nearest open rift and fights what comes out the way
 // a player would: locks on, closes in and mashes combos, shoots from range, uses its chips, takes every
-// reaction command it is offered, jumps shockwaves and dodges dives. Used for the attract demo, browser smoke
-// tests and showcase clips. It steers the camera while roaming; locked on, the view frames the target itself.
+// reaction command it is offered, jumps shockwaves and dodges dives. Between fights it visits the garage:
+// it buys parts it can afford and tries each new part it owns, so the demo shows them all in time. Used for
+// the attract demo, browser smoke tests and showcase clips. It steers the camera while roaming; locked on, the
+// view frames the target itself.
+
+import { PARTS, STARTER } from './parts.js';
 
 const wrap = (a) => {
   while (a > Math.PI) a -= Math.PI * 2;
@@ -9,14 +13,29 @@ const wrap = (a) => {
   return a;
 };
 
-export function makeBot(world) {
+export function makeBot(world, { garage = true } = {}) {
   let t = 0;
   let chargeUntil = 0;
+  const tried = new Set(Object.values(STARTER));
   return (view) => {
     t++;
     const p = world.player;
     const out = { move: { x: 0, y: 0 }, attack: false, shoot: false, jump: false, dash: false, lock: false, react: false, chip: 0 };
     if (!p.alive) return out;
+    // The garage, out of combat now and then: try a new part, else buy one.
+    if (garage && t % 90 === 0 && world.canGarage()) {
+      const fresh = Object.keys(PARTS).find((k) => world.owned.has(k) && !tried.has(k));
+      if (fresh) {
+        tried.add(fresh);
+        out.garage = { op: 'equip', part: fresh };
+        return out;
+      }
+      const buy = Object.keys(PARTS).find((k) => !world.owned.has(k) && PARTS[k].price <= world.wallet);
+      if (buy) {
+        out.garage = { op: 'buy', part: buy };
+        return out;
+      }
+    }
     const foes = world.enemies.filter((e) => e.alive && e.spawnT <= 0);
     let foe = null;
     let best = 48;

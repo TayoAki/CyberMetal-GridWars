@@ -1,17 +1,17 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { Gear } from './gear.js';
 
 // The player's mech: the rigged GLB (Mixamo bone names, rest pose = T-pose with identity bone rotations, facing
 // +z, the character's left arm along +x), animated procedurally from the simulation state. Every pose is a set
 // of bone rotations layered on the T-pose; bones ease toward their targets each frame.
 //
-// Close combat turns the buster arm into an energy saber (like Battle Network's Sword chips). A sword-arm
-// direction is written as [around, up]: `around` sweeps it horizontally (0 = out to the right, PI/2 = straight
-// ahead, PI = across to the left) and `up` raises it; see swingArm().
+// Parts (gear.js) hang on the bones: the arm part's weapon in the right hand, drawn while attacking; the gun
+// part on the left arm. A weapon-arm direction is written as [around, up]: `around` sweeps it horizontally
+// (0 = out to the right, PI/2 = straight ahead, PI = across to the left) and `up` raises it; see swingArm().
 
 export const AVATAR_HEIGHT = 1.78; // metres
 const PIVOT_Y = 0.95; // spins and flips turn around the hips
-const BLADE = { len: 1.15, base: 0.1 };
 
 // Each strike sweeps the sword arm from `from` to `to` as the strike's clock passes its hit time, turning the
 // torso through `twist`. `spin`: whole-body turns; `flip`: front flips; `hop`: a little lift.
@@ -24,6 +24,30 @@ const SWINGS = {
   air1: { from: [0.3, 0.8], to: [2.3, -0.5], twist: [-0.45, 0.5] },
   air2: { from: [2.3, -0.45], to: [0.3, 0.75], twist: [0.5, -0.45] },
   airFinisher: { from: [1.57, 1.5], to: [1.57, -1.05], twist: [0, 0], flip: 1 },
+  // Breaker: overhead smashes, a sweeping blow, a jumping ground quake.
+  smash1: { from: [1.57, 1.45], to: [1.57, -0.85], twist: [0, 0.1], hop: 0.12 },
+  smash2: { from: [0.15, 0.3], to: [2.5, -0.2], twist: [-0.6, 0.6] },
+  quake: { from: [1.57, 1.55], to: [1.57, -1.2], twist: [0, 0], hop: 0.6 },
+  airSmash: { from: [1.57, 1.35], to: [1.57, -0.9], twist: [0, 0] },
+  meteor: { from: [1.57, 1.5], to: [1.57, -1.1], twist: [0, 0], flip: 1 },
+  // Lance: jabs from the side into a straight thrust, a charge, a plunging skewer.
+  thrust1: { from: [0.75, 0.05], to: [1.57, 0.05], twist: [-0.35, 0.15], lean: 0.3 },
+  thrust2: { from: [2.2, 0.05], to: [1.57, 0.0], twist: [0.35, -0.1], lean: 0.3 },
+  thrust3: { from: [1.1, -0.35], to: [1.57, 0.2], twist: [-0.2, 0.1], lean: 0.4 },
+  pierce: { from: [1.57, 0.0], to: [1.57, 0.0], twist: [0, 0], lean: 0.85 },
+  airThrust1: { from: [0.8, 0.0], to: [1.57, -0.1], twist: [-0.35, 0.15], lean: 0.2 },
+  airThrust2: { from: [2.2, 0.0], to: [1.57, -0.15], twist: [0.35, -0.1], lean: 0.2 },
+  skewer: { from: [1.57, 0.4], to: [1.57, -1.15], twist: [0, 0], lean: 0.6 },
+  // Claws: quick rakes back and forth, an uppercut, a spinning rend.
+  rake1: { from: [0.5, 0.65], to: [2.1, -0.45], twist: [-0.3, 0.35] },
+  rake2: { from: [2.1, -0.4], to: [0.5, 0.6], twist: [0.35, -0.3] },
+  rake3: { from: [0.6, -0.35], to: [2.0, 0.55], twist: [-0.3, 0.3] },
+  rake4: { from: [2.0, 0.6], to: [0.5, -0.4], twist: [0.3, -0.35] },
+  uppercut: { from: [1.4, -1.1], to: [1.7, 1.5], twist: [0.25, -0.3], hop: 0.5 },
+  airRake1: { from: [0.5, 0.7], to: [2.1, -0.4], twist: [-0.3, 0.35] },
+  airRake2: { from: [2.1, -0.4], to: [0.5, 0.65], twist: [0.35, -0.3] },
+  airRake3: { from: [0.6, -0.3], to: [2.0, 0.6], twist: [-0.3, 0.3] },
+  rend: { from: [0.4, 0.15], to: [0.4, -0.2], twist: [0, 0], spin: 1 },
   // Reaction commands.
   break: { from: [1.57, 1.45], to: [1.57, -0.9], twist: [0, 0], hop: 0.35 },
   reversal: { from: [0.3, 0.1], to: [0.3, 0.1], twist: [0, 0], spin: -1 },
@@ -78,49 +102,28 @@ class Avatar {
     this.hipsBase = this.bones.Hips ? this.bones.Hips.position.clone() : new THREE.Vector3();
     this.tmpE = new THREE.Euler();
     this.tmpQ = new THREE.Quaternion();
-    this.bladeK = 0; // 0 hidden .. 1 fully drawn
+    this.weaponK = 0; // the arm part's weapon: 0 put away .. 1 fully drawn
+    this.showcase = false; // the garage's pose
     this.ahead = 0;
-    this.bladeColor = new THREE.Color(0x4adfff);
-    this.buildBlade();
+    this.gear = new Gear(this.bones, this.group);
   }
 
-  // An energy saber growing out of the right hand, along the arm (the hand bone's -x in the T-pose).
-  buildBlade() {
-    const hand = this.bones.RightHand;
-    if (!hand) return;
-    this.group.updateMatrixWorld(true);
-    const ws = hand.getWorldScale(new THREE.Vector3());
-    this.bladeScale = 1 / (ws.x || 1);
-    const { len, base } = BLADE;
-    const core = new THREE.CylinderGeometry(0.014, 0.05, len, 6, 1).translate(0, len / 2 + base, 0).rotateZ(Math.PI / 2);
-    const shell = new THREE.CylinderGeometry(0.05, 0.13, len * 1.05, 10, 1, true).translate(0, len / 2 + base, 0).rotateZ(Math.PI / 2);
-    this.bladeGlow = new THREE.MeshBasicMaterial({ color: this.bladeColor, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false });
-    const blade = new THREE.Group();
-    blade.add(new THREE.Mesh(core, new THREE.MeshBasicMaterial({ color: 0xf0ffff })));
-    blade.add(new THREE.Mesh(shell, this.bladeGlow));
-    for (const m of blade.children) {
-      m.frustumCulled = false;
-      m.renderOrder = 2;
-    }
-    blade.visible = false;
-    hand.add(blade);
-    this.blade = blade;
+  // Show the equipped parts.
+  setLoadout(loadout) {
+    this.gear.setLoadout(loadout);
   }
 
-  // World positions of the saber's base and tip (for the slash trail); false while it is put away.
+  // World positions of the weapon's slash-trail base and tip; false while it is put away.
   bladeEnds(base, tip) {
-    if (!this.blade || this.bladeK < 0.5) return false;
-    this.blade.updateMatrixWorld(true);
-    base.set(-BLADE.base, 0, 0).applyMatrix4(this.blade.matrixWorld);
-    tip.set(-(BLADE.base + BLADE.len), 0, 0).applyMatrix4(this.blade.matrixWorld);
-    return true;
+    return this.gear.trailEnds(base, tip);
   }
 
-  setBladeColor(hex) {
-    this.bladeColor.setHex(hex);
+  // World position of the gun's muzzle (on the left arm), for flashes and the charge glow.
+  gunMuzzle(out = new THREE.Vector3()) {
+    return this.gear.muzzle(out) ?? this.group.getWorldPosition(out).add(new THREE.Vector3(0, 1.2, 0));
   }
 
-  // Sword arm pointing [around, up] (see the top of the file), elbow nearly straight.
+  // Weapon arm pointing [around, up] (see the top of the file), elbow nearly straight.
   swingArm(t, around, up) {
     // Rz raises/lowers the arm from the T-pose, then Ry sweeps it around the body (Euler order XYZ applies Z
     // first): direction = (-cos(up) cos(around), sin(up), cos(up) sin(around)).
@@ -157,7 +160,7 @@ class Avatar {
       const up = mix(sw.from[1], sw.to[1], k);
       this.swingArm(t, around, up);
       t.Spine1.y = mix(sw.twist[0], sw.twist[1], k);
-      t.Spine.x = 0.12 + 0.12 * Math.sin(k * Math.PI);
+      t.Spine.x = 0.12 + 0.12 * Math.sin(k * Math.PI) + (sw.lean ?? 0) * k;
       // The free arm balances against the swing; legs brace in a wide stance.
       t.LeftArm = E(-0.2, 0, -0.75 - 0.3 * k);
       t.LeftForeArm = E(0, -0.6, 0);
@@ -191,14 +194,14 @@ class Avatar {
         t.RightLeg.x = 1.5 * k;
         out.hop = -0.32 * k;
       } else if (a.name === 'cannon') {
-        // Both hands on the buster, big recoil.
+        // Both hands on the gun arm, big recoil.
         const kick = Math.max(0, 1 - time / 0.25);
-        t.RightArm = E(0.25 * kick, Math.PI / 2 - 0.05, 0);
-        t.RightForeArm = E(0, 0.3 * kick, 0);
-        t.LeftArm = E(0, -(Math.PI / 2 + 0.35), 0.05); // reaching across to steady the buster
-        t.LeftForeArm = E(0, -0.5, 0);
+        t.LeftArm = E(0.25 * kick, -(Math.PI / 2 - 0.05), 0);
+        t.LeftForeArm = E(0, -0.3 * kick, 0);
+        t.RightArm = E(0, Math.PI / 2 + 0.35, -0.05); // reaching across to steady it
+        t.RightForeArm = E(0, 0.5, 0);
         t.Spine.x = -0.25 * kick;
-        t.Spine1.y = -0.3;
+        t.Spine1.y = 0.3;
       } else if (a.name === 'findash') {
         // A Dartfin's dive: body flat, saber out in front like a fin.
         out.blade = true;
@@ -216,7 +219,7 @@ class Avatar {
     return out;
   }
 
-  // World position of the right hand (the buster), for effects.
+  // World position of the right hand (the arm part), for effects.
   handPosition(out = new THREE.Vector3()) {
     const h = this.bones.RightHand;
     return h ? h.getWorldPosition(out) : this.group.getWorldPosition(out).add(new THREE.Vector3(0, 1.2, 0));
@@ -292,18 +295,37 @@ class Avatar {
       t.RightLeg.x = 0.3;
     }
     if (aiming) {
-      // Buster arm straight at the crosshair; the other arm braces; the torso turns into the shot.
+      // Gun arm (the left) straight at the crosshair; the other arm braces; the torso turns into the shot.
       const pitch = Math.max(-0.9, Math.min(0.9, aimPitch));
-      t.RightArm = E(-pitch - this.shootKick * 0.25, Math.PI / 2 - 0.08, 0);
-      t.RightForeArm = E(0, 0.05 + this.shootKick * 0.3, 0);
-      t.LeftArm = E(-0.35, 0, -1.05);
-      t.LeftForeArm = E(0, -0.9, 0);
-      t.Spine1.y = -0.18;
+      t.LeftArm = E(-pitch - this.shootKick * 0.25, -(Math.PI / 2 - 0.08), 0);
+      t.LeftForeArm = E(0, -0.05 - this.shootKick * 0.3, 0);
+      t.RightArm = E(-0.35, 0, 1.05);
+      t.RightForeArm = E(0, 0.9, 0);
+      t.Spine1.y = 0.18;
       t.Spine2.x = -pitch * 0.25;
       t.Head.x = -pitch * 0.5;
     }
+    if (p.gliding) {
+      // Hover glide: arms out, legs together, a slight forward tilt.
+      t.LeftArm = E(-0.1, 0, -0.25);
+      t.RightArm = E(-0.1, 0, 0.25);
+      t.LeftUpLeg.x = -0.15;
+      t.RightUpLeg.x = -0.1;
+      t.LeftLeg.x = 0.3;
+      t.RightLeg.x = 0.25;
+      t.Spine.x = 0.2;
+    }
     let extra = { spin: 0, flip: 0, hop: 0, blade: false, fast: false };
     if (act) extra = this.actionPose(t, act);
+    else if (this.showcase) {
+      // In the garage: weapon drawn and held out, gun arm raised, a confident stance.
+      extra.blade = true;
+      this.swingArm(t, 1.15, 0.3);
+      t.LeftArm = E(-0.25, -(Math.PI / 2 - 0.6), 0.25);
+      t.LeftForeArm = E(0, -0.5, 0);
+      t.LeftUpLeg = E(-0.1, 0, -0.12);
+      t.RightUpLeg = E(0.05, 0, 0.12);
+    }
     if (this.hurt > 0) {
       const k = this.hurt / 0.45;
       t.Spine.x = -0.5 * k;
@@ -328,16 +350,11 @@ class Avatar {
     // Spins, flips and hops turn the whole body around the hips.
     this.pivot.rotation.set(extra.flip, extra.spin, 0);
     this.pivot.position.y = PIVOT_Y + extra.hop;
-    // The saber: drawn for strikes and lingers a moment after.
-    this.bladeLinger = extra.blade ? 0.3 : Math.max(0, (this.bladeLinger ?? 0) - dt);
-    const want = extra.blade || this.bladeLinger > 0 ? 1 : 0;
-    this.bladeK += (want - this.bladeK) * (1 - Math.exp(-dt * (want ? 40 : 14)));
-    if (this.blade) {
-      const k = this.bladeK;
-      this.blade.visible = k > 0.03;
-      this.blade.scale.set(this.bladeScale * k, this.bladeScale * (0.6 + 0.4 * k), this.bladeScale * (0.6 + 0.4 * k));
-      this.bladeGlow.opacity = 0.35 + 0.25 * Math.sin(this.time * 40) * 0.5 + 0.15 * k;
-    }
+    // The arm part's weapon: drawn for strikes, lingering a moment after.
+    this.weaponLinger = extra.blade ? 0.3 : Math.max(0, (this.weaponLinger ?? 0) - dt);
+    const want = extra.blade || this.weaponLinger > 0 ? 1 : 0;
+    this.weaponK += (want - this.weaponK) * (1 - Math.exp(-dt * (want ? 40 : 14)));
+    this.gear.showWeapon(this.weaponK);
   }
 
   setVisible(v) {

@@ -1,6 +1,7 @@
 import { WORLD_SIZE, WATER_LEVEL } from './terrain.js';
 import { CHARGE } from './sim.js';
 import { CHIPS, CHIP_LEVELS } from './combat.js';
+import { PARTS, SLOTS } from './parts.js';
 
 // The open world's HUD, in plain DOM over the 3D canvas: HP and charge bars, data and rift counters, the
 // crosshair, floating damage numbers, toasts and a rotating minimap centred on the player; and, for close
@@ -28,8 +29,9 @@ export class Hud {
       hpFill: $('hpFill'), hpNum: $('hpNum'), chFill: $('chFill'), chRow: $('chRow'), data: $('data'), rifts: $('rifts'),
       cross: $('crosshair'), toast: $('toast'), nums: $('nums'), map: $('minimap'), hint: $('hint'),
       target: $('target'), tgName: $('tgName'), tgHp: $('tgHp'), tgFill: $('tgFill'), tgState: $('tgState'),
-      react: $('react'), reactName: $('reactName'), deck: $('deck'), callout: $('callout'),
+      react: $('react'), reactName: $('reactName'), deck: $('deck'), callout: $('callout'), kit: $('kit'),
     };
+    this.kitShown = '';
     this.nums = [];
     this.toastT = 0;
     this.calloutT = 0;
@@ -153,6 +155,20 @@ export class Hud {
       case 'lock-none':
         this.toast('NO TARGET IN RANGE', '#8a9cc8', 1.2);
         break;
+      case 'part-found':
+        if (ev.part) this.toast(`PART FOUND · ${PARTS[ev.part].name.toUpperCase()} · ${this.mode === 'touch' ? 'TAP GARAGE' : this.mode === 'pad' ? 'BACK: GARAGE' : 'G: GARAGE'}`, css(PARTS[ev.part].color), 3.4);
+        else this.toast(`+${ev.data} DATA`, '#6affa0', 2);
+        break;
+      case 'part-bought':
+        this.toast(`BOUGHT ${PARTS[ev.part].name.toUpperCase()} · −${ev.price} DATA`, css(PARTS[ev.part].color), 1.6);
+        break;
+      case 'part-equipped':
+        this.toast(`${PARTS[ev.part].name.toUpperCase()} EQUIPPED`, css(PARTS[ev.part].color), 1.6);
+        break;
+      case 'garage-denied':
+        if (ev.reason === 'combat') this.toast('VIRUSES NEARBY · FINISH THE FIGHT FIRST', '#ff6a6a', 2);
+        else if (ev.reason === 'data') this.toast('NOT ENOUGH DATA', '#ff6a6a', 1.6);
+        break;
       case 'hurt':
         this.number(ev.x, ev.y, ev.z, `-${ev.amount}`, 'hurt');
         break;
@@ -187,9 +203,14 @@ export class Hud {
     el.chFill.style.width = `${ch * 100}%`;
     el.chFill.classList.toggle('full', p.chargeFull);
     el.chRow.classList.toggle('on', p.charging);
-    if (w.stats.data !== this.dataShown) {
-      this.dataShown = w.stats.data;
-      el.data.textContent = `DATA ${w.stats.data}`;
+    if (w.wallet !== this.dataShown) {
+      this.dataShown = w.wallet;
+      el.data.textContent = `DATA ${w.wallet}`;
+    }
+    const kit = Object.values(w.loadout).join();
+    if (el.kit && kit !== this.kitShown) {
+      this.kitShown = kit;
+      el.kit.innerHTML = SLOTS.map((slot) => `<span style="color:${css(PARTS[w.loadout[slot]].color)}">${PARTS[w.loadout[slot]].name.toUpperCase()}</span>`).join('');
     }
     const sealed = w.zones.filter((z) => z.state === 'cleared').length;
     el.rifts.textContent = `RIFTS ${sealed}/${w.zones.length}${w.wave > 1 ? ` · WAVE ${w.wave}` : ''}`;
@@ -263,7 +284,7 @@ export class Hud {
     this.slots.forEach((slot, i) => {
       const key = w.deck[i];
       const c = key && w.chips[key];
-      const cd = c ? (w.chipCd[key] ?? 0) / CHIPS[key].cooldown : 0;
+      const cd = c ? Math.min(1, (w.chipCd[key] ?? 0) / (CHIPS[key].cooldown * w.kit.chipCd)) : 0;
       const label = c ? `${key}:${c.level}:${L.chip[i]}` : `?${unknown[i - w.deck.length]}:${L.chip[i]}`;
       if (label !== slot.shown) {
         slot.shown = label;

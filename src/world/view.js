@@ -5,6 +5,7 @@ import { Particles, glowSprite, SlashTrail, reticleTexture } from './fx.js';
 import { makeEnemyModel } from './models.js';
 import { loadAvatar } from './avatar.js';
 import { CHIPS } from './combat.js';
+import { PARTS } from './parts.js';
 
 // The open world's view: reads the simulation and draws it with three.js. It owns everything purely visual
 // (camera, effects, telegraph markers) and never changes the simulation. It also turns the camera into the
@@ -19,8 +20,13 @@ const wrap = (a) => {
   while (a < -Math.PI) a += Math.PI * 2;
   return a;
 };
-const BLADE_COLOR = 0x4adfff;
 const FINISH_COLOR = 0xffd84a;
+// Shot looks by kind: core colour, glow colour, glow size (in shot radii).
+const SHOT_LOOK = {
+  buster: [0xe8ffff, 0x40d8ff, 5], mid: [0xd8ffff, 0x5ae8ff, 5], charge: [0xffffff, 0xff5ae0, 5], cannon: [0xfffbe8, 0xffc83a, 5],
+  pellet: [0xfff6c0, 0xffd84a, 4], blast: [0xffffff, 0xffb83a, 4.5], needle: [0xf4ecff, 0xb08aff, 5], bomb: [0x2a1a14, 0xff7a3a, 4],
+};
+const TRAIL_COLOR = { charge: 0xff7ae8, cannon: 0xffc83a, pellet: 0xffd84a, blast: 0xffb83a, needle: 0xb08aff, bomb: 0xff7a3a };
 const reduceMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 export async function createView(canvas, world, avatarBuffer, opts = {}) {
@@ -68,6 +74,11 @@ class WorldView {
     this.scene.add(this.reticle);
     this.reticleK = 0;
     this.reticleId = null;
+    this.beams = []; // railgun beams fading out
+    this.sphereGeos = new Map(); // shot spheres by radius, shared so shots don't leak geometry
+    this.shotMats = new Map();
+    this.loadoutKey = '';
+    this.showcase = 0; // 0..1: the garage's slow orbit around the mech
     // KH2's soft target: a small pale marker on the virus the next strike will home in on.
     this.softMark = new THREE.Sprite(new THREE.SpriteMaterial({ map: reticleTexture(), color: 0xf4ecd0, depthTest: false, depthWrite: false, transparent: true, opacity: 0.55 }));
     this.softMark.renderOrder = 9;
@@ -404,8 +415,14 @@ class WorldView {
     const { fwd, right } = this.cameraBasis();
     // Locked on, pull back, up and further over the shoulder so the target stays in view past the player.
     const k = (this.cam.lockK += ((this.world.lockTarget() ? 1 : 0) - this.cam.lockK) * (1 - Math.exp(-dt * 4)));
-    const pivot = new THREE.Vector3(px, py + 1.55 + k * 0.45, pz).addScaledVector(right, this.shoulder());
-    const want = pivot.clone().addScaledVector(fwd, -(this.cam.dist + k * 1.6));
+    // In the garage the camera closes in on the mech, centred, and circles it slowly.
+    const sk = (this.showK = (this.showK ?? 0) + (this.showcase - (this.showK ?? 0)) * (1 - Math.exp(-dt * 3)));
+    if (this.showcase) {
+      this.cam.yaw += dt * 0.45;
+      this.cam.pitch += (-0.12 - this.cam.pitch) * (1 - Math.exp(-dt * 3));
+    }
+    const pivot = new THREE.Vector3(px, py + 1.55 + k * 0.45 - sk * 0.45, pz).addScaledVector(right, this.shoulder() * (1 - sk));
+    const want = pivot.clone().addScaledVector(fwd, -(this.cam.dist + k * 1.6 - sk * (this.cam.dist - 3.6)));
     // Keep the camera out of the ground (check a few points back from the pivot).
     for (let k = 0.5; k <= 1.001; k += 0.25) {
       const x = pivot.x + (want.x - pivot.x) * k;
@@ -501,15 +518,44 @@ class WorldView {
     switch (ev.type) {
       case 'shot': {
         this.avatar.onShot();
-        this.muzzleT = ev.kind === 'buster' ? 0.07 : 0.14;
-        this.muzzleSize = ev.kind === 'buster' ? 1.1 : ev.kind === 'mid' ? 1.8 : 3;
+        this.muzzleT = ev.kind === 'buster' || ev.kind === 'needle' ? 0.07 : 0.14;
+        this.muzzleSize = { buster: 1.1, needle: 0.9, mid: 1.8, pellet: 1.9, blast: 3.2, bomb: 1.5 }[ev.kind] ?? 3;
+        this.muzzle.material.color.setHex(PARTS[ev.gun]?.color ?? 0xbff8ff);
         break;
       }
+      case 'beam': {
+        // The railgun's beam: a bright line that fades, sparks along it.
+        this.avatar.onShot();
+        this.addBeam(ev);
+        this.muzzleT = 0.12;
+        this.muzzleSize = ev.level === 2 ? 3.4 : 2.2;
+        const len = Math.hypot(ev.x1 - ev.x0, ev.y1 - ev.y0, ev.z1 - ev.z0);
+        for (let i = 0; i < Math.min(60, len * 1.2); i++) {
+          const t = Math.random();
+          P.emit(ev.x0 + (ev.x1 - ev.x0) * t, ev.y0 + (ev.y1 - ev.y0) * t, ev.z0 + (ev.z1 - ev.z0) * t, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2, 0xc8a8ff, 0.35, 0.3);
+        }
+        P.burst(ev.x1, ev.y1, ev.z1, 16, 0xd8c0ff, { speed: 6, size: 0.45, life: 0.35 });
+        if (ev.level === 2) this.cam.shake = Math.max(this.cam.shake, 0.18);
+        break;
+      }
+      case 'charge':
+        // The Lance's pierce: a burst of speed.
+        this.dust.ring(ev.x, ev.y, ev.z, 14, 0xb8ad90, { speed: 6, size: 0.8, life: 0.45 });
+        P.burst(ev.x, ev.y + 1, ev.z, 18, PARTS.lance.color, { speed: 6, size: 0.4, life: 0.3 });
+        break;
+      case 'armor-break':
+        P.burst(ev.x, ev.y, ev.z, 30, 0xffb060, { speed: 10, size: 0.55, life: 0.45 });
+        this.flash(ev.x, ev.y, ev.z, 0xffd8a0, 4, 0.16);
+        break;
+      case 'part-found':
+        if (ev.part) P.burst(ev.x, ev.y, ev.z, 50, PARTS[ev.part].color, { speed: 9, size: 0.7, life: 1.0, up: 3 });
+        break;
       case 'impact': {
         const enemy = ev.team === 'enemy';
-        const big = ['charge', 'cannonball', 'cannon', 'deflect'].includes(ev.kind);
-        const color = enemy ? 0xff9a3a : ({ charge: 0xff7ae8, cannon: 0xffc83a }[ev.kind] ?? 0x7af0ff);
-        P.burst(ev.x, ev.y, ev.z, big ? 46 : ev.kind === 'mid' ? 18 : 9, color, { speed: big ? 11 : 6, size: big ? 0.7 : 0.35, life: big ? 0.7 : 0.35 });
+        const big = ['charge', 'cannonball', 'cannon', 'deflect', 'bomb'].includes(ev.kind);
+        const color = enemy ? 0xff9a3a : TRAIL_COLOR[ev.kind] ?? 0x7af0ff;
+        const small = ev.kind === 'pellet' || ev.kind === 'needle';
+        P.burst(ev.x, ev.y, ev.z, big ? 46 : ev.kind === 'mid' ? 18 : small ? 4 : 9, color, { speed: big ? 11 : 6, size: big ? 0.7 : small ? 0.25 : 0.35, life: big ? 0.7 : 0.35 });
         if (big) {
           P.burst(ev.x, ev.y, ev.z, 14, 0xffffff, { speed: 4, size: 1.2, life: 0.25 });
           P.ring(ev.x, ev.y, ev.z, 20, enemy ? 0xffc080 : 0xd0a0ff, { speed: 9, size: 0.6, life: 0.4 });
@@ -724,9 +770,15 @@ class WorldView {
     // Player. During hit-stop the pose holds still with the world.
     const frozen = w.hitstop > 0;
     const av = this.avatar;
+    const key = Object.values(w.loadout).join();
+    if (key !== this.loadoutKey) {
+      this.loadoutKey = key;
+      av.setLoadout(w.loadout);
+    }
     av.group.position.set(px, py, pz);
     av.group.rotation.y = p.yaw;
     const act = p.action;
+    av.showcase = this.showcase > 0;
     const blink = p.iframes > 0 && p.dash <= 0 && !act && Math.floor(this.time * 18) % 2 === 0;
     av.setVisible(p.alive && !blink);
     av.update(p, this.lastAimPitch ?? 0, frozen ? dt * 0.05 : dt, frozen ? 0 : a * DT);
@@ -740,8 +792,7 @@ class WorldView {
         this.trail.cut();
         this.trailAction = act;
         const gold = act.kind === 'react' || act.def?.finisher;
-        this.trail.setColor(gold ? FINISH_COLOR : act.kind === 'chip' ? CHIPS.findash.color : BLADE_COLOR);
-        av.setBladeColor(gold ? FINISH_COLOR : BLADE_COLOR);
+        this.trail.setColor(gold ? FINISH_COLOR : act.kind === 'chip' ? CHIPS.findash.color : PARTS[w.loadout.arm].color);
       }
       this.trail.push(this.tb, this.tt);
     }
@@ -750,8 +801,12 @@ class WorldView {
     if (act?.kind === 'chip' && act.name === 'findash' && !frozen) {
       for (let k = 0; k < 3; k++) this.particles.emit(px + (Math.random() - 0.5) * 0.8, py + 0.6 + Math.random() * 0.9, pz + (Math.random() - 0.5) * 0.8, -p.vx * 0.15, 0.5, -p.vz * 0.15, 0x5af0ff, 0.5, 0.3);
     }
-    const hand = av.handPosition(this.tmp.clone());
-    // Charge glow and particles spiralling into the buster.
+    const hand = av.gunMuzzle(this.tmp.clone());
+    // Hover legs: jets under the feet while airborne, a soft trail while gliding.
+    if (p.alive && w.loadout.legs === 'hover' && !p.onGround && !frozen && Math.random() < (p.gliding ? 0.9 : 0.5)) {
+      this.particles.emit(px + (Math.random() - 0.5) * 0.5, py - 0.05, pz + (Math.random() - 0.5) * 0.5, 0, -3 - Math.random() * 2, 0, PARTS.hover.color, 0.45, 0.3, { drag: 2 });
+    }
+    // Charge glow and particles spiralling into the gun.
     if (p.alive && p.charging) {
       const full = p.chargeFull;
       const pulse = 1 + Math.sin(this.time * (full ? 30 : 16)) * 0.15;
@@ -784,6 +839,7 @@ class WorldView {
     this.updateRifts(dt);
     this.updateReticle(dt);
     this.updateFlashes(dt);
+    this.updateBeams(dt);
     this.particles.update(dt);
     this.dust.update(dt);
 
@@ -841,9 +897,10 @@ class WorldView {
       }
       v.position.set(s.x + s.vx * lead, s.y + s.vy * lead, s.z + s.vz * lead);
       // Trail.
-      const color = s.team === 'enemy' ? 0xff8a30 : ({ charge: 0xff7ae8, cannon: 0xffc83a }[s.kind] ?? 0x6ae8ff);
-      const n = s.kind === 'buster' ? 1 : 3;
+      const color = s.team === 'enemy' ? 0xff8a30 : TRAIL_COLOR[s.kind] ?? 0x6ae8ff;
+      const n = s.kind === 'pellet' ? (Math.random() < 0.4 ? 1 : 0) : s.kind === 'buster' || s.kind === 'needle' ? 1 : 3;
       for (let k = 0; k < n; k++) this.particles.emit(v.position.x, v.position.y, v.position.z, (Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 0.6, color, s.r * 2.2, 0.18, { drag: 4 });
+      if (s.kind === 'bomb') v.children[1].material.opacity = Math.floor(this.time * 10) % 2 ? 1 : 0.45; // blinking fuse
     }
     for (const [id, v] of this.shotViews) {
       if (!seen.has(id)) {
@@ -853,22 +910,63 @@ class WorldView {
     }
   }
 
+  // A shared sphere for a radius and a shared flat material for a colour (shots come and go all the time).
+  sphere(r, color) {
+    const key = Math.round(r * 1000);
+    if (!this.sphereGeos.has(key)) this.sphereGeos.set(key, new THREE.SphereGeometry(r, 10, 8));
+    if (!this.shotMats.has(color)) this.shotMats.set(color, new THREE.MeshBasicMaterial({ color }));
+    return new THREE.Mesh(this.sphereGeos.get(key), this.shotMats.get(color));
+  }
+
   makeShot(s) {
     const g = new THREE.Group();
     g.userData.look = s.team + s.kind;
     if (s.team === 'enemy' || s.kind === 'deflect') {
       // A cannonball: dark iron in an orange glow, or a cyan one once it has been batted back.
-      g.add(new THREE.Mesh(new THREE.SphereGeometry(s.r * 0.85, 10, 8), new THREE.MeshBasicMaterial({ color: s.team === 'enemy' ? 0x3a1c10 : 0x10283a })));
+      g.add(this.sphere(s.r * 0.85, s.team === 'enemy' ? 0x3a1c10 : 0x10283a));
       g.add(glowSprite(s.team === 'enemy' ? 0xff7a20 : 0x6ae8ff, s.r * (s.team === 'enemy' ? 4 : 5.5)));
     } else {
-      const core = { buster: 0xe8ffff, mid: 0xd8ffff, charge: 0xffffff, cannon: 0xfffbe8 }[s.kind] ?? 0xffffff;
-      const glow = { buster: 0x40d8ff, mid: 0x5ae8ff, charge: 0xff5ae0, cannon: 0xffc83a }[s.kind] ?? 0x6ae8ff;
-      g.add(new THREE.Mesh(new THREE.SphereGeometry(s.r * 0.6, 10, 8), new THREE.MeshBasicMaterial({ color: core })));
-      g.add(glowSprite(glow, s.r * 5));
+      const [core, glow, size] = SHOT_LOOK[s.kind] ?? [0xffffff, 0x6ae8ff, 5];
+      g.add(this.sphere(s.r * (s.kind === 'bomb' ? 0.9 : 0.6), core));
+      g.add(glowSprite(glow, s.r * size));
       if (s.kind === 'charge') g.add(glowSprite(0x9a8bff, s.r * 7.5));
       if (s.kind === 'cannon') g.add(glowSprite(0xff8a3a, s.r * 7));
     }
     return g;
+  }
+
+  // Railgun beams: a bright core and a wide glow between the muzzle and where the beam stopped, fading.
+  addBeam(ev) {
+    const from = new THREE.Vector3(ev.x0, ev.y0, ev.z0);
+    const to = new THREE.Vector3(ev.x1, ev.y1, ev.z1);
+    const len = from.distanceTo(to);
+    const width = ev.level === 2 ? 0.2 : 0.11;
+    const g = new THREE.Group();
+    const geo = new THREE.CylinderGeometry(1, 1, 1, 10, 1, true).translate(0, 0.5, 0).rotateX(Math.PI / 2);
+    const core = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+    const halo = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: PARTS.railgun.color, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false }));
+    core.scale.set(width * 0.4, width * 0.4, len);
+    halo.scale.set(width * 1.6, width * 1.6, len);
+    g.add(core, halo);
+    g.position.copy(from);
+    g.lookAt(to);
+    this.scene.add(g);
+    this.beams.push({ g, geo, age: 0, life: ev.level === 2 ? 0.35 : 0.22, width });
+  }
+
+  updateBeams(dt) {
+    for (const b of this.beams) {
+      b.age += dt;
+      const k = 1 - b.age / b.life;
+      for (const m of b.g.children) m.material.opacity = Math.max(0, k) * (m === b.g.children[0] ? 1 : 0.55);
+      b.g.children[1].scale.x = b.g.children[1].scale.y = b.width * (1.6 + (1 - k) * 1.5);
+    }
+    for (const b of this.beams.filter((x) => x.age >= x.life)) {
+      this.scene.remove(b.g);
+      b.geo.dispose();
+      for (const m of b.g.children) m.material.dispose();
+    }
+    this.beams = this.beams.filter((x) => x.age < x.life);
   }
 
   updatePickups() {

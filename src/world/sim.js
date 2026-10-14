@@ -2,9 +2,9 @@ import { Rng } from '../engine/rng.js';
 import { makeTerrain, PLAY_RADIUS, WATER_LEVEL } from './terrain.js';
 import { ENEMY_TYPES, AI } from './enemies.js';
 import {
-  GROUND_COMBO, AIR_COMBO, LAUNCHER, CROWD, MELEE, HITSTOP, LOCK, COMBO_GRACE, REACTIONS, CHIPS, CHIP_OF, CHIP_FINISH, DECK_SIZE,
-  chipLevel, pickTarget, switchTarget, onScreen,
+  CROWD, MELEE, HITSTOP, LOCK, COMBO_GRACE, REACTIONS, CHIPS, CHIP_OF, CHIP_FINISH, DECK_SIZE, chipLevel, pickTarget, switchTarget, onScreen,
 } from './combat.js';
+import { PARTS, SLOTS, STARTER, buildKit, validLoadout } from './parts.js';
 
 // The open-world simulation: a fixed 60 Hz step with no rendering, like the grid game's engine. The view sends
 // one input per step and drains events (shots, hits, deletes...) for effects and sound. A seed plus an input
@@ -14,7 +14,12 @@ import {
 //   move: {x, y} camera-relative (x right, y forward, -1..1); camYaw, aimYaw, aimPitch; aimPoint {x,y,z} | null
 //   attack (melee combo), shoot (buster; hold to charge; `fire` is accepted as an alias), jump, dash,
 //   lock (toggle lock-on), next / prev (switch target), react (reaction command), chip: 0..4 (deck slot held)
+//   garage: { op: 'buy' | 'equip', part } (a one-off command from the garage menu)
 // Yaw 0 faces +z; a facing yaw points along (sin yaw, cos yaw).
+//
+// The equipped parts (see parts.js) decide the moveset: the arm part the combo, the gun part what SHOOT
+// fires, the legs part the movement and the core part the health and a passive. PLAYER, BUSTER and CHARGE
+// below are the starting kit's numbers (Striders, Buster, Standard core).
 
 export const DT = 1 / 60;
 export const PLAYER = {
@@ -26,8 +31,11 @@ export const BUSTER = { cooldown: 0.11, speed: 58, dmg: 6, radius: 0.28, life: 1
 // (after `full` s) charge shot. The full shot bursts on impact.
 export const CHARGE = { delay: 0.28, mid: 0.65, full: 1.25, speed: 44, dmg: [0, 18, 46], splash: [0, 0, 3.4], splashDmg: [0, 0, 24], radius: [0, 0.45, 0.75] };
 export const MUZZLE = { up: 1.2, side: 0.28, forward: 0.85 };
+export const GARAGE_SAFE = 30; // metres: the garage only opens with no virus this close
 const BUTTONS = ['shoot', 'attack', 'jump', 'dash', 'lock', 'next', 'prev', 'react'];
-const HEAVY = new Set(['charge', 'cannon', 'deflect']); // shots that knock back
+const HEAVY = new Set(['charge', 'cannon', 'deflect', 'blast', 'rail', 'bomb']); // shots that knock back
+// How much a hit builds a virus's revenge value (KH2): a combo strike counts 1; pellets and rapid shots less.
+const REVENGE = { pellet: 0.15, blast: 0.3, buster: 0.4, needle: 0.4, heavy: 0.5 };
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const approach = (v, target, step) => (v < target ? Math.min(target, v + step) : Math.max(target, v - step));
@@ -59,6 +67,11 @@ export class World {
     this.chips = {}; // key -> { deletes, level }
     this.deck = []; // up to DECK_SIZE chip keys, in the order learned
     this.chipCd = {}; // key -> seconds of cooldown left
+    // Parts: the equipped loadout, what has been bought or found, and DATA to spend.
+    this.loadout = { ...STARTER };
+    this.owned = new Set(Object.values(STARTER));
+    this.wallet = 0;
+    this.kit = buildKit(this.loadout);
     this.player = this.newPlayer();
     this.prev = {};
     this.prevChip = 0;
@@ -69,7 +82,7 @@ export class World {
     const { spawn } = this.terrain;
     return {
       x: spawn.x, y: this.terrain.ground(spawn.x, spawn.z), z: spawn.z, vx: 0, vy: 0, vz: 0, yaw: 0,
-      onGround: true, airDash: true, hp: PLAYER.maxHp, maxHp: PLAYER.maxHp, alive: true, respawn: 0,
+      onGround: true, airDashes: this.kit.legs.airDashes, hp: this.kit.hp, maxHp: this.kit.hp, alive: true, respawn: 0, gliding: false,
       iframes: 0, flinch: 0, dash: 0, dashDir: { x: 0, z: 1 }, dashCd: 0, fireCd: 0, aimHold: 0,
       charge: 0, charging: false, chargeFull: false, speed: 0, wading: false,
       lock: null, soft: null, action: null, airCombo: 0, reaction: null, attackQueue: 0, comboNext: 0, comboT: 0,
@@ -117,6 +130,7 @@ export class World {
       for (const k of Object.keys(this.pending)) edges[k] ||= this.pending[k];
       this.pending = null;
     }
+    if (input.garage) this.garage(input.garage);
     // Hit-stop: everything holds still for a few frames; presses wait for it to end.
     if (this.hitstop > 0) {
       this.hitstop--;
@@ -179,11 +193,12 @@ export class World {
       dz /= len;
     }
     p.wading = T.inWater(p.x, p.z);
-    const top = (p.wading ? PLAYER.wadeRun : PLAYER.run) * (p.charging ? 0.8 : 1);
+    const L = this.kit.legs;
+    const top = (p.wading ? Math.min(PLAYER.wadeRun, L.run) : L.run) * (p.charging ? 0.8 : 1);
 
     // Dodge: also cancels a strike once it has landed, or its wind-down.
     const canCancel = !p.action || (p.action.kind === 'melee' && p.action.hitDone);
-    if (edges.dash && canCancel && p.dashCd <= 0 && p.flinch <= 0 && (p.onGround || p.airDash)) {
+    if (edges.dash && canCancel && p.dashCd <= 0 && p.flinch <= 0 && (p.onGround || p.airDashes > 0)) {
       p.action = null;
       p.comboT = 0; // dodging ends the combo
       let ddx = dx;
@@ -194,18 +209,18 @@ export class World {
       }
       const l = Math.hypot(ddx, ddz) || 1;
       p.dashDir = { x: ddx / l, z: ddz / l };
-      p.dash = PLAYER.dashTime;
-      p.dashCd = PLAYER.dashCooldown;
-      if (!p.onGround) p.airDash = false;
-      p.iframes = Math.max(p.iframes, PLAYER.dashTime + 0.05);
+      p.dash = L.dashTime;
+      p.dashCd = L.dashCooldown;
+      if (!p.onGround) p.airDashes--;
+      p.iframes = Math.max(p.iframes, L.dashTime + 0.05);
       p.vy = Math.max(0, p.vy);
       this.emit('dash', { ...at(p), dx: p.dashDir.x, dz: p.dashDir.z });
     }
     let gravity = PLAYER.gravity;
     if (p.dash > 0) {
       p.dash -= dt;
-      p.vx = p.dashDir.x * PLAYER.dashSpeed;
-      p.vz = p.dashDir.z * PLAYER.dashSpeed;
+      p.vx = p.dashDir.x * L.dashSpeed;
+      p.vz = p.dashDir.z * L.dashSpeed;
       p.vy = 0;
       if (p.dash <= 0) {
         p.vx *= 0.4;
@@ -214,7 +229,7 @@ export class World {
     } else if (p.action) {
       gravity = this.updateAction(input);
     } else if (p.flinch <= 0) {
-      const acc = (p.onGround ? PLAYER.accel : PLAYER.airAccel) * dt;
+      const acc = (p.onGround ? L.accel : L.airAccel) * dt;
       p.vx = approach(p.vx, dx * top, acc);
       p.vz = approach(p.vz, dz * top, acc);
     } else {
@@ -225,11 +240,14 @@ export class World {
     if (edges.jump && p.onGround && p.flinch <= 0 && (!p.action || (p.action.kind === 'melee' && p.action.hitDone))) {
       p.action = null;
       p.comboT = 0;
-      p.vy = PLAYER.jump;
+      p.vy = L.jump;
       p.onGround = false;
       this.emit('jump', at(p));
     }
-    if (p.dash <= 0 && !p.onGround) p.vy -= gravity * dt;
+    // Hover legs glide: holding jump while falling floats you down.
+    p.gliding = !!L.glide && held.jump && !p.onGround && p.vy < 0 && p.dash <= 0 && !p.action && p.flinch <= 0;
+    if (p.gliding) p.vy = Math.max(p.vy - gravity * 0.25 * dt, -3.5);
+    else if (p.dash <= 0 && !p.onGround) p.vy -= gravity * dt;
 
     // Horizontal move, refusing to walk up cliffs.
     const nx = p.x + p.vx * dt;
@@ -253,7 +271,7 @@ export class World {
       p.y = g;
       p.vy = 0;
       p.onGround = true;
-      p.airDash = true;
+      p.airDashes = L.airDashes;
       p.airCombo = 0;
     } else if (p.onGround) {
       if (p.y - g < 0.45 && p.vy <= 0) p.y = g;
@@ -285,18 +303,19 @@ export class World {
     }
     if (p.action) return;
     if (edges.shoot && p.fireCd <= 0) this.fire(p, input, 0);
+    const C = this.kit.gun.charge;
     if (held.shoot) {
       p.charge += dt;
-      if (!p.charging && p.charge >= CHARGE.delay) {
+      if (!p.charging && p.charge >= C.delay) {
         p.charging = true;
         this.emit('charge-start', at(p));
       }
-      if (!p.chargeFull && p.charge >= CHARGE.full) {
+      if (!p.chargeFull && p.charge >= C.full) {
         p.chargeFull = true;
         this.emit('charge-full', at(p));
       }
     } else if (edges.release) {
-      const level = p.charge >= CHARGE.full ? 2 : p.charge >= CHARGE.mid ? 1 : 0;
+      const level = p.charge >= C.full ? 2 : p.charge >= C.mid ? 1 : 0;
       if (level) this.fire(p, input, level);
       p.charge = 0;
       p.charging = false;
@@ -392,9 +411,9 @@ export class World {
       return;
     }
     if (!p.onGround) {
-      if (p.airCombo >= AIR_COMBO.length) return; // the air combo is spent until you land
+      if (p.airCombo >= this.kit.arm.air.length) return; // the air combo is spent until you land
       this.startStrike(p.airCombo, true, input);
-    } else this.startStrike(p.comboT > 0 && p.comboNext < GROUND_COMBO.length ? p.comboNext : 0, false, input);
+    } else this.startStrike(p.comboT > 0 && p.comboNext < this.kit.arm.ground.length ? p.comboNext : 0, false, input);
     p.comboT = 0;
   }
 
@@ -402,7 +421,8 @@ export class World {
   meleeTarget(input) {
     const p = this.player;
     const locked = this.lockTarget();
-    if (locked && Math.hypot(locked.x - p.x, locked.z - p.z) <= MELEE.magnet + 1) return locked;
+    const magnet = this.kit.arm.magnet;
+    if (locked && Math.hypot(locked.x - p.x, locked.z - p.z) <= magnet + 1) return locked;
     // Directions that count as "in front": the camera's, the facing, and where the stick is pushed.
     const cy = input.camYaw ?? p.yaw;
     const dirs = [cy, p.yaw];
@@ -414,7 +434,7 @@ export class World {
     for (const e of this.enemies) {
       if (!e.alive || e.spawnT > 0) continue;
       const d = Math.hypot(e.x - p.x, e.z - p.z);
-      if (d > MELEE.magnet) continue;
+      if (d > magnet) continue;
       const toward = Math.atan2(e.x - p.x, e.z - p.z);
       let a = Infinity;
       for (const dir of dirs) a = Math.min(a, Math.abs(wrap(toward - dir)));
@@ -430,13 +450,14 @@ export class World {
 
   startStrike(step, air, input) {
     const p = this.player;
-    const list = air ? AIR_COMBO : GROUND_COMBO;
+    const arm = this.kit.arm;
+    const list = air ? arm.air : arm.ground;
     let s = list[step];
     const target = this.meleeTarget(input);
-    if (s.finisher && !air) {
-      // Crowded: the spin; one on one: the launcher.
+    if (s.finisher && !air && arm.launcher) {
+      // The saber's finisher: the spin when crowded, the launcher one on one.
       const near = this.enemies.filter((e) => e.alive && e.spawnT <= 0 && Math.hypot(e.x - p.x, e.z - p.z) < CROWD.radius).length;
-      if (near < CROWD.count) s = LAUNCHER;
+      if (near < CROWD.count) s = arm.launcher;
     }
     const a = { kind: 'melee', step, air, def: s, t: 0, hitDone: false, hits: 0, buffered: false, target: target?.id ?? null, lunge: 0 };
     p.action = a;
@@ -452,7 +473,8 @@ export class World {
       const gap = d - (s.reach * 0.55 + target.def.radius);
       if (gap > 0.2) {
         // Close the gap first (KH2's magnetism); the swing's own timing starts when the lunge ends.
-        a.lunge = clamp(gap / MELEE.lungeSpeed, 0.06, MELEE.lungeMax);
+        // Longer-reaching arms (the Lance) get proportionally longer to close in.
+        a.lunge = clamp(gap / MELEE.lungeSpeed, 0.06, MELEE.lungeMax * Math.max(1, arm.magnet / MELEE.magnet));
         a.t = -a.lunge;
       }
     } else if (input.move && Math.hypot(input.move.x ?? 0, input.move.y ?? 0) > 0.2) {
@@ -497,9 +519,16 @@ export class World {
       if (!a.hitDone && target?.alive) p.yaw = Math.atan2(target.x - p.x, target.z - p.z);
       if (!a.hitDone && a.t >= s.hit) {
         a.hitDone = true;
-        this.strikeHit(s);
+        if (s.charge) {
+          // A charging finisher (the Lance's pierce): dash ahead, hitting everything on the way once.
+          a.charging = s.charge.time;
+          a.hitIds = new Set();
+          a.dir = p.yaw;
+          this.emit('charge', { name: s.name, x: p.x, y: p.y, z: p.z, yaw: p.yaw });
+        } else this.strikeHit(s);
       }
-      const list = a.air ? AIR_COMBO : GROUND_COMBO;
+      if (a.charging > 0) this.chargeStep(a, s);
+      const list = a.air ? this.kit.arm.air : this.kit.arm.ground;
       // On the ground, a strike that hit nothing ends the combo (KH2): the next press starts over.
       const next = a.air || a.hits ? a.step + 1 : 0;
       if (a.buffered && a.t >= s.cancel && a.step + 1 < list.length) {
@@ -562,12 +591,36 @@ export class World {
       if (d > s.reach + e.def.radius) continue;
       if (Math.abs(e.y + e.def.height * 0.5 - (p.y + 1)) > MELEE.vertical + e.def.height * 0.5) continue;
       if (s.arc < Math.PI * 2 && d > 0.3 && Math.acos(clamp((dx * fx + dz * fz) / d, -1, 1)) > s.arc / 2) continue;
-      this.hitEnemy(e, s.dmg, { kind: s.finisher ? 'finisher' : 'melee', dirX: dx / (d || 1), dirZ: dz / (d || 1), push: s.push, launch: s.launch, slam: s.slam });
+      this.hitEnemy(e, s.dmg, { kind: s.finisher ? 'finisher' : 'melee', dirX: dx / (d || 1), dirZ: dz / (d || 1), push: s.push, launch: s.launch, slam: s.slam, heavy: s.heavy });
       hits++;
     }
     if (p.action?.kind === 'melee') p.action.hits = hits;
     this.emit('strike', { name: s.name, hits, finisher: !!s.finisher, air: !!s.air, x: p.x + fx * 1.4, y: p.y + 1.1, z: p.z + fz * 1.4 });
-    if (hits) this.hitstop = Math.max(this.hitstop, s.finisher ? HITSTOP.finisher : HITSTOP.slash);
+    if (hits) this.hitstop = Math.max(this.hitstop, s.finisher ? HITSTOP.finisher : this.kit.arm.stop);
+  }
+
+  // One step of a charging finisher.
+  chargeStep(a, s) {
+    const p = this.player;
+    const dx = Math.sin(a.dir);
+    const dz = Math.cos(a.dir);
+    p.vx = dx * s.charge.speed;
+    p.vz = dz * s.charge.speed;
+    for (const e of this.enemies) {
+      if (!e.alive || e.spawnT > 0 || a.hitIds.has(e.id)) continue;
+      if (Math.hypot(e.x - p.x, e.z - p.z) > 1.6 + e.def.radius) continue;
+      if (Math.abs(e.y + e.def.height * 0.5 - (p.y + 1)) > MELEE.vertical + e.def.height * 0.5) continue;
+      a.hitIds.add(e.id);
+      this.hitEnemy(e, s.dmg, { kind: 'finisher', dirX: dx, dirZ: dz, push: s.push, heavy: s.heavy });
+      this.hitstop = Math.max(this.hitstop, HITSTOP.finisher);
+    }
+    a.hits = a.hitIds.size;
+    a.charging -= DT;
+    if (a.charging <= 0) {
+      p.vx *= 0.2;
+      p.vz *= 0.2;
+      this.emit('strike', { name: s.name, hits: a.hits, finisher: true, air: false, x: p.x + dx * 1.4, y: p.y + 1.1, z: p.z + dz * 1.4 });
+    }
   }
 
   // ------------------------------------------------------------------ reaction commands
@@ -626,7 +679,7 @@ export class World {
       p.yaw = Math.atan2(s.x - p.x, s.z - p.z);
       s.team = 'player';
       s.kind = 'deflect';
-      s.dmg = Math.round(s.dmg * REACTIONS.deflect.mult);
+      s.dmg = Math.round(s.dmg * REACTIONS.deflect.mult * this.kit.react);
       s.life = 2.2;
       s.splash = 2.4;
       s.splashDmg = Math.round(s.dmg * 0.4);
@@ -682,7 +735,7 @@ export class World {
     e.vz = 0;
     if (e.def.hover) e.vy = -8;
     const d = Math.hypot(e.x - p.x, e.z - p.z) || 1;
-    this.hitEnemy(e, r.dmg, { kind: 'react', stun: r.stun, dirX: (e.x - p.x) / d, dirZ: (e.z - p.z) / d, push: 4 });
+    this.hitEnemy(e, Math.round(r.dmg * this.kit.react), { kind: 'react', stun: r.stun, dirX: (e.x - p.x) / d, dirZ: (e.z - p.z) / d, push: 4 });
     this.hitstop = HITSTOP.reaction;
     this.emit('reaction', { kind, label: r.label, x: e.x, y: e.y + e.def.height * 0.5, z: e.z });
   }
@@ -716,12 +769,13 @@ export class World {
     const def = CHIPS[key];
     // Cutting in after the third strike (or the second in the air) landed: a chip finisher. Earlier in the
     // combo, the combo carries on after the chip.
-    const finish = !!cut && cut.hits > 0 && cut.step === (cut.air ? 1 : 2);
-    const comboNext = cut && !cut.air && !finish && cut.hits > 0 && cut.step + 1 < GROUND_COMBO.length ? cut.step + 1 : 0;
-    const dmg = Math.round(def.dmg[c.level] * (finish ? CHIP_FINISH : 1));
+    const arm = this.kit.arm;
+    const finish = !!cut && cut.hits > 0 && cut.step === (cut.air ? arm.air.length : arm.ground.length) - 2;
+    const comboNext = cut && !cut.air && !finish && cut.hits > 0 && cut.step + 1 < arm.ground.length ? cut.step + 1 : 0;
+    const dmg = Math.round(def.dmg[c.level] * (finish ? CHIP_FINISH : 1) * this.kit.chipDmg);
     if (finish) this.stats.chipFinishes++;
     const target = this.lockTarget() ?? this.meleeTarget(input) ?? null;
-    this.chipCd[key] = def.cooldown;
+    this.chipCd[key] = def.cooldown * this.kit.chipCd;
     this.stats.chipsUsed++;
     if (key === 'shockwave') {
       p.action = { kind: 'chip', name: key, t: 0, dur: 0.5, comboNext };
@@ -760,11 +814,11 @@ export class World {
   muzzle(p, yaw) {
     const fx = Math.sin(yaw);
     const fz = Math.cos(yaw);
-    // The buster is on the right arm: the character's right is (-cos yaw, sin yaw).
+    // The gun part is on the left arm (the arm part on the right): the character's left is (cos yaw, -sin yaw).
     return {
-      x: p.x - Math.cos(yaw) * MUZZLE.side + fx * MUZZLE.forward,
+      x: p.x + Math.cos(yaw) * MUZZLE.side + fx * MUZZLE.forward,
       y: p.y + MUZZLE.up,
-      z: p.z + Math.sin(yaw) * MUZZLE.side + fz * MUZZLE.forward,
+      z: p.z - Math.sin(yaw) * MUZZLE.side + fz * MUZZLE.forward,
     };
   }
 
@@ -799,17 +853,122 @@ export class World {
         dir = { x: (target.x - m.x) / l, y: (target.y - m.y) / l, z: (target.z - m.z) / l };
       }
     }
-    const kind = ['buster', 'mid', 'charge'][level];
-    const speed = level ? CHARGE.speed : BUSTER.speed;
-    const shot = this.addShot({
-      team: 'player', kind, ...m, vx: dir.x * speed, vy: dir.y * speed, vz: dir.z * speed,
-      r: level ? CHARGE.radius[level] : BUSTER.radius, dmg: level ? CHARGE.dmg[level] : BUSTER.dmg,
-      splash: CHARGE.splash[level], splashDmg: CHARGE.splashDmg[level], life: level ? 1.8 : BUSTER.life,
-    });
-    p.fireCd = BUSTER.cooldown;
+    const gun = this.kit.loadout.gun;
+    if (gun === 'spreader') this.fireSpread(m, dir, level);
+    else if (gun === 'railgun') this.fireRail(m, dir, level);
+    else if (gun === 'bomber') this.fireBombs(m, dir, level, locked, input);
+    else {
+      const kind = ['buster', 'mid', 'charge'][level];
+      const speed = level ? CHARGE.speed : BUSTER.speed;
+      const shot = this.addShot({
+        team: 'player', kind, ...m, vx: dir.x * speed, vy: dir.y * speed, vz: dir.z * speed,
+        r: level ? CHARGE.radius[level] : BUSTER.radius, dmg: level ? CHARGE.dmg[level] : BUSTER.dmg,
+        splash: CHARGE.splash[level], splashDmg: CHARGE.splashDmg[level], life: level ? 1.8 : BUSTER.life,
+      });
+      this.emit('shot', { id: shot.id, kind, gun, level, ...m, dx: dir.x, dy: dir.y, dz: dir.z });
+    }
+    p.fireCd = this.kit.gun.cooldown;
     p.aimHold = 0.6;
     this.stats.shots++;
-    this.emit('shot', { id: shot.id, kind, ...m, dx: dir.x, dy: dir.y, dz: dir.z });
+  }
+
+  // Spreader: a fan of short-lived pellets around the aim direction.
+  fireSpread(m, dir, level) {
+    const g = this.kit.gun;
+    const n = g.pellets[level];
+    const kind = level === 2 ? 'blast' : 'pellet';
+    const flat = Math.hypot(dir.x, dir.z) || 1;
+    // Sideways (horizontal) axis for the fan.
+    const sx = dir.z / flat;
+    const sz = -dir.x / flat;
+    for (let i = 0; i < n; i++) {
+      const k = n > 1 ? (i / (n - 1)) * 2 - 1 : 0;
+      const off = Math.tan(g.cone[level] * k);
+      const lift = (i % 2 ? 1 : -1) * 0.03 * (level + 1);
+      let vx = dir.x + sx * off;
+      let vy = dir.y + lift;
+      let vz = dir.z + sz * off;
+      const l = Math.hypot(vx, vy, vz) || 1;
+      vx /= l;
+      vy /= l;
+      vz /= l;
+      this.addShot({ team: 'player', kind, ...m, vx: vx * g.speed, vy: vy * g.speed, vz: vz * g.speed, r: g.radius, dmg: g.dmg[level], life: g.life });
+    }
+    this.emit('shot', { kind, gun: 'spreader', level, count: n, ...m, dx: dir.x, dy: dir.y, dz: dir.z });
+  }
+
+  // Railgun: a needle on a tap; a charged release is an instant beam through every virus in line, stopped
+  // only by the ground and trees or rocks.
+  fireRail(m, dir, level) {
+    const g = this.kit.gun;
+    if (!level) {
+      const n = g.needle;
+      const shot = this.addShot({ team: 'player', kind: 'needle', ...m, vx: dir.x * n.speed, vy: dir.y * n.speed, vz: dir.z * n.speed, r: n.radius, dmg: n.dmg, life: n.life });
+      this.emit('shot', { id: shot.id, kind: 'needle', gun: 'railgun', level, ...m, dx: dir.x, dy: dir.y, dz: dir.z });
+      return;
+    }
+    const T = this.terrain;
+    let len = g.range;
+    for (let t = 1; t < g.range; t += 0.5) {
+      const x = m.x + dir.x * t;
+      const y = m.y + dir.y * t;
+      const z = m.z + dir.z * t;
+      if (y < T.height(x, z) || T.near(x, z, 1).some((o) => y < o.top && Math.hypot(x - o.x, z - o.z) < o.r)) {
+        len = t;
+        break;
+      }
+    }
+    const hit = [];
+    for (const e of this.enemies) {
+      if (!e.alive || e.spawnT > 0) continue;
+      const cx = e.x - m.x;
+      const cy = e.y + e.def.height * 0.5 - m.y;
+      const cz = e.z - m.z;
+      const t = cx * dir.x + cy * dir.y + cz * dir.z;
+      if (t < 0 || t > len + e.def.radius) continue;
+      const r = e.def.radius + g.width;
+      if (cx * cx + cy * cy + cz * cz - t * t <= r * r) hit.push(e);
+    }
+    for (const e of hit) this.hitEnemy(e, g.beam[level], { kind: 'rail', vx: dir.x, vz: dir.z });
+    this.emit('beam', { level, hits: hit.length, x0: m.x, y0: m.y, z0: m.z, x1: m.x + dir.x * len, y1: m.y + dir.y * len, z1: m.z + dir.z * len });
+  }
+
+  // Bomber: bombs lobbed on an arc onto the target (the lock-on target, else the crosshair's point, at most
+  // `range` metres out). A full charge throws three, fanned around the target.
+  fireBombs(m, dir, level, locked, input) {
+    const g = this.kit.gun;
+    let tx;
+    let ty;
+    let tz;
+    if (locked) {
+      tx = locked.x;
+      ty = locked.y;
+      tz = locked.z;
+    } else {
+      const ap = input.aimPoint;
+      const flat = Math.hypot(dir.x, dir.z) || 1;
+      const reach = ap ? Math.min(g.range, Math.hypot(ap.x - m.x, ap.z - m.z)) : g.range;
+      tx = m.x + (dir.x / flat) * reach;
+      tz = m.z + (dir.z / flat) * reach;
+      ty = this.terrain.ground(tx, tz);
+    }
+    const n = g.count[level];
+    const side = { x: tz - m.z, z: -(tx - m.x) };
+    const sl = Math.hypot(side.x, side.z) || 1;
+    for (let i = 0; i < n; i++) {
+      const off = n > 1 ? (i - (n - 1) / 2) * 2.4 : 0;
+      const bx = tx + (side.x / sl) * off;
+      const bz = tz + (side.z / sl) * off;
+      const dx = bx - m.x;
+      const dz = bz - m.z;
+      const flight = clamp(Math.hypot(dx, dz) / 16, 0.45, 1.1);
+      const vy = (ty - m.y + 0.5 * g.gravity * flight * flight) / flight;
+      const shot = this.addShot({
+        team: 'player', kind: 'bomb', ...m, vx: dx / flight, vy, vz: dz / flight, gravity: g.gravity,
+        r: g.radius[level], dmg: g.dmg[level], splash: g.splash[level], splashDmg: g.splashDmg[level], life: 3,
+      });
+      if (i === 0) this.emit('shot', { id: shot.id, kind: 'bomb', gun: 'bomber', level, count: n, ...m, dx: dir.x, dy: dir.y, dz: dir.z });
+    }
   }
 
   // Soft aim assist: the enemy closest to the aim line within `cone` radians and `range` metres.
@@ -841,20 +1000,27 @@ export class World {
       return false;
     }
     p.hp = Math.max(0, p.hp - dmg);
-    p.iframes = PLAYER.iframes;
-    p.flinch = PLAYER.flinch;
-    p.dash = 0;
-    p.action = null;
-    p.comboT = 0;
     this.stats.damageTaken += dmg;
-    const dx = p.x - fromX;
-    const dz = p.z - fromZ;
-    const l = Math.hypot(dx, dz) || 1;
-    p.vx = (dx / l) * 7;
-    p.vz = (dz / l) * 7;
-    p.vy = 4;
-    p.onGround = false;
-    this.emit('hurt', { amount: dmg, x: p.x, y: p.y + 1.2, z: p.z });
+    const steady = dmg <= (this.kit.legs.steady ?? 0) && p.hp > 0;
+    if (steady) {
+      // Treads: a light hit doesn't stagger you or break your combo.
+      p.iframes = 0.5;
+    } else {
+      p.iframes = PLAYER.iframes;
+      p.flinch = PLAYER.flinch;
+      p.dash = 0;
+      p.action = null;
+      p.comboT = 0;
+      const w = this.kit.weight;
+      const dx = p.x - fromX;
+      const dz = p.z - fromZ;
+      const l = Math.hypot(dx, dz) || 1;
+      p.vx = ((dx / l) * 7) / w;
+      p.vz = ((dz / l) * 7) / w;
+      p.vy = 4 / w;
+      p.onGround = false;
+    }
+    this.emit('hurt', { amount: dmg, steady, x: p.x, y: p.y + 1.2, z: p.z });
     if (p.hp <= 0) {
       p.alive = false;
       p.respawn = 3;
@@ -885,6 +1051,7 @@ export class World {
           const y = this.terrain.ground(zn.x, zn.z);
           for (let i = 0; i < 6; i++) this.dropData(zn.x, y + 1.5, zn.z, 1);
           this.emit('zone-clear', { id: zn.id, x: zn.x, y, z: zn.z });
+          this.findPart(zn.x, y + 2, zn.z);
         }
       }
     }
@@ -989,24 +1156,30 @@ export class World {
     let amount = dmg;
     const counter = e.state === 'windup';
     if (counter) {
-      amount *= 2;
+      amount *= this.kit.counter;
       e.state = 'recover';
       e.t = 0.9;
       this.stats.counters++;
       this.hitstop = Math.max(this.hitstop, HITSTOP.counter);
     }
     e.hp -= amount;
-    // Revenge value: a virus that keeps getting hit shrugs off flinching for a moment.
-    e.comboHits = this.t - e.lastHitT < 1.2 ? e.comboHits + 1 : 1;
+    // Revenge value: a virus that keeps getting hit shrugs off flinching for a moment. Heavy hits (the
+    // Breaker) build it slowly and shatter the armor instead.
+    const weight = src.heavy ? REVENGE.heavy : REVENGE[src.kind] ?? 1;
+    e.comboHits = (this.t - e.lastHitT < 1.2 ? e.comboHits : 0) + weight;
     e.lastHitT = this.t;
-    if (e.comboHits >= MELEE.armorAfter && e.armor <= 0) {
+    if (src.heavy && e.armor > 0) {
+      e.armor = 0;
+      e.comboHits = 0;
+      this.emit('armor-break', { id: e.id, x: e.x, y: e.y + e.def.height, z: e.z });
+    } else if (e.comboHits >= MELEE.armorAfter && e.armor <= 0) {
       e.armor = MELEE.armorTime;
       e.comboHits = 0;
       this.emit('armor', { id: e.id, x: e.x, y: e.y + e.def.height, z: e.z });
     }
     const armored = e.armor > 0 && src.kind !== 'react';
     const kind = src.kind;
-    let flinch = { charge: 0.5, cannon: 0.6, deflect: 0.8, finisher: 0.7, melee: 0.3, chip: 0.5, react: src.stun ?? 1.4 }[kind] ?? 0.1;
+    let flinch = { charge: 0.5, cannon: 0.6, deflect: 0.8, finisher: 0.7, melee: src.heavy ? 0.5 : 0.3, chip: 0.5, rail: 0.5, bomb: 0.45, blast: 0.35, react: src.stun ?? 1.4 }[kind] ?? 0.1;
     if (counter) flinch = Math.max(flinch, 0.6);
     if (!armored) e.flinch = Math.max(e.flinch, flinch);
     if (!armored && src.push) {
@@ -1043,6 +1216,89 @@ export class World {
       id: this.nextId++, x, y, z, value, t: 0,
       vx: (this.rng.next() - 0.5) * 4, vy: 6 + this.rng.next() * 3, vz: (this.rng.next() - 0.5) * 4,
     });
+  }
+
+  // ------------------------------------------------------------------ parts and the garage
+
+  // A part turns up in a sealed rift (Medabots-style spoils): one you don't have yet, else some DATA.
+  findPart(x, y, z) {
+    const missing = Object.keys(PARTS).filter((k) => !this.owned.has(k));
+    if (!missing.length) {
+      this.wallet += 20;
+      this.emit('part-found', { part: null, data: 20, x, y, z });
+      return;
+    }
+    const part = missing[this.rng.int(missing.length)];
+    this.owned.add(part);
+    this.emit('part-found', { part, x, y, z });
+  }
+
+  // The garage only opens out of combat: alive, with no virus within GARAGE_SAFE metres.
+  canGarage() {
+    const p = this.player;
+    return p.alive && !this.enemies.some((e) => e.alive && Math.hypot(e.x - p.x, e.z - p.z) < GARAGE_SAFE);
+  }
+
+  garage({ op, part } = {}) {
+    const def = PARTS[part];
+    if (!def || (op !== 'buy' && op !== 'equip')) return;
+    if (!this.canGarage()) return this.emit('garage-denied', { reason: 'combat', part });
+    if (op === 'buy') {
+      if (this.owned.has(part)) return this.emit('garage-denied', { reason: 'owned', part });
+      if (this.wallet < def.price) return this.emit('garage-denied', { reason: 'data', part });
+      this.wallet -= def.price;
+      this.owned.add(part);
+      this.emit('part-bought', { part, price: def.price });
+      return;
+    }
+    if (!this.owned.has(part)) return this.emit('garage-denied', { reason: 'locked', part });
+    if (this.loadout[def.slot] === part) return;
+    this.loadout[def.slot] = part;
+    this.applyKit();
+    this.emit('part-equipped', { part, slot: def.slot });
+  }
+
+  // Rebuild the kit from the loadout and carry the player's state over (HP keeps its fraction).
+  applyKit() {
+    const p = this.player;
+    const k = (this.kit = buildKit(this.loadout));
+    const frac = p.maxHp ? p.hp / p.maxHp : 1;
+    p.maxHp = k.hp;
+    if (p.alive) p.hp = Math.max(1, Math.round(k.hp * frac));
+    p.airDashes = p.onGround ? k.legs.airDashes : Math.min(p.airDashes, k.legs.airDashes);
+    p.action = null;
+    p.charge = 0;
+    p.charging = false;
+    p.chargeFull = false;
+    p.comboT = 0;
+  }
+
+  // Progress that outlives a session: parts, the loadout, DATA and chips.
+  saveData() {
+    return {
+      v: 1, loadout: { ...this.loadout }, owned: [...this.owned], wallet: this.wallet,
+      chips: Object.fromEntries(Object.entries(this.chips).map(([k, c]) => [k, { deletes: c.deletes }])), deck: [...this.deck],
+    };
+  }
+
+  // Restore a save (from browser storage, so check everything). Returns whether it was applied.
+  loadSave(save) {
+    if (!save || save.v !== 1) return false;
+    const owned = new Set([...Object.values(STARTER), ...(Array.isArray(save.owned) ? save.owned.filter((k) => PARTS[k]) : [])]);
+    const loadout = validLoadout(save.loadout) && SLOTS.every((slot) => owned.has(save.loadout[slot])) ? { ...save.loadout } : { ...STARTER };
+    this.owned = owned;
+    this.loadout = Object.fromEntries(SLOTS.map((slot) => [slot, loadout[slot]]));
+    this.wallet = Math.max(0, Math.floor(Number(save.wallet) || 0));
+    this.chips = {};
+    for (const [k, c] of Object.entries(save.chips ?? {})) {
+      const deletes = Math.max(0, Math.floor(Number(c?.deletes) || 0));
+      if (CHIPS[k] && deletes > 0) this.chips[k] = { deletes, level: chipLevel(deletes) };
+    }
+    this.deck = (Array.isArray(save.deck) ? save.deck : []).filter((k, i, all) => this.chips[k]?.level >= 1 && all.indexOf(k) === i).slice(0, DECK_SIZE);
+    for (const k of Object.keys(this.chips)) if (this.chips[k].level >= 1 && !this.deck.includes(k) && this.deck.length < DECK_SIZE) this.deck.push(k);
+    this.applyKit();
+    this.player.hp = this.player.maxHp;
+    return true;
   }
 
   // ------------------------------------------------------------------ shots, hazards, pickups
@@ -1161,6 +1417,7 @@ export class World {
       if (p.alive && k.t > 0.3 && d < 1.2) {
         k.dead = true;
         this.stats.data += k.value;
+        this.wallet += k.value;
         p.hp = Math.min(p.maxHp, p.hp + 3);
         this.emit('pickup', { x: k.x, y: k.y, z: k.z, value: k.value });
       } else if (k.t > 40) k.dead = true;
@@ -1173,7 +1430,8 @@ export class World {
     const p = this.player;
     let h = Math.round(p.x * 1000) * 31 + Math.round(p.z * 1000) * 17 + Math.round(p.y * 1000) + p.hp;
     for (const e of this.enemies) h = (h * 33 + Math.round(e.x * 100) + Math.round(e.z * 100) * 7 + e.hp) | 0;
-    h = (h + (p.lock ?? 0) * 7 + this.deck.length * 5 + this.stats.strikes * 3) | 0;
+    h = (h + (p.lock ?? 0) * 7 + this.deck.length * 5 + this.stats.strikes * 3 + this.wallet * 11) | 0;
+    for (const slot of SLOTS) for (const ch of this.loadout[slot]) h = (h * 31 + ch.charCodeAt(0)) | 0;
     return (h + this.shots.length * 101 + this.stats.data * 13) | 0;
   }
 }

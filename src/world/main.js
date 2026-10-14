@@ -3,6 +3,7 @@ import { createView } from './view.js';
 import { WorldInput } from './input.js';
 import { Hud } from './hud.js';
 import { makeBot } from './bot.js';
+import { Garage } from './garage.js';
 import { loadMechaBuffer } from './assets.js';
 import { audio } from '../audio/index.js';
 
@@ -19,6 +20,26 @@ const low = params.get('low') === '1' || coarse;
 if (coarse) document.body.classList.add('touch');
 
 const world = new World({ seed });
+
+// Progress (parts, loadout, DATA, chips) is kept in this browser between visits. Storage can be missing or
+// blocked (private windows, sandboxed previews), so every access is guarded and the game works without it.
+const SAVE_KEY = 'cybermetal-open-world-v1';
+const readSave = () => {
+  try {
+    return JSON.parse(localStorage.getItem(SAVE_KEY) ?? 'null');
+  } catch {
+    return null;
+  }
+};
+const writeSave = () => {
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(world.saveData()));
+  } catch {
+    // No storage: progress lasts this visit only.
+  }
+};
+if (!auto) world.loadSave(readSave());
+
 const view = await createView(canvas, world, await loadMechaBuffer(), { low });
 const input = new WorldInput(canvas, document.getElementById('touch'));
 input.isLocked = () => world.player.lock != null;
@@ -26,15 +47,58 @@ const hud = new Hud(world, view, { input });
 const bot = auto ? makeBot(world) : null;
 input.onLockFailed = () => hud.toast('MOUSE LOCK UNAVAILABLE · RIGHT-DRAG OR Q/E TO TURN · K TO SHOOT', '#ffd84a', 4);
 
+// The garage: commands go to the simulation through its input, one per step, so they replay like any input.
+const garageCommands = [];
+const garage = new Garage(document.getElementById('garage'), world, {
+  onCommand: (cmd) => garageCommands.push(cmd),
+  onDenied: (text) => {
+    hud.toast(text, '#ff6a6a', 1.6);
+    audio.play('buzz');
+  },
+  onClose: () => {
+    view.showcase = 0;
+    input.reset();
+    audio.play('cancel');
+    canvas.focus();
+  },
+});
+function toggleGarage() {
+  if (garage.open) return garage.close();
+  if (!started || auto) return;
+  if (!world.canGarage()) {
+    hud.toast('VIRUSES NEARBY · FINISH THE FIGHT FIRST', '#ff6a6a', 2);
+    audio.play('buzz');
+    return;
+  }
+  document.exitPointerLock?.();
+  view.showcase = 1;
+  garage.show();
+  audio.play('customopen');
+}
+addEventListener('keydown', (e) => {
+  if (e.code === 'KeyG' && !garage.open && !e.ctrlKey && !e.metaKey && !e.altKey) toggleGarage();
+});
+document.getElementById('garageBtn')?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  toggleGarage();
+});
+let padBack = false;
+
 // Sounds from the grid game's synth, mapped onto open-world events (a name, [name, options], or a list).
 const SWING_PITCH = [1, 1.12, 1.24, 0.85];
 const SFX = {
-  shot: (e) => (e.kind === 'buster' ? 'buster' : 'chargeshot'),
+  shot: (e) => ({ buster: 'buster', needle: 'buster', pellet: 'gun', blast: 'cannon', bomb: 'throw' })[e.kind] ?? 'chargeshot',
   'charge-start': 'charge',
   'charge-full': 'chargefull',
   impact: (e) => (e.team === 'enemy' || ['charge', 'cannon', 'deflect'].includes(e.kind) ? 'explode' : e.surface === 'enemy' ? 'hit' : null),
   'enemy-hit': (e) => (e.counter ? 'counter' : e.kind === 'finisher' || e.kind === 'react' ? 'hammer' : e.kind === 'melee' ? 'punch' : null),
-  swing: (e) => ['sword', { pitch: e.finisher ? 0.85 : SWING_PITCH[e.step] ?? 1 }],
+  swing: (e) => {
+    const arm = world.loadout.arm;
+    if (arm === 'breaker') return ['hammer', { pitch: e.finisher ? 0.8 : 1 }];
+    if (arm === 'lance') return ['throw', { pitch: 1.3 + 0.08 * e.step }];
+    if (arm === 'claws') return ['claw', { pitch: 1.1 + 0.07 * e.step }];
+    return ['sword', { pitch: e.finisher ? 0.85 : SWING_PITCH[e.step] ?? 1 }];
+  },
   lock: (e) => (e.auto ? null : 'cursor'),
   unlock: (e) => (e.auto ? null : 'deselect'),
   'lock-none': 'cancel',
@@ -46,6 +110,13 @@ const SFX = {
     return e.finish ? [s, 'pa'] : s; // a chip finisher gets Battle Network's Program Advance fanfare
   },
   'chip-denied': 'buzz',
+  beam: (e) => (e.level === 2 ? 'beam' : 'laser'),
+  charge: 'lance',
+  'armor-break': 'objbreak',
+  'part-found': 'recover',
+  'part-bought': 'confirm',
+  'part-equipped': 'select',
+  'garage-denied': 'buzz',
   delete: 'delete',
   hurt: 'hurt',
   down: 'playerdelete',
@@ -131,6 +202,24 @@ let fpsAcc = 0;
 let fpsFrames = 0;
 let slowFor = 0;
 
+// Every simulation event goes to the view, the HUD, the sound and, when it changes progress, the save.
+function handle(ev) {
+  view.onEvent(ev);
+  hud.onEvent(ev);
+  sound(ev);
+  if (ev.type === 'respawn') view.faceCamera(0);
+  if (SAVE_ON.has(ev.type)) dirty = true;
+  if (ev.type.startsWith('part-') || ev.type === 'garage-denied') garage.render();
+}
+
+// Save a few seconds after progress changes, and when the page is hidden.
+const SAVE_ON = new Set(['part-found', 'part-bought', 'part-equipped', 'chip-learn', 'pickup']);
+let dirty = false;
+let saveT = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && dirty && !auto) writeSave();
+});
+
 let acc = 0;
 let last = performance.now();
 function frame(now) {
@@ -150,26 +239,37 @@ function frame(now) {
     fpsFrames = 0;
   }
   const stopped = paused || held;
+  // Gamepad Back toggles the garage; inside it, the pad navigates the menu.
+  const pad = input.pad();
+  const back = !!pad?.buttons[8]?.pressed;
+  if (back && !padBack && !garage.open) toggleGarage();
+  padBack = back;
+  garage.pollPad(pad);
+  if (garage.open && !world.canGarage()) {
+    garage.close();
+    hud.toast('VIRUSES NEARBY · FINISH THE FIGHT FIRST', '#ff6a6a', 2);
+  }
   if (!stopped) {
-    view.applyLook(input.consumeLook(dt));
+    if (!garage.open) view.applyLook(input.consumeLook(dt));
     acc += dt;
     let steps = 0;
     while (acc >= DT && steps < 5) {
       const aim = view.aimInfo();
-      const pad = bot ? bot(view) : started ? input.sample() : { move: { x: 0, y: 0 } };
+      const controls = bot ? bot(view) : started && !garage.open ? input.sample() : { move: { x: 0, y: 0 } };
       view.beforeStep();
-      world.step({ ...pad, ...aim });
-      for (const ev of world.drainEvents()) {
-        view.onEvent(ev);
-        hud.onEvent(ev);
-        sound(ev);
-        if (ev.type === 'respawn') view.faceCamera(0);
-      }
+      world.step({ ...controls, ...aim, garage: garageCommands.shift() });
+      for (const ev of world.drainEvents()) handle(ev);
       acc -= DT;
       steps++;
     }
     if (steps === 5) acc = 0;
     music(dt);
+    saveT += dt;
+    if (dirty && saveT > 3 && !auto) {
+      writeSave();
+      dirty = false;
+      saveT = 0;
+    }
   }
   if (!held) {
     view.render(acc / DT, stopped ? 0 : dt);
@@ -184,21 +284,17 @@ requestAnimationFrame(frame);
 function advance(n, given = null) {
   for (let i = 0; i < n; i++) {
     const aim = view.aimInfo();
-    const pad = given ?? (bot ? bot(view) : started ? input.sample() : { move: { x: 0, y: 0 } });
+    const controls = given ?? (bot ? bot(view) : started && !garage.open ? input.sample() : { move: { x: 0, y: 0 } });
     view.beforeStep();
-    world.step({ ...pad, ...aim });
-    for (const ev of world.drainEvents()) {
-      view.onEvent(ev);
-      hud.onEvent(ev);
-      if (ev.type === 'respawn') view.faceCamera(0);
-    }
+    world.step({ ...controls, ...aim, garage: controls.garage ?? garageCommands.shift() });
+    for (const ev of world.drainEvents()) handle(ev);
     view.render(1, DT);
     hud.update(DT);
   }
 }
 
 window.__world = {
-  world, view, input, hud,
+  world, view, input, hud, garage, toggleGarage,
   hold: (v) => {
     held = v;
     last = performance.now();
