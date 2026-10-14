@@ -72,6 +72,18 @@ function longestGap(buf, from = 0, to = buf.duration) {
   return best;
 }
 
+// End (s) of the last 50 ms window louder than `thr` RMS: where a one-shot's music really stops.
+function lastLoud(buf, thr = 0.01) {
+  const sr = buf.sampleRate, w = Math.floor(0.05 * sr);
+  let end = 0;
+  for (let i = 0; i + w <= buf.length; i += w) {
+    let sum = 0, n = 0;
+    for (let c = 0; c < buf.numberOfChannels; c++) { const d = buf.getChannelData(c); for (let j = i; j < i + w; j++) { sum += d[j] * d[j]; n++; } }
+    if (Math.sqrt(sum / n) > thr) end = (i + w) / sr;
+  }
+  return end;
+}
+
 function mono(buf, from, len) {
   const sr = buf.sampleRate, i0 = Math.floor(from * sr), n = Math.floor(len * sr);
   const out = new Float32Array(n);
@@ -118,7 +130,7 @@ async function checkMusic(name) {
   const buf = await audio.renderOffline('music', name, 8);
   if (!buf) return add({ kind: 'music', name, ok: false, note: 'render returned null' });
   const s = stats(buf);
-  const gap = longestGap(buf, 0, info.loop ? buf.duration : Math.min(buf.duration, s.end));
+  const gap = longestGap(buf, 0, info.loop ? buf.duration : lastLoud(buf));
   const ok = !s.nan && s.peak <= 1 && s.rms > MUSIC_MIN_RMS && info.mismatch.length === 0 && gap <= 0.15;
   add({
     kind: 'music', name, duration: r4(buf.duration), peak: r4(s.peak), rms: r4(s.rms), nan: s.nan, ok,
@@ -135,7 +147,7 @@ async function checkMusic(name) {
   const loopAt = info.introSec + info.loopSec;
   const seam = await audio.renderOffline('music', name, 7, { from: loopAt - 3 });
   const pre = stats(seam, 0, 3), post = stats(seam, 3, 7);
-  const seamGap = longestGap(seam);
+  const seamGap = longestGap(seam, 2, 7); // from 2 s: notes begun before the seek point are absent
   add({
     kind: 'loop', name, duration: r4(seam.duration), peak: r4(Math.max(pre.peak, post.peak)), rms: r4(post.rms), nan: pre.nan || post.nan,
     ok: !pre.nan && !post.nan && post.rms > MUSIC_MIN_RMS && pre.rms > MUSIC_MIN_RMS && Math.max(pre.peak, post.peak) <= 1 && seamGap <= 0.15,

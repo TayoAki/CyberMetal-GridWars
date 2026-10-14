@@ -33,7 +33,11 @@ for (const btn of document.querySelectorAll('#touch [data-btn]')) {
   const on = (e) => {
     e.preventDefault();
     btn.classList.add('on');
-    btn.setPointerCapture?.(e.pointerId);
+    try {
+      btn.setPointerCapture?.(e.pointerId);
+    } catch {
+      // No live pointer to capture (a synthetic event): the press still counts.
+    }
     input.touchDown(name);
   };
   const off = (e) => {
