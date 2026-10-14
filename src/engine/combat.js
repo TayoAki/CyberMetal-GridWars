@@ -119,6 +119,7 @@ export function lob(b, user, hit, tc, tr, opts = {}) {
   s.x = fromX;
   s.y = fromY;
   s.data.target = { col: tc, row: tr };
+  s.data.landing = opts.cells ? opts.cells(tc, tr) : [[tc, tr]]; // where it will land (for telegraph-aware logic)
   s.script = (function* () {
     for (let t = 1; t <= frames; t++) {
       const k = t / frames;
@@ -151,6 +152,7 @@ export function drop(b, user, hit, c, r, opts = {}) {
   const delay = opts.delay ?? 40;
   const s = b.addSpell({ type: opts.type ?? 'meteor', team: opts.team ?? user.team, owner: user, col: c, row: r, hit });
   s.data.delay = delay;
+  s.data.landing = [[c, r]];
   s.script = (function* () {
     for (let t = 0; t < delay; t++) {
       s.data.progress = t / delay;

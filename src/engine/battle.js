@@ -276,7 +276,7 @@ export class Battle {
     if (target.underShirt && before > 1 && target.hp === 0) target.hp = 1;
     res.dealt = before - target.hp;
     if (res.dealt > 0) {
-      this.emit('hurt', { id: target.id, amount: res.dealt, col: target.col, row: target.row, doubled, element });
+      this.emit('hurt', { id: target.id, amount: res.dealt, col: target.col, row: target.row, doubled, element, by: attacker?.type ?? hit.source ?? null });
       if (target === this.player) this.stats.damageTaken += res.dealt;
     }
 

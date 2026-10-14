@@ -31,10 +31,12 @@ export function bossReward(save, enc, version, result) {
   const chips = BOSS_CHIPS[type] ?? [];
   const r = rankNum(result.bustingLevel);
   if (first && enc.reward) {
+    // Every first boss clear also raises max HP by 80 (four HP Memories), keeping pace with BN3, where
+    // the navi has roughly 500-900 HP by the late game.
     const chip = parse(enc.reward.chip);
     const extra = enc.reward.stat ? { stat: enc.reward.stat } : enc.reward.program ? { program: enc.reward.program } : {};
-    const label = `${CHIPS[chip.key]?.name ?? chip.key} ${chip.code}` + (extra.stat ? ` + ${STAT_LABEL[extra.stat]}` : extra.program ? ` + ${PROGRAMS[extra.program]?.name}` : '');
-    return { type: 'chip', ...chip, ...extra, label };
+    const label = `${CHIPS[chip.key]?.name ?? chip.key} ${chip.code}, HP +80` + (extra.stat && extra.stat !== 'hp' ? `, ${STAT_LABEL[extra.stat]}` : extra.program ? `, ${PROGRAMS[extra.program]?.name}` : '');
+    return { type: 'chip', ...chip, ...extra, hpUp: extra.stat === 'hp' ? 5 : 4, label: extra.stat === 'hp' ? label.replace('HP +80', 'HP +100') : label };
   }
   const id = chips[Math.min(chips.length - 1, Math.max(0, version - 1))];
   if (id && r >= 8) return { type: 'chip', ...parse(id) };
@@ -45,8 +47,9 @@ export function applyReward(save, rw) {
   const d = save.data;
   if (rw.type === 'chip' && CHIPS[rw.key]) save.addChip(rw.key, rw.code);
   if (rw.type === 'bits') d.bits += rw.amount;
-  if (rw.stat === 'hp') d.stats.hpMem++;
-  else if (rw.stat && d.stats[rw.stat] !== undefined) d.stats[rw.stat] = Math.min(5, d.stats[rw.stat] + 1);
+  if (rw.hpUp) d.stats.hpMem += rw.hpUp;
+  else if (rw.stat === 'hp') d.stats.hpMem++;
+  if (rw.stat && rw.stat !== 'hp' && d.stats[rw.stat] !== undefined) d.stats[rw.stat] = Math.min(5, d.stats[rw.stat] + 1);
   if (rw.program && !d.programs.owned.includes(rw.program)) d.programs.owned.push(rw.program);
   save.persist();
 }
