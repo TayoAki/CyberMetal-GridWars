@@ -4,7 +4,7 @@ import { drawText, measureText } from './font.js';
 import { SCREEN_W, SCREEN_H, PANEL_W, PANEL_H, FIELD_Y, floorPoint } from './layout.js';
 import { drawBackground } from './background.js';
 import { drawEntitySprite, drawSpellSprite, drawFxSprite, fxDuration, ENTITY_SPRITES } from './sprites/index.js';
-import { drawChipIcon } from './chipart.js';
+import { drawChipIcon, drawElementIcon } from './chipart.js';
 import { drawCustomScreen, CustomAnim } from './customView.js';
 
 // Draws a Battle onto the 240x160 buffer and keeps the purely visual state (effects, damage numbers,
@@ -369,6 +369,11 @@ export class BattleView {
     frame(ctx, 2, 2, 42, 15, '#8ab0ff');
     rect(ctx, 3, 3, 40, 1, '#2a4a9a');
     drawText(ctx, String(p.hp), 41, 6, hpColor, { align: 'right', shadow: '#000000' });
+    const st = b.style;
+    if (st && (st.element !== 'null' || st.type)) {
+      if (st.element !== 'null') drawElementIcon(ctx, st.element, 47, 5);
+      if (st.type) drawText(ctx, st.type[0].toUpperCase(), st.element !== 'null' ? 58 : 47, 6, '#7affe0', { outline: '#0a1430' });
+    }
 
     // Custom gauge.
     const gx = 72;
