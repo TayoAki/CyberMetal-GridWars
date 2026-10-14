@@ -3,7 +3,7 @@ import { SCREEN_W, SCREEN_H } from '../render/layout.js';
 import { SaveData } from './save.js';
 import { BattleScene } from './scenes/battleScene.js';
 import { TitleScene } from './scenes/titleScene.js';
-import { ENCOUNTERS, encounterById } from './data/areas.js';
+import { ENCOUNTERS, encounterById, bossVersion } from './data/areas.js';
 import { autopilot } from './autopilot.js';
 
 // Owns the current scene, the save data and screen fades. Scenes implement update(held, edges) and
@@ -24,7 +24,9 @@ export class Game {
 
     const quick = this.params.get('battle');
     if (quick) {
-      const enc = encounterById(quick) ?? ENCOUNTERS[0];
+      let enc = encounterById(quick) ?? ENCOUNTERS[0];
+      const v = Number(this.params.get('v') ?? 0);
+      if (v) enc = bossVersion(enc, v);
       const auto = this.params.get('auto') === '1';
       this.setScene(
         new BattleScene(this, {

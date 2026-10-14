@@ -2,6 +2,7 @@ import { Input, PadEdges } from './input/input.js';
 import { SCREEN_W, SCREEN_H } from './render/layout.js';
 import { audio } from './audio/index.js';
 import { Game } from './game/game.js';
+import { autopilot } from './game/autopilot.js';
 
 // Boot: canvas scaling, the fixed 60 Hz loop, input/audio wiring and the touch controls.
 
@@ -85,6 +86,7 @@ document.addEventListener('visibilitychange', () => {
 
 // Test hooks for scripted browser runs.
 window.__game = game;
+window.__autopilot = autopilot;
 window.__ready = true;
 
 function safeStorage() {

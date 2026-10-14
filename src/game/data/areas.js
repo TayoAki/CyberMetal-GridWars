@@ -96,7 +96,7 @@ export const AREAS = [
     theme: 'void',
     blurb: 'The source of the corruption. ZeroDay waits.',
     battles: [
-      { id: 'void1', name: 'Event Horizon', field: ['.x....', '....x.', '..x...'], enemies: [E('bombeetle', 3, 4, 1), E('mortarshell', 4, 5, 2), E('gloop', 4, 4, 0)], drops: ['recov150:N', 'geddon2:F', 'aqua30:*'], rare: ['recov200:M'] },
+      { id: 'void1', name: 'Event Horizon', field: ['.x....', '...x..', '..x...'], enemies: [E('bombeetle', 3, 4, 1), E('mortarshell', 4, 5, 2), E('gloop', 4, 4, 0)], drops: ['recov150:N', 'geddon2:F', 'aqua30:*'], rare: ['recov200:M'] },
       { id: 'void2', name: 'Dead Signal', field: ['p.....', '......', '.....p'], enemies: [E('watcher', 3, 5, 1), E('cinderkite', 3, 4, 0), E('sporeling', 3, 4, 2)], drops: ['muramasa:M', 'elec30:*', 'zapring3:C'], rare: ['lifeaura:D'] },
       { id: 'void3', name: 'Omega Patrol', enemies: [E('rivet', 4, 4, 1), E('plinker', 4, 5, 0), E('dartfin', 4, 5, 2)], drops: ['atk30:*', 'navi20:*', 'fullcust:*'], rare: ['recov300:O'] },
     ],

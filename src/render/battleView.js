@@ -293,6 +293,22 @@ export class BattleView {
     else ellipse(ctx, x, floor, 7, 2, 'rgba(0,0,0,0.25)');
     const flash = this.flash.get(e.id);
     const invis = e.invisTimer > 0;
+    // Materialise at battle start: reveal bottom-up behind a bright scanline.
+    const b = this.b;
+    const reveal = b.phase === 'intro' ? Math.min(1, Math.max(0, (b.phaseTimer - (e === b.player ? 0 : 8)) / 30)) : 1;
+    if (reveal <= 0) return;
+    if (reveal < 1) {
+      const top = Math.round(floor - 64 * reveal);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x - 40, top, 80, floor - top + 4);
+      ctx.clip();
+      drawEntitySprite(ctx, e, x, y, t);
+      ctx.restore();
+      rect(ctx, x - 14, top, 28, 1, '#ffffff');
+      rect(ctx, x - 10, top - 1, 20, 1, e.team === TEAM.RED ? '#9ae8ff' : '#ffb0b0');
+      return;
+    }
     if (invis) ctx.globalAlpha = 0.35;
     if (flash) tinted(ctx, '#ffffff', 0.85, (g) => drawEntitySprite(g, e, x, y, t));
     else drawEntitySprite(ctx, e, x, y, t);
