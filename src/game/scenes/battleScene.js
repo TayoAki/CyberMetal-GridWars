@@ -49,7 +49,11 @@ export class BattleScene {
         this.game.audio.music(b.result.won ? 'victory' : 'gameover');
       }
       this.resultT++;
-      if (this.resultT > 40 && (edges.pressed.a || edges.pressed.start || (this.autopilot && this.resultT > 90))) {
+      // The autopilot continues on its own once the victory jingle (about 4.7 s) has played. onEnd runs
+      // once: some handlers change scene asynchronously (a dynamic import), and this scene keeps
+      // updating until they do.
+      if (!this.ended && this.resultT > 40 && (edges.pressed.a || edges.pressed.start || (this.autopilot && this.resultT > 290))) {
+        this.ended = true;
         this.opts.onEnd?.(b.result, this.reward, this);
       }
     }

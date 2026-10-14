@@ -81,6 +81,10 @@ from the owner's own BN3 ROM. None of the ROM's bytes ship in this repo.
   - boosts and Navi chips that summon the game's own characters.
 - **Enemies:** 13 virus families with 4 levels each (L1-L3 and Ω), plus 8 boss navis with V1/V2/V3/Ω.
 
+**Sound:** 62 sound effects and 7 original tracks (title, menu, battle, boss, final boss, victory, game
+over), all synthesized at runtime with WebAudio. `tools/audio_check.html` renders every sound offline
+and checks lengths, peaks, loop seams and dropouts.
+
 ## How it was built
 
 This project followed the [universal-modder](https://github.com/rehan-remade/universal-modder) skill's
