@@ -208,6 +208,21 @@ function flipRows(rows) {
   return rows.map((r) => r.split('').reverse().join(''));
 }
 
+// A table of poses built on first use (sculpting every pose at load would cost ~100 ms of startup).
+function lazy(defs) {
+  const out = {};
+  for (const [k, make] of Object.entries(defs)) {
+    let v = null;
+    Object.defineProperty(out, k, { get: () => (v ??= make()), enumerable: true });
+  }
+  return out;
+}
+
+function once(make) {
+  let v = null;
+  return () => (v ??= make());
+}
+
 // ---------------------------------------------------------------- draw helpers
 
 function lv(o) {
@@ -521,21 +536,21 @@ function ironPose(o = {}) {
   return rows;
 }
 
-const IRON = {
-  idle: ironPose({}),
-  idle2: ironPose({ dy: 1 }),
-  stepA: ironPose({ stepF: 3, dy: 1 }),
-  stepB: ironPose({ stepB: 3, dy: 1 }),
-  windup: ironPose({ arm: 'raise', lean: -1, mood: 'rage' }),
-  launch: ironPose({ arm: 'launch', mood: 'rage' }),
-  catch: ironPose({ arm: 'catch', dy: 1 }),
-  sawwind: ironPose({ back: 'raise', lean: -1 }),
-  throw: ironPose({ back: 'throw', lean: 1 }),
-  stompwind: ironPose({ liftB: 9, lean: 2, dy: -1, arm: 'catch', mood: 'rage' }),
-  stomp: ironPose({ dy: 3, arm: 'slam', mood: 'rage' }),
-  hurt: ironPose({ lean: -3, dy: 2, arm: 'catch', mood: 'hurt' }),
-  summon: ironPose({ arm: 'slam', mood: 'rage' }),
-};
+const IRON = lazy({
+  idle: () => ironPose({}),
+  idle2: () => ironPose({ dy: 1 }),
+  stepA: () => ironPose({ stepF: 3, dy: 1 }),
+  stepB: () => ironPose({ stepB: 3, dy: 1 }),
+  windup: () => ironPose({ arm: 'raise', lean: -1, mood: 'rage' }),
+  launch: () => ironPose({ arm: 'launch', mood: 'rage' }),
+  catch: () => ironPose({ arm: 'catch', dy: 1 }),
+  sawwind: () => ironPose({ back: 'raise', lean: -1 }),
+  throw: () => ironPose({ back: 'throw', lean: 1 }),
+  stompwind: () => ironPose({ liftB: 9, lean: 2, dy: -1, arm: 'catch', mood: 'rage' }),
+  stomp: () => ironPose({ dy: 3, arm: 'slam', mood: 'rage' }),
+  hurt: () => ironPose({ lean: -3, dy: 2, arm: 'catch', mood: 'hurt' }),
+  summon: () => ironPose({ arm: 'slam', mood: 'rage' }),
+});
 
 function drawIronclad(ctx, e, x, y, t) {
   const L = lv(e);
@@ -786,18 +801,18 @@ function sabrePose(o = {}) {
   return g.rows();
 }
 
-const SABRE = {
-  idle: sabrePose({ blade: [1.0, 16] }),
-  idle2: sabrePose({ blade: [1.0, 16], dy: 1, plume: 1, fArm: [[39, 32], [42, 36]] }),
-  move: sabrePose({ lean: 2, dy: 1, legs: 'run', tails: 1, plume: -2, fArm: [[36, 32], [33, 36]], blade: [2.75, 15] }),
-  guard: sabrePose({ dy: 2, legs: 'crouch', shield: 'front', fArm: [[35, 32], [31, 35]], blade: [2.2, 14], bladeBehind: true, mood: 'fierce' }),
-  windup: sabrePose({ lean: -2, legs: 'crouch', fArm: [[37, 19], [33, 12]], blade: [-2.55, 17], bladeBehind: true, mood: 'fierce' }),
-  slash: sabrePose({ lean: 3, dy: 2, legs: 'lunge', tails: 1, plume: -2, fArm: [[42, 30], [46, 34]], blade: [0.35, 15], mood: 'fierce' }),
-  aim: sabrePose({ lean: -2, dy: 1, legs: 'crouch', fArm: [[34, 32], [30, 34]], blade: [3.05, 16], bladeBehind: true, mood: 'fierce' }),
-  thrust: sabrePose({ lean: 4, dy: 2, legs: 'lunge', tails: 1, plume: -2, fArm: [[42, 28], [47, 29]], blade: [0.02, 16], mood: 'fierce' }),
-  hurt: sabrePose({ lean: -3, dy: 1, blade: [1.4, 15], fArm: [[37, 33], [38, 37]], mood: 'hurt' }),
-  summon: sabrePose({ fArm: [[40, 28], [38, 22]], blade: [-1.45, 17], mood: 'fierce' }),
-};
+const SABRE = lazy({
+  idle: () => sabrePose({ blade: [1.0, 16] }),
+  idle2: () => sabrePose({ blade: [1.0, 16], dy: 1, plume: 1, fArm: [[39, 32], [42, 36]] }),
+  move: () => sabrePose({ lean: 2, dy: 1, legs: 'run', tails: 1, plume: -2, fArm: [[36, 32], [33, 36]], blade: [2.75, 15] }),
+  guard: () => sabrePose({ dy: 2, legs: 'crouch', shield: 'front', fArm: [[35, 32], [31, 35]], blade: [2.2, 14], bladeBehind: true, mood: 'fierce' }),
+  windup: () => sabrePose({ lean: -2, legs: 'crouch', fArm: [[37, 19], [33, 12]], blade: [-2.55, 17], bladeBehind: true, mood: 'fierce' }),
+  slash: () => sabrePose({ lean: 3, dy: 2, legs: 'lunge', tails: 1, plume: -2, fArm: [[42, 30], [46, 34]], blade: [0.35, 15], mood: 'fierce' }),
+  aim: () => sabrePose({ lean: -2, dy: 1, legs: 'crouch', fArm: [[34, 32], [30, 34]], blade: [3.05, 16], bladeBehind: true, mood: 'fierce' }),
+  thrust: () => sabrePose({ lean: 4, dy: 2, legs: 'lunge', tails: 1, plume: -2, fArm: [[42, 28], [47, 29]], blade: [0.02, 16], mood: 'fierce' }),
+  hurt: () => sabrePose({ lean: -3, dy: 1, blade: [1.4, 15], fArm: [[37, 33], [38, 37]], mood: 'hurt' }),
+  summon: () => sabrePose({ fArm: [[40, 28], [38, 22]], blade: [-1.45, 17], mood: 'fierce' }),
+});
 
 function drawSabre(ctx, e, x, y, t) {
   const L = lv(e);
@@ -986,20 +1001,20 @@ function zeroPose(o = {}) {
   return rows;
 }
 
-const ZERO = {
-  idle: zeroPose({}),
-  idle2: zeroPose({ hem: 1, dy: 1 }),
-  barragewind: zeroPose({ fClaw: [[39, 25], [47, 22]], fCurl: 0.5, mood: 'fierce' }),
-  barrage: zeroPose({ lean: -1, fClaw: [[39, 25], [50, 27]], fCurl: 0, mood: 'fierce', hem: 1 }),
-  crouch: zeroPose({ dy: 5, spread: 4, hood: 1, fClaw: [[39, 26], [44, 40]], bClaw: [[22, 26], [16, 40]], mood: 'fierce' }),
-  leap: zeroPose({ dy: -2, spread: -2, hem: 1, fClaw: [[39, 24], [43, 10]], bClaw: [[22, 24], [19, 10]], fCurl: 0.3, bCurl: -0.3 }),
-  smash: zeroPose({ dy: 4, spread: 5, hood: 1, lean: 2, fClaw: [[39, 26], [47, 44]], fCurl: 0.4, mood: 'fierce' }),
-  aura: zeroPose({ spread: 3, fClaw: [[39, 25], [51, 19]], bClaw: [[22, 25], [9, 19]], fCurl: -0.6, bCurl: 0.6, mood: 'fierce' }),
-  charge: zeroPose({ lean: -1, dy: 1, fClaw: [[39, 26], [47, 31]], bClaw: [[24, 26], [40, 34]], fCurl: 0.9, mood: 'fierce', hem: 1 }),
-  beam: zeroPose({ lean: -3, spread: 2, fClaw: [[37, 26], [48, 29]], bClaw: [[24, 26], [44, 32]], fCurl: 0, mood: 'fierce' }),
-  hurt: zeroPose({ lean: -3, dy: 1, hood: 1, mood: 'hurt', fClaw: [[39, 26], [41, 39]] }),
-};
-ZERO.summon = ZERO.aura;
+const ZERO = lazy({
+  idle: () => zeroPose({}),
+  idle2: () => zeroPose({ hem: 1, dy: 1 }),
+  barragewind: () => zeroPose({ fClaw: [[39, 25], [47, 22]], fCurl: 0.5, mood: 'fierce' }),
+  barrage: () => zeroPose({ lean: -1, fClaw: [[39, 25], [50, 27]], fCurl: 0, mood: 'fierce', hem: 1 }),
+  crouch: () => zeroPose({ dy: 5, spread: 4, hood: 1, fClaw: [[39, 26], [44, 40]], bClaw: [[22, 26], [16, 40]], mood: 'fierce' }),
+  leap: () => zeroPose({ dy: -2, spread: -2, hem: 1, fClaw: [[39, 24], [43, 10]], bClaw: [[22, 24], [19, 10]], fCurl: 0.3, bCurl: -0.3 }),
+  smash: () => zeroPose({ dy: 4, spread: 5, hood: 1, lean: 2, fClaw: [[39, 26], [47, 44]], fCurl: 0.4, mood: 'fierce' }),
+  aura: () => zeroPose({ spread: 3, fClaw: [[39, 25], [51, 19]], bClaw: [[22, 25], [9, 19]], fCurl: -0.6, bCurl: 0.6, mood: 'fierce' }),
+  charge: () => zeroPose({ lean: -1, dy: 1, fClaw: [[39, 26], [47, 31]], bClaw: [[24, 26], [40, 34]], fCurl: 0.9, mood: 'fierce', hem: 1 }),
+  beam: () => zeroPose({ lean: -3, spread: 2, fClaw: [[37, 26], [48, 29]], bClaw: [[24, 26], [44, 32]], fCurl: 0, mood: 'fierce' }),
+  hurt: () => zeroPose({ lean: -3, dy: 1, hood: 1, mood: 'hurt', fClaw: [[39, 26], [41, 39]] }),
+  summon: () => ZERO.aura,
+});
 
 function drawZeroday(ctx, e, x, y, t) {
   const L = lv(e);
@@ -1274,20 +1289,20 @@ function briarPose(o = {}) {
   return g.rows();
 }
 
-const BRIAR = {
-  idle: briarPose({ lance: [45, 52, 45, 6] }),
-  idle2: briarPose({ lance: [45, 52, 45, 6], dy: 1, cape: 1, fArm: [[40, 32], [41, 38]] }),
-  stepA: briarPose({ legs: 'stepA', lance: [45, 51, 46, 6], dy: 1, cape: 2 }),
-  stepB: briarPose({ legs: 'stepB', lance: [45, 51, 44, 6], dy: 1, cape: 1 }),
-  plant: briarPose({ lean: -1, fArm: [[40, 21], [38, 14]], lance: [34, 1, 42, 40], mood: 'fierce', cape: 1 }),
-  stab: briarPose({ lean: 2, dy: 2, fArm: [[43, 31], [46, 38]], lance: [37, 26, 53, 55], mood: 'fierce', cape: 3 }),
-  bloom: briarPose({ fArm: [[41, 22], [43, 15]], bArm: [[19, 22], [17, 15]], bloom: 3, lance: null, mood: 'fierce' }),
-  storm: briarPose({ fArm: [[43, 27], [49, 25]], bArm: [[18, 27], [12, 25]], bloom: 4, lance: null, mood: 'fierce', cape: 3 }),
-  grow: briarPose({ legs: 'kneel', dy: 5, lean: 1, fArm: [[42, 38], [45, 50]], lance: [20, 52, 24, 12], lanceBehind: true, cape: 2 }),
-  taunt: briarPose({ lance: [47, 52, 47, 6], fArm: [[41, 30], [45, 34]], bArm: [[19, 31], [23, 36]], bloom: 1 }),
-  hurt: briarPose({ lean: -3, dy: 1, lance: [43, 52, 47, 8], mood: 'hurt', cape: 2 }),
-  summon: briarPose({ fArm: [[42, 27], [47, 24]], lance: [39, 34, 57, 9], bloom: 2, mood: 'fierce', cape: 2 }),
-};
+const BRIAR = lazy({
+  idle: () => briarPose({ lance: [45, 52, 45, 6] }),
+  idle2: () => briarPose({ lance: [45, 52, 45, 6], dy: 1, cape: 1, fArm: [[40, 32], [41, 38]] }),
+  stepA: () => briarPose({ legs: 'stepA', lance: [45, 51, 46, 6], dy: 1, cape: 2 }),
+  stepB: () => briarPose({ legs: 'stepB', lance: [45, 51, 44, 6], dy: 1, cape: 1 }),
+  plant: () => briarPose({ lean: -1, fArm: [[40, 21], [38, 14]], lance: [34, 1, 42, 40], mood: 'fierce', cape: 1 }),
+  stab: () => briarPose({ lean: 2, dy: 2, fArm: [[43, 31], [46, 38]], lance: [37, 26, 53, 55], mood: 'fierce', cape: 3 }),
+  bloom: () => briarPose({ fArm: [[41, 22], [43, 15]], bArm: [[19, 22], [17, 15]], bloom: 3, lance: null, mood: 'fierce' }),
+  storm: () => briarPose({ fArm: [[43, 27], [49, 25]], bArm: [[18, 27], [12, 25]], bloom: 4, lance: null, mood: 'fierce', cape: 3 }),
+  grow: () => briarPose({ legs: 'kneel', dy: 5, lean: 1, fArm: [[42, 38], [45, 50]], lance: [20, 52, 24, 12], lanceBehind: true, cape: 2 }),
+  taunt: () => briarPose({ lance: [47, 52, 47, 6], fArm: [[41, 30], [45, 34]], bArm: [[19, 31], [23, 36]], bloom: 1 }),
+  hurt: () => briarPose({ lean: -3, dy: 1, lance: [43, 52, 47, 8], mood: 'hurt', cape: 2 }),
+  summon: () => briarPose({ fArm: [[42, 27], [47, 24]], lance: [39, 34, 57, 9], bloom: 2, mood: 'fierce', cape: 2 }),
+});
 
 function drawBriarix(ctx, e, x, y, t) {
   const L = lv(e);
@@ -1388,14 +1403,14 @@ function budPose(o = {}) {
   return g.rows();
 }
 
-const BUD = {
-  sprout1: budPose({ h: 0.35 }),
-  sprout2: budPose({ h: 0.7 }),
-  idle: budPose({}),
-  aim: budPose({ open: 1 }),
-  spit: budPose({ open: 2 }),
-  wither: budPose({ droop: 3 }),
-};
+const BUD = lazy({
+  sprout1: () => budPose({ h: 0.35 }),
+  sprout2: () => budPose({ h: 0.7 }),
+  idle: () => budPose({}),
+  aim: () => budPose({ open: 1 }),
+  spit: () => budPose({ open: 2 }),
+  wither: () => budPose({ droop: 3 }),
+});
 const BUD_WITHER = BRIAR_PALS.map((p) => recolor(p, { l: '#b8a060', m: '#8a7038', n: '#5e4a22', o: '#3a2c12', p: '#c8a8a0', q: '#9a6a68', r: '#6a4040', s: '#3a2222' }));
 
 function drawThornBud(ctx, e, x, y, t) {
@@ -1435,7 +1450,7 @@ function cellsOf(s) {
 // --- Ironclad
 
 // The launched piston fist, seen at full size: a cylinder stub over a huge riveted gauntlet, knuckles down.
-const FIST_ROWS = (() => {
+const fistRows = once(() => {
   const g = new Grid(27, 32);
   ironForearm(g, 13.5, 0, 13.5, 13, 3.5);
   g.part(g.mask().rect(2, 12, 23, 18, 5), 'abcde');
@@ -1463,12 +1478,14 @@ const FIST_ROWS = (() => {
     .r..
   `));
   return g.rows();
-})();
-const SAW_FRAMES = [0, 1 / 3, 2 / 3].map((ph) => {
-  const g = new Grid(25, 25);
-  ironSaw(g, 12.5, 12.5, 9.5, true, ph);
-  return g.rows();
 });
+const sawFrames = once(() =>
+  [0, 1 / 3, 2 / 3].map((ph) => {
+    const g = new Grid(25, 25);
+    ironSaw(g, 12.5, 12.5, 9.5, true, ph);
+    return g.rows();
+  }),
+);
 
 function drawPiston(ctx, s, x, y, t) {
   const L = lv(s.data);
@@ -1487,18 +1504,18 @@ function drawPiston(ctx, s, x, y, t) {
     }
     if (p > 0.72) {
       const z = Math.round(((1 - p) / 0.28) * 120);
-      sprite(ctx, FIST_ROWS, pal, x, y - z, { anchor: 'feet', outline: OUT });
+      sprite(ctx, fistRows(), pal, x, y - z, { anchor: 'feet', outline: OUT });
     }
     return;
   }
   const age = (s.t ?? 0) - (s.data.delay ?? 0) - 1;
   const z = age < 6 ? 0 : (age - 6) * 14;
-  withAlpha(ctx, age < 6 ? 1 : Math.max(0, 1 - (age - 6) / 8), () => sprite(ctx, FIST_ROWS, pal, x, y - z, { anchor: 'feet', outline: OUT }));
+  withAlpha(ctx, age < 6 ? 1 : Math.max(0, 1 - (age - 6) / 8), () => sprite(ctx, fistRows(), pal, x, y - z, { anchor: 'feet', outline: OUT }));
 }
 
 function drawSawblade(ctx, s, x, y, t) {
   const L = lv(s.data);
-  const frame = SAW_FRAMES[Math.floor((s.t ?? t) / 2) % 3];
+  const frame = sawFrames()[Math.floor((s.t ?? t) / 2) % 3];
   const rows = (s.dir ?? -1) < 0 ? frame : flipRows(frame);
   const z = 12 + Math.round(Math.sin((s.t ?? t) / 3));
   // sparks off the floor
@@ -1597,6 +1614,14 @@ function drawVoidWave(ctx, s, x, y, t) {
     px(ctx, x - 15, y - 6 - (k % 6), core);
     px(ctx, x + 14, y - 9 - (k % 5), core);
   }
+}
+
+// Where ZeroDay will come down: a shadow that swells while it is out of sight.
+function drawVoidLand(ctx, s, x, y, t) {
+  const L = lv(s.data);
+  const p = Math.max(0, Math.min(1, s.data?.progress ?? 0));
+  withAlpha(ctx, 0.35 + 0.4 * p, () => ellipse(ctx, x, y - 1, 6 + Math.round(10 * p), 2 + Math.round(4 * p), '#05020a'));
+  if (Math.floor(t / (p > 0.6 ? 2 : 4)) % 2 === 0) withAlpha(ctx, 0.7, () => ring(ctx, x, y - 1, 8 + Math.round(8 * p), ZERO_CORE[L - 1]));
 }
 
 function drawVoidWarn(ctx, s, x, y, t) {
@@ -1738,10 +1763,7 @@ function drawPetalZone(ctx, s, x, y, t, warn) {
     if (warn) {
       // petals gather: a slow ring on the floor and a few petals circling
       const p = s.data?.progress ?? 0;
-      withAlpha(ctx, 0.35 + 0.35 * p, () => {
-        ellipse(ctx, q.x, q.y - 1, 15, 5, c2);
-        ellipse(ctx, q.x, q.y - 1, 13, 4, '#00000000');
-      });
+      withAlpha(ctx, 0.35 + 0.35 * p, () => ellipse(ctx, q.x, q.y - 1, 15, 5, c2));
       for (let i = 0; i < 5; i++) {
         const a = age * 0.12 + (i / 5) * Math.PI * 2 + c;
         const px0 = q.x + Math.round(Math.cos(a) * 12);
@@ -1981,6 +2003,7 @@ export const SPELL_SPRITES = {
   nullshot: { draw: drawNullShot },
   voidwave: { draw: drawVoidWave },
   voidwarn: { draw: drawVoidWarn },
+  voidland: { draw: drawVoidLand },
   voidbeam: { draw: drawVoidBeam },
   roots: { draw: drawRoots },
   petalwarn: { draw: (ctx, s, x, y, t) => drawPetalZone(ctx, s, x, y, t, true) },

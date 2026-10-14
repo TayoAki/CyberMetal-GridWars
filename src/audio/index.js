@@ -18,6 +18,7 @@ const THROTTLE_MS = 25; // same SFX name within this window plays once
 const MAX_VOICES = 32; // concurrent SFX cap
 const FADE_OUT = 0.25; // music change: old track fade
 const TRIM = { master: 0.8, sfx: 1, music: 0.8 }; // fixed headroom under the user volumes
+const PREROLL = 0.3; // offline renders: silent lead-in so the compressor is settled (trimmed off)
 
 export const SFX_NAMES = Object.keys(SFX);
 export const TRACK_NAMES = Object.keys(TRACKS);
@@ -37,6 +38,7 @@ const state = {
   voices: [], // end times of sounding SFX
   track: null, // requested track name
   seq: null, // current Sequencer
+  seqId: 0, // increments each time a track (re)starts
   timer: null,
 };
 
@@ -117,6 +119,7 @@ function startTrack(name) {
   if (!name) return stopTimer();
   const seq = new Sequencer(ctx, state.nodes.music, TRACKS[name], ctx.currentTime + 0.06, { live: true, fadeIn: 0.02 });
   state.seq = seq;
+  state.seqId++;
   seq.advance(ctx.currentTime + LOOKAHEAD);
   if (!state.timer) state.timer = setInterval(tick, TICK_MS);
 }
@@ -295,6 +298,39 @@ export const audio = {
     return state.track;
   },
 
+  /**
+   * Snapshot for tools/tests: context state and time, current track, whether it is playing, a counter
+   * of track starts, sounding SFX voices, and the output level (an analyser is attached on first call).
+   */
+  debug() {
+    const ctx = state.ctx;
+    const out = { available: !!AudioCtx(), state: ctx ? ctx.state : 'none', time: ctx ? ctx.currentTime : 0, track: state.track };
+    try {
+      out.playing = !!(state.seq && state.seq.playing);
+      out.seqId = state.seqId;
+      out.voices = ctx ? state.voices.filter((e) => e > ctx.currentTime).length : 0;
+      if (ctx && state.nodes) {
+        if (!state.nodes.meter) {
+          state.nodes.meter = ctx.createAnalyser();
+          state.nodes.meter.fftSize = 2048;
+          state.nodes.clip.connect(state.nodes.meter);
+        }
+        const buf = new Float32Array(state.nodes.meter.fftSize);
+        state.nodes.meter.getFloatTimeDomainData(buf);
+        let sum = 0;
+        let peak = 0;
+        for (const x of buf) {
+          sum += x * x;
+          peak = Math.max(peak, Math.abs(x));
+        }
+        out.level = { rms: Math.sqrt(sum / buf.length), peak };
+      }
+    } catch {
+      /* best effort */
+    }
+    return out;
+  },
+
   sfxNames: SFX_NAMES,
   trackNames: TRACK_NAMES,
   trackInfo,
@@ -314,11 +350,21 @@ export const audio = {
       const isMusic = kind === 'music';
       const key = isMusic ? (TRACKS[name] ? name : null) : kind === 'sfx' ? resolveSfx(name) : null;
       if (!key) return Promise.resolve(null);
-      const ctx = new OAC(2, Math.ceil(sr * dur), sr);
+      // The compressor starts out fully attenuated and settles within ~0.2 s; live playback never
+      // hears that (the context runs continuously), so render a silent pre-roll and trim it off.
+      const len = Math.ceil(sr * dur);
+      const pre = Math.ceil(sr * PREROLL);
+      const ctx = new OAC(2, len + pre, sr);
       const nodes = buildChain(ctx, state.vol, false);
-      if (isMusic) new Sequencer(ctx, nodes.music, TRACKS[key], 0, { from: (opts && opts.from) || 0 }).advance(dur);
-      else renderSfx(ctx, nodes.sfx, key, 0, { volume: opts && Number.isFinite(opts.volume) ? opts.volume : 1 });
-      return startRendering(ctx);
+      const t0 = pre / sr;
+      if (isMusic) new Sequencer(ctx, nodes.music, TRACKS[key], t0, { from: (opts && opts.from) || 0 }).advance(t0 + dur);
+      else renderSfx(ctx, nodes.sfx, key, t0, { volume: opts && Number.isFinite(opts.volume) ? opts.volume : 1 });
+      return startRendering(ctx).then((buf) => {
+        if (!buf) return null;
+        const out = ctx.createBuffer(buf.numberOfChannels, len, sr);
+        for (let c = 0; c < buf.numberOfChannels; c++) out.getChannelData(c).set(buf.getChannelData(c).subarray(pre, pre + len));
+        return out;
+      }).catch(() => null);
     } catch {
       return Promise.resolve(null);
     }

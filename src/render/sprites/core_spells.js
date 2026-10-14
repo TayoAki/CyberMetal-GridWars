@@ -1,7 +1,7 @@
 // Spell sprites: every chip attack's moving or lingering part. (x, y) is the floor point of (s.x, s.y);
 // projectiles fly at chest height, lobbed things use s.z, zones read s.data.cells.
 import { sprite } from '../pixel.js';
-import { OUTLINE, ramp, hash, withAlpha, cellDelta, sparkle, bolt, flameTongue, ditherDisc, ellipseRing, crescent, streak, rect, px, line, ellipse, disc, ring, poly } from './core_util.js';
+import { OUTLINE, ramp, hash, withAlpha, cellDelta, sparkle, bolt, flameTongue, ellipseRing, crescent, streak, rect, px, line, ellipse, disc, ring, poly } from './core_util.js';
 
 const CHEST = 14; // projectile height above the floor
 
@@ -455,7 +455,6 @@ export const SPELL_SPRITES = {
       cellsOf(s).forEach(([c, r]) => {
         const [cx, cy] = cellPoint(s, x, y, c, r);
         const k = s.t ?? t;
-        const H = 36;
         withAlpha(ctx, 0.3, () => ellipse(ctx, cx, cy - 1, 12, 3, '#c8d0e0'));
         for (let i = 0; i < 12; i++) {
           const yy = cy - 2 - i * 3;
@@ -471,7 +470,6 @@ export const SPELL_SPRITES = {
           const a = k * 0.5 + i * 2.1;
           rect(ctx, cx + Math.round(Math.cos(a) * 14), cy - 10 - i * 8 + Math.round(Math.sin(a) * 2), 2, 2, '#7a6a58');
         }
-        void H;
       });
     },
   },
@@ -704,4 +702,5 @@ export const SPELL_SPRITES = {
   },
 };
 
-export { shockwaveSprite, crestWave };
+// Shared with the chip art.
+export { shockwaveSprite, crestWave, FIST_SIDE, FIST_PAL, RAT_SIDE, RAT_PAL };

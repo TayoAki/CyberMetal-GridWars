@@ -158,7 +158,60 @@ for (const n of SFX_NAMES) {
   listen.appendChild(b);
 }
 
+// Live path (?live=1, needs autoplay permission, e.g. --autoplay-policy=no-user-gesture-required):
+// the real AudioContext, the setInterval lookahead scheduler, track switching, mute and SFX throttle.
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function live() {
+  const row = (name, ok, note) => add({ kind: 'live', name, ok, note });
+  audio.unlock();
+  for (let i = 0; i < 40 && audio.debug().state !== 'running'; i++) await sleep(50);
+  if (audio.debug().state !== 'running') return row('context', false, `state ${audio.debug().state}`);
+  audio.debug(); // attaches the meter
+  audio.music('battle');
+  await sleep(1500);
+  let d = audio.debug();
+  row('music battle', d.playing && d.level.rms > 0.01, `rms ${d.level.rms.toFixed(4)} peak ${d.level.peak.toFixed(3)} t=${d.time.toFixed(2)}`);
+  const id = d.seqId;
+  audio.music('battle');
+  await sleep(100);
+  row('same track no restart', audio.debug().seqId === id, `seqId ${id} -> ${audio.debug().seqId}`);
+  audio.music('boss');
+  await sleep(1200);
+  d = audio.debug();
+  row('switch to boss', d.seqId === id + 1 && d.track === 'boss' && d.level.rms > 0.01, `rms ${d.level.rms.toFixed(4)}`);
+  audio.setMuted(true);
+  await sleep(400);
+  d = audio.debug();
+  row('mute', audio.muted && d.level.peak < 0.002, `peak ${d.level.peak.toFixed(5)}`);
+  audio.setMuted(false);
+  audio.music(null);
+  await sleep(900);
+  d = audio.debug();
+  row('music(null) stops', !d.playing && d.level.peak < 0.01, `peak ${d.level.peak.toFixed(5)}`);
+  for (let i = 0; i < 10; i++) audio.play('hit');
+  const v1 = audio.debug().voices;
+  await sleep(40);
+  audio.play('hit');
+  const v2 = audio.debug().voices;
+  row('sfx throttle', v1 === 1 && v2 === 2, `10 calls at once -> ${v1} voice; +1 after 40 ms -> ${v2}`);
+  audio.play('cannon');
+  await sleep(60);
+  d = audio.debug();
+  row('sfx live output', d.level.peak > 0.02, `peak ${d.level.peak.toFixed(3)}`);
+  audio.play('no-such-sound');
+  row('unknown sfx ignored', true, 'no throw');
+  audio.music('victory');
+  await sleep(6500);
+  d = audio.debug();
+  row('jingle ends', !d.playing && d.level.peak < 0.01, `playing=${d.playing} peak ${d.level.peak.toFixed(4)}`);
+  audio.music('menu');
+  await sleep(800);
+  row('music after jingle', audio.debug().playing && audio.debug().level.rms > 0.005, `rms ${audio.debug().level.rms.toFixed(4)}`);
+  audio.music(null);
+}
+
 try {
+  if (new URLSearchParams(location.search).has('live')) await live();
   for (const n of SFX_NAMES) await checkSfx(n);
   for (const t of TRACK_NAMES) await checkMusic(t);
   await fullLoop('battle');

@@ -7,7 +7,7 @@ import { TEAM, COLS, ROWS } from '../engine/constants.js';
 
 const key = (c, r) => c * 10 + r;
 
-function dangerMap(b) {
+export function dangerMap(b) {
   const d = new Set();
   const add = (c, r) => {
     if (c >= 0 && c < COLS && r >= 0 && r < ROWS) d.add(key(c, r));
@@ -16,11 +16,13 @@ function dangerMap(b) {
     if (!s.alive || s.team === TEAM.RED) continue;
     const r = Math.round(s.y);
     if (s.data?.cells) for (const [c, rr] of s.data.cells) add(c, rr);
-    // A lob lands on its target; assume a plus-shaped blast to be safe (its cells callback may consume
-    // the battle RNG, so it is never called ahead of time).
+    // A lob lands on its target. Its cells callback may draw from the battle RNG, so it is never called
+    // ahead of time: read the shape the thrower left in data.blast / data.effect, else assume a plus.
     if (s.data?.target) {
       const { col: tc, row: tr } = s.data.target;
-      for (const [c, rr] of [[tc, tr], [tc + 1, tr], [tc - 1, tr], [tc, tr - 1], [tc, tr + 1]]) add(c, rr);
+      add(tc, tr);
+      const single = s.data.blast === 'single' || (s.data.effect !== undefined && s.data.effect !== 'blast');
+      if (!single) for (const [c, rr] of [[tc + 1, tr], [tc - 1, tr], [tc, tr - 1], [tc, tr + 1]]) add(c, rr);
     }
     if (Array.isArray(s.data?.landing)) for (const [c, rr] of s.data.landing) add(c, rr);
     if (s.data?.delay !== undefined || s.type === 'reticle') {
@@ -28,10 +30,15 @@ function dangerMap(b) {
       if (s.type === 'reticle') for (let c = 0; c < COLS; c++) add(c, s.row);
     }
     if (s.hit && !s.data?.cells && s.data?.delay === undefined && !s.data?.target) {
-      // Something moving along a row: the next few panels ahead of it.
+      // Something on the move: the next few panels ahead of it (data.dc/dr is the heading of a crawler
+      // that can turn, otherwise it runs along its row).
       const x = Math.round(s.x);
-      for (let k = 0; k <= 3; k++) add(x + k * (s.dir || -1), r);
-      add(x, r);
+      const dc = s.data?.dc ?? (s.dir || -1);
+      const dr = s.data?.dr ?? 0;
+      for (let k = 0; k <= 3; k++) add(x + k * dc, r + k * dr);
+      // A crawler that has not turned yet turns toward anyone standing in the column it is crossing:
+      // that whole column is unsafe until it has passed (the dodge is a sidestep, best behind it).
+      if (s.data?.dc !== undefined && !s.data.turned && dr === 0) for (let rr = 0; rr < ROWS; rr++) add(s.col, rr);
     }
   }
   for (const e of b.entities) {
@@ -84,51 +91,69 @@ export function autopilot(opts = {}) {
     const busy = b.controller.action || b.controller.moveTimer > 0 || p.slide;
     const canStep = !busy && t - lastMove > 5;
 
-    const stepTo = (c, r) => {
-      if (c < p.col) pad.left = true;
-      else if (c > p.col) pad.right = true;
-      else if (r < p.row) pad.up = true;
-      else if (r > p.row) pad.down = true;
+    const press = (dc, dr) => {
+      if (dc < 0) pad.left = true;
+      else if (dc > 0) pad.right = true;
+      else if (dr < 0) pad.up = true;
+      else if (dr > 0) pad.down = true;
       lastMove = t;
       holdB = 0;
     };
-    const neighbours = [[p.col, p.row - 1], [p.col, p.row + 1], [p.col - 1, p.row], [p.col + 1, p.row]];
-
-    // 1. Get out of harm's way: breadth-first search for the nearest safe panel (up to 3 steps), then
-    // take the first step of that path even if it crosses danger.
-    if (danger.has(key(p.col, p.row)) && canStep) {
-      const walkable = (c, r) => b.canEnter(p, c, r) && !hazard(c, r);
-      const prev = new Map([[key(p.col, p.row), null]]);
-      let frontier = [[p.col, p.row]];
-      let goal = null;
-      for (let depth = 0; depth < 3 && !goal; depth++) {
-        const next = [];
-        for (const [c, r] of frontier) {
-          for (const [nc, nr] of [[c, r - 1], [c, r + 1], [c - 1, r], [c + 1, r]]) {
-            const k = key(nc, nr);
-            if (prev.has(k) || !walkable(nc, nr)) continue;
-            prev.set(k, key(c, r));
-            next.push([nc, nr]);
-            if (!danger.has(k) && (!goal || foes.some((f) => f.row === nr))) goal = goal ?? [nc, nr];
-          }
-        }
-        frontier = next;
+    // Where one step from (c, r) really ends: ice carries a body on until something stops it.
+    const slides = p.grounded && p.element !== 'aqua';
+    const land = (c, r, dc, dr) => {
+      let nc = c + dc;
+      let nr = r + dr;
+      if (!b.canEnter(p, nc, nr)) return null;
+      while (slides && b.field.typeAt(nc, nr) === 'ice' && b.canEnter(p, nc + dc, nr + dr)) {
+        nc += dc;
+        nr += dr;
       }
-      if (goal) {
-        let k = key(goal[0], goal[1]);
-        while (prev.get(k) !== key(p.col, p.row)) k = prev.get(k);
-        stepTo(Math.floor(k / 10), k % 10);
+      return [nc, nr];
+    };
+    const DIRS = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+
+    // 1. Get out of harm's way: breadth-first search (in real steps, slides included) for the nearest
+    // safe panel up to 3 steps away, preferring one in an enemy's row, then take the first step of that
+    // path even if it crosses danger. Lava and poison are avoided unless there is no other way out: a
+    // burn costs less than a direct hit.
+    if (danger.has(key(p.col, p.row)) && canStep) {
+      const escape = (allowHazard) => {
+        const seen = new Set([key(p.col, p.row)]);
+        let frontier = [[p.col, p.row, null]];
+        for (let depth = 0; depth < 3; depth++) {
+          const next = [];
+          for (const [c, r, first] of frontier) {
+            for (const [dc, dr] of DIRS) {
+              const to = land(c, r, dc, dr);
+              if (!to) continue;
+              const k = key(to[0], to[1]);
+              if (seen.has(k) || (!allowHazard && hazard(to[0], to[1]))) continue;
+              seen.add(k);
+              next.push([to[0], to[1], first ?? [dc, dr]]);
+            }
+          }
+          const goals = next.filter(([c, r]) => !danger.has(key(c, r)));
+          if (goals.length) return (goals.find(([, r]) => foes.some((f) => f.row === r)) ?? goals[0])[2];
+          frontier = next;
+        }
+        return null;
+      };
+      const step = escape(false) ?? escape(true);
+      if (step) {
+        press(step[0], step[1]);
         return pad;
       }
     }
 
-    // 2. Line up with an enemy (on a safe panel).
+    // 2. Line up with an enemy (only if the step really ends on a safe panel).
     const inRow = foes.filter((e) => e.row === p.row && e.targetable);
     if (!inRow.length && canStep) {
       const target = foes.reduce((a, e) => (Math.abs(e.row - p.row) < Math.abs(a.row - p.row) ? e : a), foes[0]);
-      const r = p.row + Math.sign(target.row - p.row);
-      if (r !== p.row && safe(p.col, r)) {
-        stepTo(p.col, r);
+      const dr = Math.sign(target.row - p.row);
+      const to = dr ? land(p.col, p.row, 0, dr) : null;
+      if (to && safe(to[0], to[1])) {
+        press(0, dr);
         return pad;
       }
     }

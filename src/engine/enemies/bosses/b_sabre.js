@@ -3,8 +3,8 @@ import { noteMove, pickMove, settle, windup, markCounter, pose, frontCol, backCo
 
 // Sabre: the rival. A sleek crimson duelist with a hexagonal energy shield and a curved saber. He blinks
 // around the back of his area watching the player, and the moment the player fires (buster, charge shot
-// or chip) he may snap his shield up: for a second every hit is blocked and bounced back down his row.
-// Between guards he attacks:
+// or chip) he may snap his shield up: for a second every hit is blocked, and the first one is bounced back
+// down his row. The guard then needs a moment to recharge — the window to strike. Between guards he attacks:
 //   Wide Slash  - blinks to the front column of his area in the player's row, raises the saber
 //                 (counterable) and cuts the whole column in front of him: the player's front column.
 //   Crescent    - from the back, an overhead swing that sends a crimson blade wave down his row.

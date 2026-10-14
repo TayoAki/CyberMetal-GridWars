@@ -124,7 +124,7 @@ export function spawnPet(b, boss, o) {
     ...o,
     data: { owner: boss, ...(o.data ?? {}) },
   });
-  (boss.data.pets ?? (boss.data.pets = [])).push(pet);
+  boss.data.pets = [...livePets(boss), pet]; // drop broken ones as we go
   b.emit('fx', { fx: 'warp', col: pet.col, row: pet.row });
   return pet;
 }

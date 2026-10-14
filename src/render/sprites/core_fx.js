@@ -1,7 +1,7 @@
 // One-shot effects. Each entry is { duration, draw(ctx, fx, x, y, age) } with (x, y) the floor point of
 // (fx.col, fx.row). Full-screen effects (flash, stage, wind, fan) ignore (x, y).
 import { SCREEN_W, SCREEN_H, FIELD_Y, PANEL_W, PANEL_H } from '../layout.js';
-import { OUTLINE, ramp, hash, withAlpha, shotEndX, cellDelta, sparkle, bolt, flameTongue, ditherDisc, ellipseRing, crescent, streak, rect, px, line, ellipse, disc, ring, poly } from './core_util.js';
+import { OUTLINE, ramp, hash, withAlpha, shotEndX, sparkle, bolt, flameTongue, ellipseRing, crescent, streak, rect, px, line, ellipse, disc, ring, poly } from './core_util.js';
 import { BUSTER_MUZZLE, CANNON_MUZZLE } from './core_player.js';
 import { drawHeart } from './core_objects.js';
 
@@ -13,6 +13,23 @@ function muzzle(fx, x, y, kind = 'buster') {
   if (fx.enemy) return { mx: x + d * 12, my: y - BODY, d };
   const m = kind === 'cannon' ? CANNON_MUZZLE : BUSTER_MUZZLE;
   return { mx: d > 0 ? x + m.x : x - 1 - m.x, my: y + m.y, d };
+}
+
+// Full-screen effects ignore (x, y): the engine emits them without a panel. When a caller does give a
+// panel (dev contact sheets), draw a clipped thumbnail of the screen centred on (x, y) instead of
+// painting over the whole canvas.
+function screenFx(ctx, fx, x, y, fn) {
+  if (fx.col === undefined && fx.row === undefined) {
+    fn();
+    return;
+  }
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x - 26, y - 44, 52, 46);
+  ctx.clip();
+  ctx.translate(Math.round(x - SCREEN_W / 2), Math.round(y - 116));
+  fn();
+  ctx.restore();
 }
 
 function seedOf(fx) {
@@ -369,10 +386,19 @@ export const FX_SPRITES = {
           st: Math.min(4, Math.floor(p * 5.4 + (i ? 0.2 : 0))),
         });
       }
-      for (const q of puffs) disc(ctx, q.x, q.y, q.r + 1, q.st >= 4 ? '#1c1a28' : FIRE_STAGES[Math.min(3, q.st + 1)][0]);
-      for (const q of puffs) disc(ctx, q.x, q.y, q.r, FIRE_STAGES[q.st][0]);
-      for (const q of puffs) if (q.r > 2) disc(ctx, q.x - 1, q.y - 1, q.r - 2, FIRE_STAGES[q.st][1]);
-      for (const q of puffs) if (q.r > 4) disc(ctx, q.x - 2, q.y - 2, q.r - 4, FIRE_STAGES[q.st][2]);
+      const fire = puffs.filter((q) => q.st < 4);
+      const smoke = puffs.filter((q) => q.st >= 4);
+      // Smoke: soft translucent grey puffs that rise and thin out.
+      if (smoke.length) {
+        withAlpha(ctx, Math.max(0.2, 0.75 - (age - 14) * 0.08), () => {
+          for (const q of smoke) disc(ctx, q.x, q.y, Math.max(1, q.r - 1), '#3a3648');
+          for (const q of smoke) if (q.r > 3) disc(ctx, q.x - 1, q.y - 1, q.r - 3, '#5a5670');
+        });
+      }
+      for (const q of fire) disc(ctx, q.x, q.y, q.r + 1, FIRE_STAGES[Math.min(3, q.st + 1)][0]);
+      for (const q of fire) disc(ctx, q.x, q.y, q.r, FIRE_STAGES[q.st][0]);
+      for (const q of fire) if (q.r > 2) disc(ctx, q.x - 1, q.y - 1, q.r - 2, FIRE_STAGES[q.st][1]);
+      for (const q of fire) if (q.r > 4) disc(ctx, q.x - 2, q.y - 2, q.r - 4, FIRE_STAGES[q.st][2]);
     },
   },
 
@@ -642,7 +668,6 @@ export const FX_SPRITES = {
     duration: 34,
     draw(ctx, fx, x, y, age) {
       const seed = seedOf(fx);
-      const k = age / 34;
       if (age < 14) ellipseRing(ctx, x, y - 2, 6 + age, 2 + (age >> 2), age < 8 ? '#b8ffc8' : '#5fe39a');
       for (let j = 0; j < 2; j++) {
         const k = age - j * 8;
@@ -663,7 +688,6 @@ export const FX_SPRITES = {
           px(ctx, sx, sy, '#ffffff');
         } else sparkle(ctx, sx, sy, a < 10 ? 1 : 0, c, '#ffffff');
       }
-      void k;
     },
   },
 
@@ -708,10 +732,12 @@ export const FX_SPRITES = {
     draw(ctx, fx, x, y, age) {
       const [c0, c1] = NAVI_COLORS[fx.navi] ?? ['#e8fbff', '#5fd8ff'];
       const w = age < 4 ? 2 + age * 3 : Math.max(0, 14 - (age - 4));
+      // The beam reaches past the top of the screen from any row (floor y <= 140), without assuming y = 0.
+      const top = y - 150;
       if (w > 0) {
-        withAlpha(ctx, 0.7, () => rect(ctx, x - w, 0, w * 2, y, c1));
-        rect(ctx, x - Math.max(1, w >> 1), 0, Math.max(2, w), y, c0);
-        rect(ctx, x - 1, 0, 2, y, '#ffffff');
+        withAlpha(ctx, 0.7, () => rect(ctx, x - w, top, w * 2, y - top, c1));
+        rect(ctx, x - Math.max(1, w >> 1), top, Math.max(2, w), y - top, c0);
+        rect(ctx, x - 1, top, 2, y - top, '#ffffff');
       }
       if (age < 18) {
         ellipseRing(ctx, x, y - 1, 8 + age, 3 + (age >> 2), c1);
@@ -810,9 +836,9 @@ export const FX_SPRITES = {
       const seed = seedOf(fx);
       const r = age < 4 ? 4 + age * 3 : Math.max(0, 16 - (age - 4));
       if (r > 0) {
-        disc(ctx, cx(x), cy, r + 1, '#ff3ae0');
-        disc(ctx, cx(x), cy, r, '#1a0828');
-        if (r > 4) disc(ctx, cx(x) - 2, cy - 2, r - 4, '#3a1258');
+        disc(ctx, x, cy, r + 1, '#ff3ae0');
+        disc(ctx, x, cy, r, '#1a0828');
+        if (r > 4) disc(ctx, x - 2, cy - 2, r - 4, '#3a1258');
       }
       for (let i = 0; i < 8; i++) {
         const a = hash(seed, i) * Math.PI * 2;
@@ -828,48 +854,17 @@ export const FX_SPRITES = {
   // Full-screen white flash (the battle view also flashes; this adds a quick bright pop and streaks).
   flash: {
     duration: 24,
-    draw(ctx, fx, x, y, age) {
-      const a = Math.max(0, 1 - age / 24);
-      withAlpha(ctx, a * a * 0.7, () => rect(ctx, 0, 0, SCREEN_W, SCREEN_H, '#ffffff'));
-      if (age < 10) {
-        for (let i = 0; i < 5; i++) {
-          const yy = 20 + ((i * 37 + age * 13) % 120);
-          withAlpha(ctx, 0.6 * (1 - age / 10), () => rect(ctx, 0, yy, SCREEN_W, 1, '#fffbe0'));
-        }
-      }
-    },
+    draw: (ctx, fx, x, y, age) => screenFx(ctx, fx, x, y, () => drawFlash(ctx, age)),
   },
-
   // Stage change: a shimmer sweeps across the whole field, tinted by the new floor.
   stage: {
     duration: 30,
-    draw(ctx, fx, x, y, age) {
-      const tint = STAGE_TINT[fx.panel] ?? '#ffffff';
-      const sweep = (age / 22) * 8 - 1; // column of the sweep front
-      for (let r = 0; r < 3; r++) {
-        for (let c = 0; c < 6; c++) {
-          const dist = sweep - c - r * 0.5;
-          if (dist < 0 || dist > 2.5) continue;
-          const a = dist < 0.6 ? dist / 0.6 : 1 - (dist - 0.6) / 1.9;
-          const px0 = c * PANEL_W;
-          const py0 = FIELD_Y + r * PANEL_H;
-          withAlpha(ctx, 0.55 * a, () => rect(ctx, px0 + 1, py0 + 1, PANEL_W - 2, 17, tint));
-          if (dist < 0.8) rect(ctx, px0 + 1, py0 + 1, PANEL_W - 2, 1, '#ffffff');
-        }
-      }
-      if (age < 26) {
-        for (let i = 0; i < 6; i++) {
-          const sx = ((i * 41 + age * 9) % SCREEN_W) | 0;
-          const sy = FIELD_Y + ((i * 23 + age * 3) % 70);
-          sparkle(ctx, sx, sy, (age + i) % 4 < 2 ? 1 : 2, tint, '#ffffff');
-        }
-      }
-    },
+    draw: (ctx, fx, x, y, age) => screenFx(ctx, fx, x, y, () => drawStage(ctx, fx, age)),
   },
 
   // Wind / Fan: gust streaks cross the field in dir.
-  wind: { duration: 30, draw: (ctx, fx, x, y, age) => gust(ctx, fx, age, false) },
-  fan: { duration: 30, draw: (ctx, fx, x, y, age) => gust(ctx, fx, age, true) },
+  wind: { duration: 30, draw: (ctx, fx, x, y, age) => screenFx(ctx, fx, x, y, () => gust(ctx, fx, age, false)) },
+  fan: { duration: 30, draw: (ctx, fx, x, y, age) => screenFx(ctx, fx, x, y, () => gust(ctx, fx, age, true)) },
 
   // Geyser: a column of water erupts from the panel.
   geyser: {
@@ -918,8 +913,38 @@ export const FX_SPRITES = {
   },
 };
 
-function cx(x) {
-  return x;
+function drawStage(ctx, fx, age) {
+  const tint = STAGE_TINT[fx.panel] ?? '#ffffff';
+  const sweep = (age / 22) * 8 - 1; // column of the sweep front
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 6; c++) {
+      const dist = sweep - c - r * 0.5;
+      if (dist < 0 || dist > 2.5) continue;
+      const a = dist < 0.6 ? dist / 0.6 : 1 - (dist - 0.6) / 1.9;
+      const px0 = c * PANEL_W;
+      const py0 = FIELD_Y + r * PANEL_H;
+      withAlpha(ctx, 0.55 * a, () => rect(ctx, px0 + 1, py0 + 1, PANEL_W - 2, 17, tint));
+      if (dist < 0.8) rect(ctx, px0 + 1, py0 + 1, PANEL_W - 2, 1, '#ffffff');
+    }
+  }
+  if (age < 26) {
+    for (let i = 0; i < 6; i++) {
+      const sx = ((i * 41 + age * 9) % SCREEN_W) | 0;
+      const sy = FIELD_Y + ((i * 23 + age * 3) % 70);
+      sparkle(ctx, sx, sy, (age + i) % 4 < 2 ? 1 : 2, tint, '#ffffff');
+    }
+  }
+}
+
+function drawFlash(ctx, age) {
+  const a = Math.max(0, 1 - age / 24);
+  withAlpha(ctx, a * a * 0.7, () => rect(ctx, 0, 0, SCREEN_W, SCREEN_H, '#ffffff'));
+  if (age < 10) {
+    for (let i = 0; i < 5; i++) {
+      const yy = 20 + ((i * 37 + age * 13) % 120);
+      withAlpha(ctx, 0.6 * (1 - age / 10), () => rect(ctx, 0, yy, SCREEN_W, 1, '#fffbe0'));
+    }
+  }
 }
 
 function starPoints(x, y, r1, r2, n, rot) {

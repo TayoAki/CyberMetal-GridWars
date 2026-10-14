@@ -3,10 +3,10 @@
 // def.element; Mega, Giga and Program Advance chips get their own frames. All drawn in code.
 import { rect, frame, px, line, ellipse, disc, ring, poly, shade, mix, sprite } from './pixel.js';
 import { drawText } from './font.js';
-import { OUTLINE, ramp, withAlpha, sparkle, bolt, flameTongue, ellipseRing, crescent, streak } from './sprites/core_util.js';
+import { OUTLINE, ramp, withAlpha, sparkle, bolt, flameTongue, ellipseRing, streak } from './sprites/core_util.js';
 import { PLAYER_SPRITE } from './sprites/core_player.js';
 import { ROCKCUBE_SPRITE, BLACKBOMB_SPRITE, TIMEBOMB_SPRITE, DOOMBOMB_SPRITE, MENDER_SPRITE, CRUSHER_SPRITE, drawHeart } from './sprites/core_objects.js';
-import { SPELL_SPRITES } from './sprites/core_spells.js';
+import { SPELL_SPRITES, FIST_SIDE, FIST_PAL, RAT_SIDE, RAT_PAL } from './sprites/core_spells.js';
 
 // ---------------------------------------------------------------- palettes
 
@@ -377,7 +377,6 @@ function klassFrame(ctx, x, y, def, t) {
       rect(ctx, cx - 1, cy - 1, 3, 3, OUTLINE);
       px(ctx, cx, cy, c);
     }
-    drawText(ctx, 'PA', x + AW - 13, y + AH - 9, '#ffd23f', { mini: true, outline: OUTLINE });
   } else if (k === 'mega') {
     frame(ctx, x, y, AW, AH, '#5ad8ff');
     frame(ctx, x + 1, y + 1, AW - 2, AH - 2, '#1a5a8a');
@@ -492,8 +491,14 @@ function scene(ctx, def, x, y, t) {
     case 'punch':
     case 'pa_rushpunch': {
       const n = b === 'pa_rushpunch' ? 3 : 1;
-      for (let i = 0; i < n; i++) SPELL_SPRITES.fist.draw(ctx, { t: t + i, dir: 1 }, x + 30 - i * 6, y + 44 - i * 9 + (n > 1 ? 9 : 0), t);
-      if (k === 'gutimpct' || b === 'pa_rushpunch') sparkle(ctx, x + 46, y + 21, 4, '#fff27a', '#ffffff', true);
+      for (let i = 0; i < n; i++) {
+        const fx0 = x + 20 - i * 8;
+        const fy0 = y + (n > 1 ? 4 + i * 13 : 15);
+        for (let j = 0; j < 4; j++) rect(ctx, fx0 - 4 - j * 3, fy0 + 7 + (j % 2), 3, 3 - (j >> 1), j < 2 ? '#fff27a' : '#ff9a3a');
+        drawScaled(ctx, 'fist', FIST_SIDE, FIST_PAL, fx0, fy0, 2);
+      }
+      if (k === 'gutimpct' || b === 'pa_rushpunch') sparkle(ctx, x + 48, y + 22, 4, '#fff27a', '#ffffff', true);
+      if (k === 'gutstrgt' || k === 'rushstrght') for (let i = 0; i < 3; i++) rect(ctx, x + 2, y + 18 + i * 6, 10, 1, '#ffffff');
       break;
     }
     case 'dash':
@@ -509,10 +514,11 @@ function scene(ctx, def, x, y, t) {
       miniPanels(ctx, x + 1, y + 37, 3);
       if (b === 'pa_megarat') SPELL_SPRITES.megarat.draw(ctx, { t, dir: 1 }, cx, y + 41, t);
       else {
-        SPELL_SPRITES.ratton.draw(ctx, { t, dir: 1 }, x + 16, y + 41, t);
-        for (let i = 0; i < 4; i++) rect(ctx, x + 26 + i * 5, y + 38, 2, 1, '#ffd23f');
-        rect(ctx, x + 45, y + 22, 1, 14, '#ffd23f');
-        poly(ctx, [[x + 42, y + 24], [x + 45, y + 19], [x + 48, y + 24]], '#ffd23f');
+        drawScaled(ctx, `rat${(t >> 3) % 2}`, RAT_SIDE[(t >> 3) % 2], RAT_PAL, x + 2, y + 21, 2);
+        sparkle(ctx, x + 16, y + 18, (t >> 2) % 2 ? 2 : 1, '#ffd23f', '#ffffff');
+        for (let i = 0; i < 3; i++) rect(ctx, x + 34 + i * 4, y + 38, 2, 1, '#ffd23f');
+        rect(ctx, x + 47, y + 16, 1, 22, '#ffd23f');
+        poly(ctx, [[x + 44, y + 18], [x + 47, y + 13], [x + 50, y + 18]], '#ffd23f');
       }
       break;
     }
@@ -547,10 +553,25 @@ function scene(ctx, def, x, y, t) {
       miniPanels(ctx, x + 1, y + 39, 3);
       drawLances(ctx, cx, y + 42, t);
       break;
-    case 'boomer':
+    case 'boomer': {
       ellipseRing(ctx, cx, y + 26, 22, 14, '#bdf08a', Math.PI * 0.2, Math.PI * 1.9);
-      SPELL_SPRITES.boomer.draw(ctx, { t }, x + 44, y + 30, t);
+      const bx = x + 40;
+      const by = y + 24;
+      const a = t * 0.12;
+      for (const off of [0, 1.9]) {
+        const ax = bx + Math.cos(a + off) * 13;
+        const ay = by + Math.sin(a + off) * 10;
+        streak(ctx, bx, by, ax, ay, 4, OUTLINE);
+        streak(ctx, bx, by, ax, ay, 3, '#c89050');
+        line(ctx, bx, by, ax, ay, '#e8c088');
+        disc(ctx, ax, ay, 3, OUTLINE);
+        disc(ctx, ax, ay, 2, '#3fbe3a');
+        px(ctx, ax - 1, ay - 1, '#d8f0a0');
+      }
+      disc(ctx, bx, by, 3, '#8a5a2a');
+      px(ctx, bx, by, '#e8c088');
       break;
+    }
     case 'meteors':
       miniPanels(ctx, x + 1, y + 39, 3, 'blue', 18, ['cracked', '', 'cracked']);
       for (let i = 0; i < 3; i++) SPELL_SPRITES.meteor.draw(ctx, { t: t + i * 5, data: { progress: 0.45 + i * 0.12 } }, x + 14 + i * 14 + 20, y + 74 - i * 4, t);
@@ -570,11 +591,18 @@ function scene(ctx, def, x, y, t) {
       miniPanels(ctx, x + 1, y + 39, 3);
       ent(ctx, DOOMBOMB_SPRITE, 'doombomb', cx, y + 42, t, { data: { fuse: 150 - ((t * 2) % 150), fuseMax: 150 } });
       break;
-    case 'mine':
+    case 'mine': {
       miniPanels(ctx, x + 1, y + 37, 3);
-      SPELL_SPRITES.mine.draw(ctx, { data: {} }, cx, y + 42, t);
-      ring(ctx, cx, y + 39, 6 + ((t >> 2) % 4), '#ff6a5a');
+      const my = y + 38;
+      ellipseRing(ctx, cx, my, 15 + ((t >> 2) % 4), 5 + ((t >> 3) % 2), '#ff6a5a');
+      ellipse(ctx, cx, my, 12, 5, OUTLINE);
+      ellipse(ctx, cx, my - 1, 11, 4, '#4a5272');
+      ellipse(ctx, cx, my - 2, 8, 3, '#7a86a6');
+      ellipse(ctx, cx - 2, my - 3, 3, 1, '#c8d0e0');
+      rect(ctx, cx - 2, my - 7, 5, 4, OUTLINE);
+      rect(ctx, cx - 1, my - 6, 3, 2, (t >> 3) % 2 ? '#ff4a4a' : '#8a1a1a');
       break;
+    }
     case 'geyser':
       miniPanels(ctx, x + 1, y + 39, 3);
       drawGeyserArt(ctx, cx, y + 43, t);
@@ -946,6 +974,37 @@ function drawNaviArt(ctx, def, name, x, y, t) {
   if (name === 'feralis') for (let i = 0; i < 3; i++) line(ctx, x + 40 + i * 4, y + 30, x + 46 + i * 4, y + 42, '#ffffff');
   if (name === 'ironclad') rect(ctx, x + 44, y + 36, 8, 8, '#cfd6df');
   sparkle(ctx, x + 50, y + 6, (t >> 3) % 2 ? 2 : 1, ac, '#ffffff');
+}
+
+// Pixel-string art drawn at an integer scale (chip pictures), cached per key and scale.
+const scaledCache = new Map();
+function drawScaled(ctx, key, rows, palette, x, y, s) {
+  const id = `${key}:${s}`;
+  let c = scaledCache.get(id);
+  if (!c) {
+    const w = rows[0].length;
+    const h = rows.length;
+    const cw = (w + 2) * s;
+    const chh = (h + 2) * s;
+    const cv = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(cw, chh) : Object.assign(document.createElement('canvas'), { width: cw, height: chh });
+    const g = cv.getContext('2d');
+    const solid = (cx, cy) => {
+      const ch = rows[cy]?.[cx];
+      return ch !== undefined && ch !== '.' && palette[ch] !== undefined;
+    };
+    g.fillStyle = OUTLINE;
+    for (let cy = -1; cy <= h; cy++) for (let cx = -1; cx <= w; cx++) if (!solid(cx, cy) && (solid(cx - 1, cy) || solid(cx + 1, cy) || solid(cx, cy - 1) || solid(cx, cy + 1))) g.fillRect((cx + 1) * s, (cy + 1) * s, s, s);
+    for (let cy = 0; cy < h; cy++) {
+      for (let cx = 0; cx < w; cx++) {
+        if (!solid(cx, cy)) continue;
+        g.fillStyle = palette[rows[cy][cx]];
+        g.fillRect((cx + 1) * s, (cy + 1) * s, s, s);
+      }
+    }
+    c = cv;
+    scaledCache.set(id, c);
+  }
+  ctx.drawImage(c, Math.round(x) - s, Math.round(y) - s);
 }
 
 const scaledFaceCache = new Map();

@@ -104,10 +104,10 @@ function* petalStorm(b, e, s) {
   e.data.warn = warning(b, e, 'petalwarn', cells, s.petalWarn);
   yield* wait(s.petalWarn);
   e.data.warn = null;
-  const z = zone(b, e, { damage: s.petal, element: W, flinch: false }, cells, s.petalFrames, { type: 'petals', rehit: 10 });
-  z.z = 1; // the storm engulfs the row
-  z.data.level = e.level;
-  z.data.frames = s.petalFrames;
+  const storm = zone(b, e, { damage: s.petal, element: W, flinch: false }, cells, s.petalFrames, { type: 'petals', rehit: 10 });
+  storm.z = 1; // the storm engulfs the row (z is a draw-order hint only)
+  storm.data.level = e.level;
+  storm.data.frames = s.petalFrames;
   yield* wait(s.petalFrames);
   yield* pose(e, 'idle', s.recover);
 }

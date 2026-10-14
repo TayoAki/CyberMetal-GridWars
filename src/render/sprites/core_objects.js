@@ -2,7 +2,7 @@
 // player's panel during Navi chips (Mender, Crusher).
 import { sprite, recolor } from '../pixel.js';
 import { drawText } from '../font.js';
-import { OUTLINE, compose, solidPalette, withAlpha, sparkle, flameTongue, hash, rect, px, line, ellipse, disc, ring, poly, shade } from './core_util.js';
+import { OUTLINE, compose, solidPalette, withAlpha, sparkle, flameTongue, hash, rect, px, line, disc, ring, poly } from './core_util.js';
 
 // ---------------------------------------------------------------- RockCube: a cracked data-cube rock
 
@@ -144,7 +144,6 @@ function fuseSpark(ctx, x, y, t, big = false) {
 export const BLACKBOMB_SPRITE = {
   draw(ctx, e, x, y, t) {
     const bob = (t >> 4) % 2;
-    const w = BOMB_BODY[0].length;
     const h = BOMB_BODY.length;
     const top = y - h - bob;
     // Fuse: a short curl from the cap to the spark.
@@ -156,7 +155,6 @@ export const BLACKBOMB_SPRITE = {
     const glow = (t >> 3) % 2;
     flameTongue(ctx, Math.round(x - 1), top + 14, 3, 7 + glow, t, 1, ['#fff6c8', '#ffd23f', '#ff7a1f', glow ? '#c42e18' : '#8a1e10']);
     fuseSpark(ctx, fx + 4, top - 5, t);
-    void w;
   },
 };
 
@@ -515,16 +513,17 @@ crusherPose('slam', { arm: ARM, armX: 1, armY: -15, fistX: 11, fistY: -12, crouc
 export const CRUSHER_SPRITE = {
   draw(ctx, e, x, y, t) {
     const k = e.animT ?? 0;
-    const pose = k < 8 ? CRUSHER_POSES.stand : k < 16 ? CRUSHER_POSES.raise : k < 34 ? CRUSHER_POSES.slam : CRUSHER_POSES.stand;
+    // The chip strikes at frame 14 of the summon: wind up before it, slam on it.
+    const pose = k < 6 ? CRUSHER_POSES.stand : k < 14 ? CRUSHER_POSES.raise : k < 34 ? CRUSHER_POSES.slam : CRUSHER_POSES.stand;
     const flip = (e.facing ?? 1) < 0;
-    const shake = pose === CRUSHER_POSES.slam && k < 22 ? ((t >> 1) % 2 ? 1 : -1) : 0;
+    const shake = pose === CRUSHER_POSES.slam && k < 20 ? ((t >> 1) % 2 ? 1 : -1) : 0;
     materialise(ctx, pose, CRUSHER_PAL, x + shake, y, k, flip);
     if (k < 10) return;
     if (pose === CRUSHER_POSES.raise) {
       sparkle(ctx, x - 8, y - 44, (t >> 1) % 2 ? 2 : 1, '#ffd07a', '#ffffff');
       sparkle(ctx, x + 8, y - 44, (t >> 1) % 2 ? 1 : 2, '#ffd07a', '#ffffff');
-    } else if (pose === CRUSHER_POSES.slam && k < 24) {
-      const kk = k - 16;
+    } else if (pose === CRUSHER_POSES.slam && k < 22) {
+      const kk = k - 14;
       for (const s of [-1, 1]) {
         const ix = x + s * 15;
         rect(ctx, ix - 4 - kk, y - 1, 9 + kk * 2, 1, kk < 3 ? '#ffffff' : '#ffd07a');
@@ -535,4 +534,3 @@ export const CRUSHER_SPRITE = {
   },
 };
 
-export { shade };

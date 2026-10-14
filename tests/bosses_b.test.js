@@ -75,11 +75,16 @@ test('higher versions hit harder and add moves', () => {
     const fam = ENEMIES[type];
     for (let i = 1; i < 4; i++) assert.ok(fam.levels[i].attack > fam.levels[i - 1].attack, `${type} attack rises`);
   }
+  // Moves used over a few seeds (so a change in how much rng other code consumes can't flake this).
   const used = (type, level) => {
-    const b = duel(type, level, { seed: 21 });
-    toFight(b);
-    run(b, 4000);
-    return enemy(b, type).data.moves;
+    const all = {};
+    for (const seed of [21, 22, 23]) {
+      const b = duel(type, level, { seed });
+      toFight(b);
+      run(b, 4000);
+      for (const [k, n] of Object.entries(enemy(b, type).data.moves)) all[k] = (all[k] ?? 0) + n;
+    }
+    return all;
   };
   assert.ok(used('ironclad', 3).quake > 0);
   assert.equal(used('ironclad', 1).quake, undefined);

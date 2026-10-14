@@ -107,9 +107,8 @@ export function parseMML(src, { drum = false, inst = null } = {}) {
     } else if (drum) {
       if (c === '(') {
         const drums = [];
-        while (i < s.length && s[i] !== ')') if (s[i] !== ' ') drums.push(s[i++]);
-        else i++;
-        i++;
+        for (; i < s.length && s[i] !== ')'; i++) if (s[i] !== ' ') drums.push(s[i]);
+        i++; // skip ')'
         push({ tick, ticks: length(len), drums, vol });
       } else if (/[a-z]/.test(c)) push({ tick, ticks: length(len), drums: [c], vol });
       else throw new Error(`unexpected '${c}' at ${i - 1} in drum MML`);

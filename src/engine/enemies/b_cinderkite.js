@@ -4,8 +4,9 @@ import { COLS, ROWS, ELEMENT, PANEL } from '../constants.js';
 // Cinderkite: an ember kite riding the heat over its area. It drifts from panel to panel, then flares
 // (counterable) and calls a shower of meteors onto the player's area: the first one aimed at the
 // player's panel, the rest at random panels, each telegraphed by a target mark before it lands and
-// cracks the floor. Higher levels call more meteors, aim more of them and drop them faster. Only one
-// kite calls meteors at a time. Mirrors BN3's Metrid family (HP 150/200/250/300, Fire).
+// bursts (the Ω kite's aimed meteors also crack the floor). Higher levels call more meteors, aim more of
+// them and drop them faster. Only one kite calls meteors at a time. Mirrors BN3's Metrid family
+// (HP 150/200/250/300, Fire).
 
 export const CINDERKITE = {
   type: 'cinderkite',
@@ -47,11 +48,12 @@ export const CINDERKITE = {
       for (let i = 0; i < s.meteors; i++) {
         const p = b.player;
         let cell = null;
-        if (i % every === 0 && !b.field.isHole(p.col, p.row)) cell = [p.col, p.row];
+        const aimed = i % every === 0 && !b.field.isHole(p.col, p.row);
+        if (aimed) cell = [p.col, p.row];
         else cell = randomTarget(b, e, used);
         if (cell) {
           used.add(cell[0] + cell[1] * COLS);
-          meteor(b, e, hit, cell[0], cell[1], s.delay);
+          meteor(b, e, hit, cell[0], cell[1], s.delay, aimed && e.level >= 4);
         }
         yield* wait(s.gap);
       }
@@ -68,9 +70,11 @@ export const CINDERKITE = {
 
 // One meteor: a target mark on the floor (a no-hit marker, drawn under bodies) and the telegraphed drop
 // itself. The drop keeps z at the meteor's height while it falls so the view draws it above bodies.
-function meteor(b, e, hit, c, r, delay) {
+// Only the Ω kite's aimed meteors crack the floor: with every meteor cracking, one kite turned the whole
+// player area into holes within a minute and left nowhere to dodge to (balance sweep, void2).
+function meteor(b, e, hit, c, r, delay, crack) {
   marker(b, e, 'kitemark', c, r, delay);
-  const m = drop(b, e, hit, c, r, { delay, type: 'kitemeteor', crack: true, landFx: e.level >= 4 ? 'kiteburstv' : 'kiteburst' });
+  const m = drop(b, e, hit, c, r, { delay, type: 'kitemeteor', crack, landFx: e.level >= 4 ? 'kiteburstv' : 'kiteburst' });
   const inner = m.script;
   m.z = FALL_HEIGHT;
   m.script = (function* () {

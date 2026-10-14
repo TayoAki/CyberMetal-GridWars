@@ -91,10 +91,10 @@ export const BOSS = {
   echo: { beats: 0.5, fb: 0.3, mix: 0.2, lp: 2200 },
   channels: [
     { name: 'lead', inst: 'leadsq', vol: 1.05, pan: -0.08, echo: 0.5, intro: 'r1 | o4 r2 g8 a-8 b8 > d8', loop: bars(A, B, C) },
-    { name: 'harm', inst: 'stab', vol: 0.75, pan: 0.3, intro: '@arp o4 {c e- g}1 | {< b > d f g}1', loop: harm },
+    { name: 'harm', inst: 'stab', vol: 0.85, pan: 0.3, intro: '@arp o4 {c e- g}1 | {< b > d f g}1', loop: harm },
     { name: 'bass', inst: 'bass', vol: 1, intro: bars(N('c2', 1), N('c2', 4) + N('d-2', 4) + N('d2', 4) + N('g1', 4)), loop: bass },
-    { name: 'kit', kind: 'drum', vol: 0.9, intro: bars('k8 r8 r4 k8 r8 r4', 't16 t16 t16 t16 m16 m16 m16 m16 u16 u16 u16 u16 n16 n16 n16 n16'), loop: kit },
-    { name: 'hat', kind: 'drum', vol: 0.6, pan: 0.15, intro: 'v12 c2 r2 | r2 r4 z4', loop: hat },
+    { name: 'kit', kind: 'drum', vol: 0.75, intro: bars('k8 r8 r4 k8 r8 r4', 't16 t16 t16 t16 m16 m16 m16 m16 u16 u16 u16 u16 n16 n16 n16 n16'), loop: kit },
+    { name: 'hat', kind: 'drum', vol: 0.7, pan: 0.15, intro: 'v12 c2 r2 | r2 r4 z4', loop: hat },
   ],
 };
 

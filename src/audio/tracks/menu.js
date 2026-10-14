@@ -64,6 +64,6 @@ export const MENU = {
     { name: 'keys', inst: 'keys', vol: 0.6, pan: 0.35, echo: 0.2, loop: harm },
     { name: 'bass', inst: 'sub', vol: 0.9, loop: bass },
     { name: 'kit', kind: 'drum', vol: 0.7, loop: bars(rep(K, 7), K2, rep(K, 7), K2) },
-    { name: 'hat', kind: 'drum', vol: 0.5, pan: 0.2, loop: bars(rep(H, 7), H2, rep(H, 7), H2) },
+    { name: 'hat', kind: 'drum', vol: 0.75, pan: 0.2, loop: bars(rep(H, 7), H2, rep(H, 7), H2) },
   ],
 };

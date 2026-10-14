@@ -7,7 +7,7 @@
 // into a single 64x56 sprite (cached) and drawn with the 'feet' anchor, so flipping mirrors cleanly.
 
 import { sprite, recolor } from '../pixel.js';
-import { OUTLINE, compose, solidPalette, withAlpha, sparkle, flameTongue, ellipseRing, hash, rect, px, line, ellipse, disc, ring, poly } from './core_util.js';
+import { OUTLINE, compose, solidPalette, withAlpha, sparkle, flameTongue, ellipseRing, rect, px, line, disc, ring, poly } from './core_util.js';
 
 const CW = 64;
 const CH = 56;
@@ -602,8 +602,8 @@ function drawWarpIn(ctx, rows, x, y, flip, k, t, pal) {
   }
   // Light column.
   const cw = 4 - k;
-  withAlpha(ctx, 0.85, () => rect(ctx, x - cw, top - 4, cw * 2, h + 4, '#bff4ff'));
-  rect(ctx, x - 1, top - 6, 2, h + 6, '#ffffff');
+  withAlpha(ctx, 0.6, () => rect(ctx, x - cw, top - 2, cw * 2, h + 2, '#bff4ff'));
+  if (k < 2) rect(ctx, x - 1, top - 4, 2, h + 4, '#ffffff');
   // Body slices: every other row band, offset sideways, filling in as k grows.
   ctx.save();
   ctx.beginPath();
@@ -788,4 +788,3 @@ function drawBurnerFlames(ctx, x, y, k, t, behind) {
 
 // Exported for previews/tests: the composed pose rows.
 export const PLAYER_POSES = P;
-export { hash };

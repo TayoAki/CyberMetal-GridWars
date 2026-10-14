@@ -92,6 +92,6 @@ export const FINAL = {
       intro: bars('k2 t4 t4', 'k2 t4 m4', 'k2 t8 t8 m8 m8', 'n16 n16 n16 n16 n16 n16 n16 n16 t16 t16 m16 m16 u16 u16 (kn)8'),
       loop: kit,
     },
-    { name: 'hat', kind: 'drum', vol: 0.55, pan: 0.15, intro: 'v12 c1 | r1 | v12 c1 | r2 r4 z4', loop: hat },
+    { name: 'hat', kind: 'drum', vol: 0.7, pan: 0.15, intro: 'v12 c1 | r1 | v12 c1 | r2 r4 z4', loop: hat },
   ],
 };

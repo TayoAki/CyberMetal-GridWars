@@ -111,7 +111,7 @@ export const BATTLE = {
     {
       name: 'harm',
       inst: 'stab',
-      vol: 0.75,
+      vol: 0.85,
       pan: 0.3,
       intro: bars('@stab ' + stabs('e g b'), '@pluck12 ' + arp16(['b3', 'd+4', 'f+4', 'a4'])),
       loop: harm,
@@ -124,6 +124,6 @@ export const BATTLE = {
       loop: bass,
     },
     { name: 'kit', kind: 'drum', vol: 0.85, intro: bars('b8 r8 r8 b8 r8 b8 s8 r8', ROLL), loop: kit },
-    { name: 'hat', kind: 'drum', vol: 0.6, pan: 0.15, intro: 'r1 | r2 r4 v12 z4', loop: hat },
+    { name: 'hat', kind: 'drum', vol: 0.7, pan: 0.15, intro: 'r1 | r2 r4 v12 z4', loop: hat },
   ],
 };

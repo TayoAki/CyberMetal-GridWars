@@ -157,7 +157,7 @@ test('Watcher beam is instant down the row; the Ω beam also paralyses', () => {
   assert.equal(b3.player.stunTimer, 0);
 });
 
-test('Cinderkite volleys: L1 calls 3 telegraphed meteors (first on the player), Ω calls 7; they crack the floor', () => {
+test('Cinderkite volleys: L1 calls 3 telegraphed meteors (first on the player), Ω calls 7; only Ω cracks the floor', () => {
   for (const [level, count] of [[1, 3], [2, 4], [3, 5], [4, 7]]) {
     const b = makeBattle({ enemies: [{ type: 'cinderkite', level, col: 4, row: 1 }], seed: 8, player: TOUGH });
     toFight(b);
@@ -184,7 +184,8 @@ test('Cinderkite volleys: L1 calls 3 telegraphed meteors (first on the player), 
     assert.equal(new Set(strays.map(([c, r]) => c + r * COLS)).size, strays.length, 'random meteors pick distinct panels');
     assert.equal(cells.length - strays.length, [1, 1, 2, 3][level - 1], 'aimed meteors per volley');
     const cracked = cells.filter(([c, r]) => [PANEL.CRACKED, PANEL.BROKEN].includes(b.field.typeAt(c, r)));
-    assert.ok(cracked.length >= 1, 'meteors crack the floor');
+    if (level === 4) assert.ok(cracked.length >= 1, 'Ω meteors crack the floor');
+    else assert.equal(cracked.length, 0, 'L1-L3 meteors leave the floor whole');
     assert.ok(b.events.some((ev) => ev.fx === (level === 4 ? 'kiteburstv' : 'kiteburst')));
   }
 });

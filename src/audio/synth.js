@@ -123,6 +123,9 @@ export function curve(param, spec, t, end, mul = 1) {
 /** Percussive envelope: linear attack, hold, exponential decay to -60 dB. Returns the end time. */
 export function percEnv(param, t, v, a, h, d) {
   const end = t + a + h + d;
+  // A new GainNode defaults to 1. A source started at a sub-sample time can emit its first sample one
+  // frame before setValueAtTime(0, t) applies, which would pass at full gain: a one-sample click.
+  param.value = 0;
   param.setValueAtTime(0, t);
   if (v <= 0) return end;
   param.linearRampToValueAtTime(v, t + a);
@@ -138,6 +141,7 @@ export function percEnv(param, t, v, a, h, d) {
  */
 export function adsrEnv(param, t, gate, v, a, d, s, r) {
   const sus = Math.max(v * s, v * 0.001, 1e-5);
+  param.value = 0; // see percEnv
   param.setValueAtTime(0, t);
   const off = t + Math.max(gate, 0.004);
   if (off <= t + a) {
@@ -180,6 +184,7 @@ function lfo(ctx, param, rate, depth, t, end, delay = 0) {
   l.frequency.value = rate;
   const g = ctx.createGain();
   if (delay > 0) {
+    g.gain.value = 0;
     g.gain.setValueAtTime(0, t);
     g.gain.linearRampToValueAtTime(depth, t + delay);
   } else g.gain.value = depth;

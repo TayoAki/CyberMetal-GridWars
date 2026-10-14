@@ -79,9 +79,9 @@ export const TITLE = {
   echo: { beats: 0.75, fb: 0.3, mix: 0.24, lp: 2600 },
   channels: [
     { name: 'lead', inst: 'hero', vol: 1, echo: 0.5, intro: 'r1 | o4 r2 a8 b8 > c+8 < a8', loop: bars(A, B, C) },
-    { name: 'harm', inst: 'pluck', vol: 0.75, pan: 0.3, intro: '@arp o4 {d f+ a}1 | {c+ e a}1', loop: harm },
+    { name: 'harm', inst: 'pluck', vol: 0.85, pan: 0.3, intro: '@arp o4 {d f+ a}1 | {c+ e a}1', loop: harm },
     { name: 'bass', inst: 'bass', vol: 1, intro: bars(N('d2', 1), N('a1', 1)), loop: bass },
     { name: 'kit', kind: 'drum', vol: 0.85, intro: bars('b4 r4 b4 r4', ROLL), loop: kit },
-    { name: 'hat', kind: 'drum', vol: 0.55, pan: 0.15, intro: 'v12 c1 | r2 r4 z4', loop: hat },
+    { name: 'hat', kind: 'drum', vol: 0.7, pan: 0.15, intro: 'v12 c1 | r2 r4 z4', loop: hat },
   ],
 };

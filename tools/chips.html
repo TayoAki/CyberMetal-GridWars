@@ -152,9 +152,14 @@ if (mode === 'chips') {
           const ev = { fx: name, col: 1, row: 1, dir: 1, toCol: 4, hit: true, shape: opt ?? 'wide', element: q.get('element') ?? 'null', navi: opt ?? 'mender', panel: opt ?? 'lava' };
           if (['explosion', 'burst', 'bubble', 'flame', 'ice', 'punch', 'quake', 'guard', 'barrierup', 'barrierhit', 'barrierbreak', 'aurablock', 'aurabreak', 'stun', 'panelfall', 'lance', 'claw', 'darkburst', 'geyser', 'rock'].includes(name)) ev.col = 4;
           if (name === 'fan') ev.dir = -1;
+          // Full-screen effects arrive without a panel; the battle view then uses (2.5, 1).
+          if (['flash', 'stage', 'wind', 'fan'].includes(name)) {
+            delete ev.col;
+            delete ev.row;
+          }
           const dur = fxDuration(name);
           if (age < dur) {
-            const p = floorPoint(ev.col, ev.row);
+            const p = floorPoint(ev.col ?? 2.5, ev.row ?? 1);
             drawFxSprite(ctx, ev, p.x, p.y, age);
           } else drawText(ctx, `done (${dur})`, 4, 4, '#ff9a9a', { mini: true });
         } else {
