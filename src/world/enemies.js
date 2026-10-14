@@ -130,7 +130,7 @@ export const AI = {
           const tz = p.z + p.vz * flight * 0.5;
           const l = Math.hypot(tx - mouth.x, ty - mouth.y, tz - mouth.z) || 1;
           w.addShot({
-            team: 'enemy', kind: 'cannonball', ...mouth, r: CANNONBALL.radius, dmg: Math.round(CANNONBALL.dmg * e.power), life: CANNONBALL.life,
+            team: 'enemy', kind: 'cannonball', ownerId: e.id, ...mouth, r: CANNONBALL.radius, dmg: Math.round(CANNONBALL.dmg * e.power), life: CANNONBALL.life,
             vx: ((tx - mouth.x) / l) * CANNONBALL.speed, vy: ((ty - mouth.y) / l) * CANNONBALL.speed, vz: ((tz - mouth.z) / l) * CANNONBALL.speed,
           });
           w.emit('enemy-shot', { id: e.id, kind: 'cannonball', ...mouth });

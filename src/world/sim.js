@@ -1,13 +1,18 @@
 import { Rng } from '../engine/rng.js';
 import { makeTerrain, PLAY_RADIUS, WATER_LEVEL } from './terrain.js';
 import { ENEMY_TYPES, AI } from './enemies.js';
+import {
+  GROUND_COMBO, AIR_COMBO, MELEE, HITSTOP, LOCK, REACTIONS, CHIPS, CHIP_OF, DECK_SIZE, chipLevel, pickTarget, switchTarget,
+} from './combat.js';
 
 // The open-world simulation: a fixed 60 Hz step with no rendering, like the grid game's engine. The view sends
 // one input per step and drains events (shots, hits, deletes...) for effects and sound. A seed plus an input
 // log replays exactly, so it can be tested headless.
 //
-// Input per step: { move: {x, y} (camera-relative: x right, y forward, -1..1), camYaw, aimYaw, aimPitch,
-//   aimPoint: {x, y, z} | null (what the crosshair is on), fire, jump, dash (held booleans) }.
+// Input per step (held booleans unless noted):
+//   move: {x, y} camera-relative (x right, y forward, -1..1); camYaw, aimYaw, aimPitch; aimPoint {x,y,z} | null
+//   attack (melee combo), shoot (buster; hold to charge; `fire` is accepted as an alias), jump, dash,
+//   lock (toggle lock-on), next / prev (switch target), react (reaction command), chip: 0..4 (deck slot held)
 // Yaw 0 faces +z; a facing yaw points along (sin yaw, cos yaw).
 
 export const DT = 1 / 60;
@@ -20,6 +25,8 @@ export const BUSTER = { cooldown: 0.11, speed: 58, dmg: 6, radius: 0.28, life: 1
 // (after `full` s) charge shot. The full shot bursts on impact.
 export const CHARGE = { delay: 0.28, mid: 0.65, full: 1.25, speed: 44, dmg: [0, 18, 46], splash: [0, 0, 3.4], splashDmg: [0, 0, 24], radius: [0, 0.45, 0.75] };
 export const MUZZLE = { up: 1.2, side: 0.28, forward: 0.85 };
+const BUTTONS = ['shoot', 'attack', 'jump', 'dash', 'lock', 'next', 'prev', 'react'];
+const HEAVY = new Set(['charge', 'cannon', 'deflect']); // shots that knock back
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const approach = (v, target, step) => (v < target ? Math.min(target, v + step) : Math.max(target, v - step));
@@ -37,6 +44,8 @@ export class World {
     this.terrain = makeTerrain(seed);
     this.t = 0;
     this.frame = 0;
+    this.hitstop = 0; // frames the whole world freezes after a solid hit
+    this.pending = null; // presses that land during a hit-stop, applied after it
     this.events = [];
     this.enemies = [];
     this.shots = [];
@@ -45,9 +54,14 @@ export class World {
     this.nextId = 1;
     this.zones = this.terrain.zones.map((z) => ({ ...z, state: 'dormant', members: [], clears: 0 }));
     this.wave = 1; // sealing every rift starts the next, tougher wave
+    // Chips survive being knocked down: they belong to the save, not the body.
+    this.chips = {}; // key -> { deletes, level }
+    this.deck = []; // up to DECK_SIZE chip keys, in the order learned
+    this.chipCd = {}; // key -> seconds of cooldown left
     this.player = this.newPlayer();
-    this.prev = { fire: false, jump: false, dash: false };
-    this.stats = { shots: 0, hits: 0, kills: 0, damageTaken: 0, data: 0, counters: 0 };
+    this.prev = {};
+    this.prevChip = 0;
+    this.stats = { shots: 0, hits: 0, kills: 0, damageTaken: 0, data: 0, counters: 0, reactions: 0, chipsUsed: 0, strikes: 0 };
   }
 
   newPlayer() {
@@ -57,6 +71,7 @@ export class World {
       onGround: true, airDash: true, hp: PLAYER.maxHp, maxHp: PLAYER.maxHp, alive: true, respawn: 0,
       iframes: 0, flinch: 0, dash: 0, dashDir: { x: 0, z: 1 }, dashCd: 0, fireCd: 0, aimHold: 0,
       charge: 0, charging: false, chargeFull: false, speed: 0, wading: false,
+      lock: null, action: null, airCombo: 0, reaction: null, attackQueue: 0,
     };
   }
 
@@ -76,20 +91,39 @@ export class World {
     return shot;
   }
 
+  enemy(id) {
+    return id == null ? null : this.enemies.find((e) => e.id === id) ?? null;
+  }
+
+  lockTarget() {
+    const e = this.enemy(this.player.lock);
+    return e && e.alive ? e : null;
+  }
+
   step(input = {}) {
     this.frame++;
+    const held = {};
+    for (const b of BUTTONS) held[b] = !!input[b];
+    held.shoot = !!(input.shoot ?? input.fire);
+    const edges = {};
+    for (const b of BUTTONS) edges[b] = held[b] && !this.prev[b];
+    edges.release = !held.shoot && !!this.prev.shoot;
+    const chip = input.chip | 0;
+    edges.chip = chip && chip !== this.prevChip ? chip : 0;
+    this.prev = held;
+    this.prevChip = chip;
+    if (this.pending) {
+      for (const k of Object.keys(this.pending)) edges[k] ||= this.pending[k];
+      this.pending = null;
+    }
+    // Hit-stop: everything holds still for a few frames; presses wait for it to end.
+    if (this.hitstop > 0) {
+      this.hitstop--;
+      this.pending = edges;
+      return;
+    }
     this.t += DT;
-    const fire = !!input.fire;
-    const jump = !!input.jump;
-    const dash = !!input.dash;
-    const edges = {
-      fire: fire && !this.prev.fire,
-      release: !fire && this.prev.fire,
-      jump: jump && !this.prev.jump,
-      dash: dash && !this.prev.dash,
-    };
-    this.prev = { fire, jump, dash };
-    this.updatePlayer(input, edges);
+    this.updatePlayer(input, held, edges);
     this.updateZones();
     for (const e of this.enemies) this.updateEnemy(e);
     this.separateEnemies();
@@ -97,11 +131,12 @@ export class World {
     this.updateShots();
     this.updateHazards();
     this.updatePickups();
+    for (const k of Object.keys(this.chipCd)) this.chipCd[k] = Math.max(0, this.chipCd[k] - DT);
   }
 
   // ------------------------------------------------------------------ player
 
-  updatePlayer(input, edges) {
+  updatePlayer(input, held, edges) {
     const p = this.player;
     const T = this.terrain;
     const dt = DT;
@@ -118,6 +153,17 @@ export class World {
     p.dashCd = Math.max(0, p.dashCd - dt);
     p.fireCd = Math.max(0, p.fireCd - dt);
     p.aimHold = Math.max(0, p.aimHold - dt);
+    if (p.flinch > 0 && p.action) p.action = null;
+
+    this.updateLock(input, edges);
+    this.updateReaction(edges);
+    if (edges.chip) this.useChip(edges.chip, input);
+    p.attackQueue = Math.max(0, p.attackQueue - dt);
+    if (edges.attack && p.flinch <= 0) this.attack(input);
+    else if (p.attackQueue > 0 && p.dash <= 0 && !p.action && p.flinch <= 0) {
+      p.attackQueue = 0;
+      this.attack(input);
+    }
 
     // Camera-relative movement.
     const cy = input.camYaw ?? 0;
@@ -133,7 +179,10 @@ export class World {
     p.wading = T.inWater(p.x, p.z);
     const top = (p.wading ? PLAYER.wadeRun : PLAYER.run) * (p.charging ? 0.8 : 1);
 
-    if (edges.dash && p.dashCd <= 0 && p.flinch <= 0 && (p.onGround || p.airDash)) {
+    // Dodge: also cancels a strike once it has landed, or its wind-down.
+    const canCancel = !p.action || (p.action.kind === 'melee' && p.action.hitDone);
+    if (edges.dash && canCancel && p.dashCd <= 0 && p.flinch <= 0 && (p.onGround || p.airDash)) {
+      p.action = null;
       let ddx = dx;
       let ddz = dz;
       if (len < 0.2) {
@@ -149,6 +198,7 @@ export class World {
       p.vy = Math.max(0, p.vy);
       this.emit('dash', { ...at(p), dx: p.dashDir.x, dz: p.dashDir.z });
     }
+    let gravity = PLAYER.gravity;
     if (p.dash > 0) {
       p.dash -= dt;
       p.vx = p.dashDir.x * PLAYER.dashSpeed;
@@ -158,6 +208,8 @@ export class World {
         p.vx *= 0.4;
         p.vz *= 0.4;
       }
+    } else if (p.action) {
+      gravity = this.updateAction(input);
     } else if (p.flinch <= 0) {
       const acc = (p.onGround ? PLAYER.accel : PLAYER.airAccel) * dt;
       p.vx = approach(p.vx, dx * top, acc);
@@ -167,12 +219,13 @@ export class World {
       p.vz = approach(p.vz, 0, 20 * dt);
     }
 
-    if (edges.jump && p.onGround && p.flinch <= 0) {
+    if (edges.jump && p.onGround && p.flinch <= 0 && (!p.action || (p.action.kind === 'melee' && p.action.hitDone))) {
+      p.action = null;
       p.vy = PLAYER.jump;
       p.onGround = false;
       this.emit('jump', at(p));
     }
-    if (p.dash <= 0 && !p.onGround) p.vy -= PLAYER.gravity * dt;
+    if (p.dash <= 0 && !p.onGround) p.vy -= gravity * dt;
 
     // Horizontal move, refusing to walk up cliffs.
     const nx = p.x + p.vx * dt;
@@ -187,28 +240,7 @@ export class World {
       p.x = nx;
       p.z = nz;
     }
-    // World edge and obstacles.
-    const d = Math.hypot(p.x, p.z);
-    if (d > PLAY_RADIUS) {
-      p.x *= PLAY_RADIUS / d;
-      p.z *= PLAY_RADIUS / d;
-    }
-    for (const o of T.near(p.x, p.z, 2)) {
-      if (p.y > o.top - 0.3) continue;
-      const ox = p.x - o.x;
-      const oz = p.z - o.z;
-      const od = Math.hypot(ox, oz);
-      const min = o.r + PLAYER.radius;
-      if (od < min && od > 1e-6) {
-        p.x = o.x + (ox / od) * min;
-        p.z = o.z + (oz / od) * min;
-        const into = p.vx * (ox / od) + p.vz * (oz / od);
-        if (into < 0) {
-          p.vx -= into * (ox / od);
-          p.vz -= into * (oz / od);
-        }
-      }
-    }
+    this.keepInWorld(p);
     // Vertical: land, or stick to the ground walking downhill.
     p.y += p.vy * dt;
     const g = T.ground(p.x, p.z);
@@ -218,29 +250,36 @@ export class World {
       p.vy = 0;
       p.onGround = true;
       p.airDash = true;
+      p.airCombo = 0;
     } else if (p.onGround) {
       if (p.y - g < 0.45 && p.vy <= 0) p.y = g;
       else p.onGround = false;
     }
 
-    // Facing: toward the crosshair while shooting or charging, otherwise along the movement.
+    // Facing: toward the target or the crosshair while fighting, otherwise along the movement.
+    const target = this.lockTarget();
     const aiming = p.charging || p.aimHold > 0;
-    const moveYaw = len > 0.1 ? Math.atan2(dx, dz) : p.yaw;
-    const want = aiming ? input.aimYaw ?? cy : p.dash > 0 ? Math.atan2(p.dashDir.x, p.dashDir.z) : moveYaw;
-    const diff = wrap(want - p.yaw);
-    const rate = (aiming ? 20 : 12) * dt;
-    p.yaw = wrap(p.yaw + clamp(diff, -rate, rate));
+    if (!p.action) {
+      const moveYaw = len > 0.1 ? Math.atan2(dx, dz) : p.yaw;
+      let want = moveYaw;
+      if (p.dash > 0) want = Math.atan2(p.dashDir.x, p.dashDir.z);
+      else if (aiming) want = target ? Math.atan2(target.x - p.x, target.z - p.z) : input.aimYaw ?? cy;
+      const diff = wrap(want - p.yaw);
+      const rate = (aiming ? 20 : 12) * dt;
+      p.yaw = wrap(p.yaw + clamp(diff, -rate, rate));
+    }
     p.speed = Math.hypot(p.vx, p.vz);
 
-    // Buster and charge shot.
+    // Buster and charge shot (not mid-strike).
     if (p.flinch > 0) {
       p.charge = 0;
       p.charging = false;
       p.chargeFull = false;
       return;
     }
-    if (edges.fire && p.fireCd <= 0) this.fire(p, input, 0);
-    if (input.fire) {
+    if (p.action) return;
+    if (edges.shoot && p.fireCd <= 0) this.fire(p, input, 0);
+    if (held.shoot) {
       p.charge += dt;
       if (!p.charging && p.charge >= CHARGE.delay) {
         p.charging = true;
@@ -259,6 +298,425 @@ export class World {
     }
   }
 
+  keepInWorld(o, radius = PLAYER.radius) {
+    const d = Math.hypot(o.x, o.z);
+    if (d > PLAY_RADIUS) {
+      o.x *= PLAY_RADIUS / d;
+      o.z *= PLAY_RADIUS / d;
+    }
+    for (const ob of this.terrain.near(o.x, o.z, 2)) {
+      if (o.y > ob.top - 0.3) continue;
+      const ox = o.x - ob.x;
+      const oz = o.z - ob.z;
+      const od = Math.hypot(ox, oz);
+      const min = ob.r + radius;
+      if (od < min && od > 1e-6) {
+        o.x = ob.x + (ox / od) * min;
+        o.z = ob.z + (oz / od) * min;
+        const into = o.vx * (ox / od) + o.vz * (oz / od);
+        if (into < 0) {
+          o.vx -= into * (ox / od);
+          o.vz -= into * (oz / od);
+        }
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------ lock-on
+
+  updateLock(input, edges) {
+    const p = this.player;
+    const camYaw = input.camYaw ?? 0;
+    let target = this.enemy(p.lock);
+    if (edges.lock) {
+      if (p.lock) {
+        p.lock = null;
+        this.emit('unlock', {});
+      } else {
+        const t = pickTarget(this.enemies, p, camYaw);
+        if (t) {
+          p.lock = t.id;
+          this.emit('lock', { id: t.id });
+        } else this.emit('lock-none', {});
+      }
+      return;
+    }
+    if (!p.lock) return;
+    if (!target || !target.alive || Math.hypot(target.x - p.x, target.z - p.z) > LOCK.keep) {
+      // Carry the lock to the nearest virus close by, otherwise let go.
+      let near = null;
+      let nd = LOCK.retarget;
+      for (const e of this.enemies) {
+        if (!e.alive || e.spawnT > 0) continue;
+        const d = Math.hypot(e.x - p.x, e.z - p.z);
+        if (d < nd) {
+          nd = d;
+          near = e;
+        }
+      }
+      if (near) {
+        p.lock = near.id;
+        target = near;
+        this.emit('lock', { id: near.id, auto: true });
+      } else {
+        p.lock = null;
+        this.emit('unlock', { auto: true });
+        return;
+      }
+    }
+    if (edges.next || edges.prev) {
+      const n = switchTarget(this.enemies, p, target, camYaw, edges.next ? 1 : -1);
+      if (n && n !== target) {
+        p.lock = n.id;
+        this.emit('lock', { id: n.id, switched: true });
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------ melee
+
+  attack(input) {
+    const p = this.player;
+    if (p.action) {
+      if (p.action.kind === 'melee') p.action.buffered = true;
+      return;
+    }
+    if (p.dash > 0) {
+      p.attackQueue = 0.2; // swing as soon as the dodge ends
+      return;
+    }
+    if (!p.onGround) {
+      if (p.airCombo >= AIR_COMBO.length) return; // the air combo is spent until you land
+      this.startStrike(p.airCombo, true, input);
+    } else this.startStrike(0, false, input);
+  }
+
+  // The strike's target: the lock-on target, else the nearest virus roughly in front (camera or facing).
+  meleeTarget(input) {
+    const p = this.player;
+    const locked = this.lockTarget();
+    if (locked && Math.hypot(locked.x - p.x, locked.z - p.z) <= MELEE.magnet + 1) return locked;
+    const look = input.camYaw ?? p.yaw;
+    let best = null;
+    let bestScore = Infinity;
+    for (const e of this.enemies) {
+      if (!e.alive || e.spawnT > 0) continue;
+      const d = Math.hypot(e.x - p.x, e.z - p.z);
+      if (d > MELEE.magnet) continue;
+      const toward = Math.atan2(e.x - p.x, e.z - p.z);
+      const a = Math.min(Math.abs(wrap(toward - look)), Math.abs(wrap(toward - p.yaw)));
+      if (a > 1.0 && d > 2.5) continue;
+      const score = d + a * 3;
+      if (score < bestScore) {
+        bestScore = score;
+        best = e;
+      }
+    }
+    return best;
+  }
+
+  startStrike(step, air, input) {
+    const p = this.player;
+    const list = air ? AIR_COMBO : GROUND_COMBO;
+    const s = list[step];
+    const target = this.meleeTarget(input);
+    const a = { kind: 'melee', step, air, def: s, t: 0, hitDone: false, buffered: false, target: target?.id ?? null, lunge: 0 };
+    p.action = a;
+    if (air) {
+      p.airCombo = step + 1;
+      p.vy = Math.max(p.vy, 2.5);
+    }
+    if (target) {
+      const dx = target.x - p.x;
+      const dz = target.z - p.z;
+      const d = Math.hypot(dx, dz) || 1;
+      p.yaw = Math.atan2(dx, dz);
+      const gap = d - (s.reach * 0.55 + target.def.radius);
+      if (gap > 0.2) {
+        // Close the gap first (KH2's magnetism); the swing's own timing starts when the lunge ends.
+        a.lunge = clamp(gap / MELEE.lungeSpeed, 0.06, MELEE.lungeMax);
+        a.t = -a.lunge;
+      }
+    } else if (input.move && Math.hypot(input.move.x ?? 0, input.move.y ?? 0) > 0.2) {
+      const cy = input.camYaw ?? 0;
+      p.yaw = Math.atan2(-Math.cos(cy) * input.move.x + Math.sin(cy) * input.move.y, Math.sin(cy) * input.move.x + Math.cos(cy) * input.move.y);
+    }
+    this.stats.strikes++;
+    this.emit('swing', { name: s.name, step, air, finisher: !!s.finisher, x: p.x, y: p.y, z: p.z });
+  }
+
+  // Advance the current action; returns the gravity to use this frame.
+  updateAction(input) {
+    const p = this.player;
+    const a = p.action;
+    a.t += DT;
+    if (a.kind === 'melee') {
+      const s = a.def;
+      if (a.lunge > 0) {
+        const t = this.enemy(a.target);
+        if (t?.alive) {
+          const dx = t.x - p.x;
+          const dz = t.z - p.z;
+          const d = Math.hypot(dx, dz) || 1;
+          const gap = d - (s.reach * 0.55 + t.def.radius);
+          const left = Math.max(a.lunge, DT);
+          const v = gap > 0.05 ? Math.min(MELEE.lungeTop, gap / left) : 0;
+          p.vx = (dx / d) * v;
+          p.vz = (dz / d) * v;
+          if (a.air) p.vy = clamp((t.y + t.def.height * 0.5 - (p.y + 1)) / left, -12, 12);
+        }
+        a.lunge -= DT;
+        if (a.lunge <= 0) {
+          p.vx *= 0.15;
+          p.vz *= 0.15;
+          if (a.air) p.vy *= 0.2;
+        }
+      } else {
+        p.vx = approach(p.vx, 0, 60 * DT);
+        p.vz = approach(p.vz, 0, 60 * DT);
+      }
+      const target = this.enemy(a.target);
+      if (!a.hitDone && target?.alive) p.yaw = Math.atan2(target.x - p.x, target.z - p.z);
+      if (!a.hitDone && a.t >= s.hit) {
+        a.hitDone = true;
+        this.strikeHit(s);
+      }
+      const list = a.air ? AIR_COMBO : GROUND_COMBO;
+      if (a.buffered && a.t >= s.cancel && a.step + 1 < list.length) {
+        if (a.air && p.onGround) this.startStrike(0, false, input);
+        else this.startStrike(a.step + 1, a.air, input);
+        return a.air ? PLAYER.gravity * 0.2 : PLAYER.gravity;
+      }
+      if (a.t >= s.dur) p.action = null;
+      if (a.air) {
+        // Air strikes hang in the air; the air finisher drops you after the hit.
+        if (s.finisher && a.hitDone) return PLAYER.gravity * 1.4;
+        p.vy = Math.max(p.vy, -2.5);
+        return PLAYER.gravity * 0.2;
+      }
+      return PLAYER.gravity;
+    }
+    if (a.kind === 'chip' && a.name === 'findash') {
+      const moving = a.t < a.dur - 0.08;
+      p.vx = moving ? a.dx * 32 : p.vx * 0.5;
+      p.vz = moving ? a.dz * 32 : p.vz * 0.5;
+      p.vy = Math.max(p.vy, 0);
+      for (const e of this.enemies) {
+        if (!e.alive || e.spawnT > 0 || a.hitIds.has(e.id)) continue;
+        if (Math.hypot(e.x - p.x, e.y + e.def.height * 0.5 - (p.y + 1), e.z - p.z) < 1.9 + e.def.radius) {
+          a.hitIds.add(e.id);
+          this.hitEnemy(e, a.dmg, { kind: 'chip', dirX: a.dx, dirZ: a.dz, push: 7 });
+        }
+      }
+    } else {
+      p.vx = approach(p.vx, 0, 60 * DT);
+      p.vz = approach(p.vz, 0, 60 * DT);
+    }
+    if (a.t >= a.dur) p.action = null;
+    return a.kind === 'chip' && a.name === 'findash' ? 0 : PLAYER.gravity;
+  }
+
+  strikeHit(s) {
+    const p = this.player;
+    const fx = Math.sin(p.yaw);
+    const fz = Math.cos(p.yaw);
+    let hits = 0;
+    for (const e of this.enemies) {
+      if (!e.alive || e.spawnT > 0) continue;
+      const dx = e.x - p.x;
+      const dz = e.z - p.z;
+      const d = Math.hypot(dx, dz);
+      if (d > s.reach + e.def.radius) continue;
+      if (Math.abs(e.y + e.def.height * 0.5 - (p.y + 1)) > MELEE.vertical + e.def.height * 0.5) continue;
+      if (s.arc < Math.PI * 2 && d > 0.3 && Math.acos(clamp((dx * fx + dz * fz) / d, -1, 1)) > s.arc / 2) continue;
+      this.hitEnemy(e, s.dmg, { kind: s.finisher ? 'finisher' : 'melee', dirX: dx / (d || 1), dirZ: dz / (d || 1), push: s.push, launch: s.launch, slam: s.slam });
+      hits++;
+    }
+    this.emit('strike', { name: s.name, hits, finisher: !!s.finisher, air: !!s.air, x: p.x + fx * 1.4, y: p.y + 1.1, z: p.z + fz * 1.4 });
+    if (hits) this.hitstop = Math.max(this.hitstop, s.finisher ? HITSTOP.finisher : HITSTOP.slash);
+  }
+
+  // ------------------------------------------------------------------ reaction commands
+
+  updateReaction(edges) {
+    const p = this.player;
+    p.reaction = null;
+    if (!p.alive || p.flinch > 0 || (p.action && p.action.kind !== 'melee')) return;
+    let best = null;
+    let bestScore = Infinity;
+    for (const e of this.enemies) {
+      if (!e.alive || e.spawnT > 0) continue;
+      const d = Math.hypot(e.x - p.x, e.z - p.z);
+      let kind = null;
+      if (e.type === 'rivet' && e.state === 'windup' && d < 7) kind = 'break';
+      else if (e.type === 'dartfin' && Math.hypot(e.x - p.x, e.y - (p.y + 1), e.z - p.z) < 13) {
+        const incoming = (p.x - e.x) * e.vx + (p.z - e.z) * e.vz > 0;
+        if ((e.state === 'windup' && e.t < 0.4) || (e.state === 'dive' && incoming)) kind = 'reversal';
+      }
+      if (!kind) continue;
+      const score = d - (e.id === p.lock ? 5 : 0);
+      if (score < bestScore) {
+        bestScore = score;
+        best = { kind, id: e.id };
+      }
+    }
+    if (!best) {
+      for (const s of this.shots) {
+        if (s.team !== 'enemy') continue;
+        const dx = p.x - s.x;
+        const dy = p.y + 0.9 - s.y;
+        const dz = p.z - s.z;
+        if (Math.hypot(dx, dy, dz) < 8 && dx * s.vx + dy * s.vy + dz * s.vz > 0) {
+          best = { kind: 'deflect', id: s.id };
+          break;
+        }
+      }
+    }
+    p.reaction = best ? { ...best, label: REACTIONS[best.kind].label } : null;
+    if (best && edges.react) this.react(best);
+  }
+
+  react({ kind, id }) {
+    const p = this.player;
+    p.action = { kind: 'react', name: kind, t: 0, dur: 0.42 };
+    p.dash = 0;
+    p.iframes = Math.max(p.iframes, 0.6);
+    p.charge = 0;
+    p.charging = false;
+    p.chargeFull = false;
+    this.stats.reactions++;
+    if (kind === 'deflect') {
+      const s = this.shots.find((x) => x.id === id);
+      if (!s) return;
+      const target = this.lockTarget() ?? this.enemy(s.ownerId) ?? this.enemies.find((e) => e.alive);
+      p.yaw = Math.atan2(s.x - p.x, s.z - p.z);
+      s.team = 'player';
+      s.kind = 'deflect';
+      s.dmg = Math.round(s.dmg * REACTIONS.deflect.mult);
+      s.life = 2.2;
+      s.splash = 2.4;
+      s.splashDmg = Math.round(s.dmg * 0.4);
+      if (target) {
+        const tx = target.x - s.x;
+        const ty = target.y + target.def.height * 0.5 - s.y;
+        const tz = target.z - s.z;
+        const l = Math.hypot(tx, ty, tz) || 1;
+        s.vx = (tx / l) * 42;
+        s.vy = (ty / l) * 42;
+        s.vz = (tz / l) * 42;
+      } else {
+        s.vx *= -1.4;
+        s.vy *= -1.4;
+        s.vz *= -1.4;
+      }
+      p.action.dur = 0.3;
+      this.hitstop = HITSTOP.reaction;
+      this.emit('reaction', { kind, label: REACTIONS.deflect.label, x: s.x, y: s.y, z: s.z });
+      return;
+    }
+    const e = this.enemy(id);
+    if (!e) return;
+    const r = REACTIONS[kind];
+    if (kind === 'break') {
+      // Dash in and smash it before the slam lands.
+      const dx = e.x - p.x;
+      const dz = e.z - p.z;
+      const d = Math.hypot(dx, dz) || 1;
+      p.x = e.x - (dx / d) * (e.def.radius + 1.1);
+      p.z = e.z - (dz / d) * (e.def.radius + 1.1);
+      p.yaw = Math.atan2(dx, dz);
+    } else {
+      // Warp up behind the diver and strike its back.
+      const l = Math.hypot(e.vx, e.vz);
+      const bx = l > 0.5 ? e.vx / l : Math.sin(e.yaw);
+      const bz = l > 0.5 ? e.vz / l : Math.cos(e.yaw);
+      p.x = e.x - bx * 2.4;
+      p.z = e.z - bz * 2.4;
+      p.y = e.y - 1;
+      p.vy = 3;
+      p.yaw = Math.atan2(bx, bz);
+    }
+    this.keepInWorld(p);
+    const g = this.terrain.ground(p.x, p.z);
+    p.y = Math.max(p.y, g);
+    p.onGround = p.y - g < 0.05;
+    p.vx = 0;
+    p.vz = 0;
+    e.state = 'recover';
+    e.t = r.stun;
+    e.vx = 0;
+    e.vz = 0;
+    if (e.def.hover) e.vy = -8;
+    const d = Math.hypot(e.x - p.x, e.z - p.z) || 1;
+    this.hitEnemy(e, r.dmg, { kind: 'react', stun: r.stun, dirX: (e.x - p.x) / d, dirZ: (e.z - p.z) / d, push: 4 });
+    this.hitstop = HITSTOP.reaction;
+    this.emit('reaction', { kind, label: r.label, x: e.x, y: e.y + e.def.height * 0.5, z: e.z });
+  }
+
+  // ------------------------------------------------------------------ chips
+
+  learnFrom(e) {
+    const key = CHIP_OF[e.type];
+    if (!key) return;
+    const c = (this.chips[key] ??= { deletes: 0, level: 0 });
+    c.deletes++;
+    const level = chipLevel(c.deletes);
+    if (level > c.level) {
+      c.level = level;
+      if (!this.deck.includes(key) && this.deck.length < DECK_SIZE) this.deck.push(key);
+      this.emit('chip-learn', { chip: key, level, name: CHIPS[key].name });
+    }
+  }
+
+  useChip(slot, input) {
+    const p = this.player;
+    const key = this.deck[slot - 1];
+    const c = key && this.chips[key];
+    if (!c || c.level < 1) return;
+    if (!p.alive || p.flinch > 0 || p.dash > 0 || (this.chipCd[key] ?? 0) > 0) {
+      this.emit('chip-denied', { chip: key });
+      return;
+    }
+    if (p.action && !(p.action.kind === 'melee' && p.action.hitDone)) return;
+    const def = CHIPS[key];
+    const dmg = def.dmg[c.level];
+    const target = this.lockTarget() ?? this.meleeTarget(input) ?? null;
+    this.chipCd[key] = def.cooldown;
+    this.stats.chipsUsed++;
+    if (key === 'shockwave') {
+      p.action = { kind: 'chip', name: key, t: 0, dur: 0.5 };
+      this.hazards.push({ kind: 'ring', team: 'player', x: p.x, y: p.y, z: p.z, r: 0.8, speed: 14, max: 9 + 2 * c.level, thick: 1.4, dmg, hitIds: new Set() });
+    } else if (key === 'cannon') {
+      p.action = { kind: 'chip', name: key, t: 0, dur: 0.35 };
+      const yaw = target ? Math.atan2(target.x - p.x, target.z - p.z) : input.aimYaw ?? p.yaw;
+      p.yaw = yaw;
+      const m = this.muzzle(p, yaw);
+      let dir;
+      if (target) {
+        const tx = target.x - m.x;
+        const ty = target.y + target.def.height * 0.5 - m.y;
+        const tz = target.z - m.z;
+        const l = Math.hypot(tx, ty, tz) || 1;
+        dir = { x: tx / l, y: ty / l, z: tz / l };
+      } else dir = this.aimDir(m, input, yaw);
+      this.addShot({ team: 'player', kind: 'cannon', ...m, vx: dir.x * 36, vy: dir.y * 36, vz: dir.z * 36, r: 0.55, dmg, splash: 3, splashDmg: Math.round(dmg * 0.5), life: 2 });
+    } else if (key === 'findash') {
+      let dx = Math.sin(p.yaw);
+      let dz = Math.cos(p.yaw);
+      if (target) {
+        const l = Math.hypot(target.x - p.x, target.z - p.z) || 1;
+        dx = (target.x - p.x) / l;
+        dz = (target.z - p.z) / l;
+      }
+      p.yaw = Math.atan2(dx, dz);
+      p.action = { kind: 'chip', name: key, t: 0, dur: 0.4, dx, dz, dmg, hitIds: new Set() };
+      p.iframes = Math.max(p.iframes, 0.5);
+    }
+    this.emit('chip-use', { chip: key, level: c.level, name: def.name, ...at(p) });
+  }
+
+  // ------------------------------------------------------------------ shooting
+
   muzzle(p, yaw) {
     const fx = Math.sin(yaw);
     const fz = Math.cos(yaw);
@@ -270,24 +728,36 @@ export class World {
     };
   }
 
-  fire(p, input, level) {
-    const yaw = input.aimYaw ?? input.camYaw ?? p.yaw;
-    const m = this.muzzle(p, yaw);
-    let dir;
+  aimDir(m, input, yaw) {
     if (input.aimPoint) {
       const ax = input.aimPoint.x - m.x;
       const ay = input.aimPoint.y - m.y;
       const az = input.aimPoint.z - m.z;
       const l = Math.hypot(ax, ay, az) || 1;
-      dir = { x: ax / l, y: ay / l, z: az / l };
-    } else {
-      const pitch = input.aimPitch ?? 0;
-      dir = { x: Math.sin(yaw) * Math.cos(pitch), y: Math.sin(pitch), z: Math.cos(yaw) * Math.cos(pitch) };
+      return { x: ax / l, y: ay / l, z: az / l };
     }
-    const target = this.assistTarget(m, dir, level === 2 ? 0.16 : 0.11, 75);
-    if (target) {
-      const l = Math.hypot(target.x - m.x, target.y - m.y, target.z - m.z) || 1;
-      dir = { x: (target.x - m.x) / l, y: (target.y - m.y) / l, z: (target.z - m.z) / l };
+    const pitch = input.aimPitch ?? 0;
+    return { x: Math.sin(yaw) * Math.cos(pitch), y: Math.sin(pitch), z: Math.cos(yaw) * Math.cos(pitch) };
+  }
+
+  fire(p, input, level) {
+    const locked = this.lockTarget();
+    const yaw = locked ? Math.atan2(locked.x - p.x, locked.z - p.z) : input.aimYaw ?? input.camYaw ?? p.yaw;
+    const m = this.muzzle(p, yaw);
+    let dir;
+    if (locked) {
+      const tx = locked.x - m.x;
+      const ty = locked.y + locked.def.height * 0.5 - m.y;
+      const tz = locked.z - m.z;
+      const l = Math.hypot(tx, ty, tz) || 1;
+      dir = { x: tx / l, y: ty / l, z: tz / l };
+    } else {
+      dir = this.aimDir(m, input, yaw);
+      const target = this.assistTarget(m, dir, level === 2 ? 0.16 : 0.11, 75);
+      if (target) {
+        const l = Math.hypot(target.x - m.x, target.y - m.y, target.z - m.z) || 1;
+        dir = { x: (target.x - m.x) / l, y: (target.y - m.y) / l, z: (target.z - m.z) / l };
+      }
     }
     const kind = ['buster', 'mid', 'charge'][level];
     const speed = level ? CHARGE.speed : BUSTER.speed;
@@ -334,6 +804,7 @@ export class World {
     p.iframes = PLAYER.iframes;
     p.flinch = PLAYER.flinch;
     p.dash = 0;
+    p.action = null;
     this.stats.damageTaken += dmg;
     const dx = p.x - fromX;
     const dz = p.z - fromZ;
@@ -348,6 +819,7 @@ export class World {
       p.respawn = 3;
       p.charge = 0;
       p.charging = false;
+      p.lock = null;
       this.emit('down', at(p));
     }
     return true;
@@ -393,7 +865,7 @@ export class World {
     const e = {
       id: this.nextId++, type, def, x, y: this.terrain.ground(x, z) + (def.hover ?? 0), z, power: 1 + 0.25 * (this.wave - 1),
       vx: 0, vy: 0, vz: 0, yaw: this.rng.next() * Math.PI * 2, hp, maxHp: hp,
-      alive: true, dying: 0, state: 'idle', t: 0, cd: 0, flinch: 0, spawnT: 0.9,
+      alive: true, dying: 0, state: 'idle', t: 0, cd: 0, flinch: 0, spawnT: 0.9, air: false, armor: 0, comboHits: 0, lastHitT: -9,
       zone: zone.id, home: { x: zone.x, z: zone.z }, orbit: this.rng.chance(0.5) ? 1 : -1,
     };
     this.enemies.push(e);
@@ -408,14 +880,15 @@ export class World {
       e.spawnT -= DT;
       return;
     }
+    e.armor = Math.max(0, e.armor - DT);
     const p = this.player;
     const dx = p.x - e.x;
     const dz = p.z - e.z;
     const dist = Math.hypot(dx, dz);
     if (e.flinch > 0) {
       e.flinch -= DT;
-      e.vx *= 0.85;
-      e.vz *= 0.85;
+      e.vx *= 0.88;
+      e.vz *= 0.88;
     } else {
       AI[e.type](this, e, DT, { dx, dz, dist, sees: p.alive && dist < e.def.aggro });
     }
@@ -423,28 +896,28 @@ export class World {
     const hx = e.home.x - e.x;
     const hz = e.home.z - e.z;
     const hd = Math.hypot(hx, hz);
-    if (hd > 45 && e.state !== 'dive') {
+    if (hd > 45 && e.state !== 'dive' && e.flinch <= 0) {
       e.vx = (hx / hd) * e.def.speed;
       e.vz = (hz / hd) * e.def.speed;
       e.yaw = Math.atan2(hx, hz);
     }
     e.x += e.vx * DT;
     e.z += e.vz * DT;
-    for (const o of T.near(e.x, e.z, 2)) {
-      if (e.y > o.top - 0.3) continue;
-      const ox = e.x - o.x;
-      const oz = e.z - o.z;
-      const od = Math.hypot(ox, oz);
-      const min = o.r + e.def.radius;
-      if (od < min && od > 1e-6) {
-        e.x = o.x + (ox / od) * min;
-        e.z = o.z + (oz / od) * min;
-      }
-    }
+    this.keepInWorld(e, e.def.radius);
     const g = T.ground(e.x, e.z);
     if (e.def.hover) {
       e.y += (e.vy ?? 0) * DT;
+      if (e.flinch > 0) e.vy *= 0.95;
       e.y = Math.max(e.y, g + 0.6);
+    } else if (e.air) {
+      // Launched by a finisher: fly, fall, land.
+      e.vy -= 30 * DT;
+      e.y += e.vy * DT;
+      if (e.y <= g) {
+        e.y = g;
+        e.vy = 0;
+        e.air = false;
+      }
     } else e.y = g;
   }
 
@@ -469,7 +942,8 @@ export class World {
     }
   }
 
-  hitEnemy(e, dmg, shot) {
+  // src: a shot (kind, vx, vz) or a strike ({ kind, dirX, dirZ, push, launch, slam, stun }).
+  hitEnemy(e, dmg, src) {
     if (!e.alive) return;
     let amount = dmg;
     const counter = e.state === 'windup';
@@ -478,16 +952,38 @@ export class World {
       e.state = 'recover';
       e.t = 0.9;
       this.stats.counters++;
+      this.hitstop = Math.max(this.hitstop, HITSTOP.counter);
     }
     e.hp -= amount;
-    e.flinch = shot.kind === 'charge' ? 0.5 : counter ? 0.6 : 0.1;
-    if (shot.kind === 'charge') {
-      const l = Math.hypot(shot.vx, shot.vz) || 1;
-      e.vx = (shot.vx / l) * 6;
-      e.vz = (shot.vz / l) * 6;
+    // Revenge value: a virus that keeps getting hit shrugs off flinching for a moment.
+    e.comboHits = this.t - e.lastHitT < 1.2 ? e.comboHits + 1 : 1;
+    e.lastHitT = this.t;
+    if (e.comboHits >= MELEE.armorAfter && e.armor <= 0) {
+      e.armor = MELEE.armorTime;
+      e.comboHits = 0;
+      this.emit('armor', { id: e.id, x: e.x, y: e.y + e.def.height, z: e.z });
     }
+    const armored = e.armor > 0 && src.kind !== 'react';
+    const kind = src.kind;
+    let flinch = { charge: 0.5, cannon: 0.6, deflect: 0.8, finisher: 0.7, melee: 0.3, chip: 0.5, react: src.stun ?? 1.4 }[kind] ?? 0.1;
+    if (counter) flinch = Math.max(flinch, 0.6);
+    if (!armored) e.flinch = Math.max(e.flinch, flinch);
+    if (!armored && src.push) {
+      e.vx = (src.dirX ?? 0) * src.push;
+      e.vz = (src.dirZ ?? 0) * src.push;
+    }
+    if (!armored && HEAVY.has(kind)) {
+      const l = Math.hypot(src.vx ?? 0, src.vz ?? 0) || 1;
+      e.vx = ((src.vx ?? 0) / l) * 6;
+      e.vz = ((src.vz ?? 0) / l) * 6;
+    }
+    if (!armored && src.launch && !e.def.hover) {
+      e.air = true;
+      e.vy = src.launch;
+    }
+    if (src.slam) e.vy = -src.slam;
     this.stats.hits++;
-    this.emit('enemy-hit', { id: e.id, x: e.x, y: e.y + e.def.height * 0.6, z: e.z, amount: Math.round(amount), counter });
+    this.emit('enemy-hit', { id: e.id, x: e.x, y: e.y + e.def.height * 0.6, z: e.z, amount: Math.round(amount), counter, kind, armored });
     if (e.hp <= 0) this.killEnemy(e);
   }
 
@@ -498,6 +994,7 @@ export class World {
     this.stats.kills++;
     this.emit('delete', { id: e.id, enemy: e.type, x: e.x, y: e.y + e.def.height * 0.5, z: e.z });
     for (let i = 0; i < e.def.data; i++) this.dropData(e.x, e.y + 1, e.z, 1);
+    this.learnFrom(e);
   }
 
   dropData(x, y, z, value) {
@@ -577,7 +1074,17 @@ export class World {
         h.dead = true;
         continue;
       }
-      if (!h.hit && p.alive) {
+      if (h.team === 'player') {
+        // The player's ShockWave: hits each virus near the ring once.
+        for (const e of this.enemies) {
+          if (!e.alive || e.spawnT > 0 || h.hitIds.has(e.id)) continue;
+          if (Math.abs(Math.hypot(e.x - h.x, e.z - h.z) - h.r) < h.thick + e.def.radius && e.y - h.y < 3) {
+            h.hitIds.add(e.id);
+            const d = Math.hypot(e.x - h.x, e.z - h.z) || 1;
+            this.hitEnemy(e, h.dmg, { kind: 'chip', dirX: (e.x - h.x) / d, dirZ: (e.z - h.z) / d, push: 5, launch: 5 });
+          }
+        }
+      } else if (!h.hit && p.alive) {
         const d = Math.hypot(p.x - h.x, p.z - h.z);
         const grounded = p.y - this.terrain.ground(p.x, p.z) < 0.6;
         if (grounded && Math.abs(d - h.r) < h.thick && this.hurtPlayer(h.dmg, h.x, h.z)) h.hit = true;
@@ -625,6 +1132,7 @@ export class World {
     const p = this.player;
     let h = Math.round(p.x * 1000) * 31 + Math.round(p.z * 1000) * 17 + Math.round(p.y * 1000) + p.hp;
     for (const e of this.enemies) h = (h * 33 + Math.round(e.x * 100) + Math.round(e.z * 100) * 7 + e.hp) | 0;
+    h = (h + (p.lock ?? 0) * 7 + this.deck.length * 5 + this.stats.strikes * 3) | 0;
     return (h + this.shots.length * 101 + this.stats.data * 13) | 0;
   }
 }

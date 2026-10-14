@@ -4,38 +4,7 @@ import { World, PLAYER, BUSTER, CHARGE } from '../src/world/sim.js';
 import { makeTerrain, PLAY_RADIUS, WATER_LEVEL } from '../src/world/terrain.js';
 import { RING, CANNONBALL, DIVE } from '../src/world/enemies.js';
 import { Rng } from '../src/engine/rng.js';
-
-// A world with no glitch zones (so nothing wakes up unasked) on flat, empty ground, so mechanics tests don't
-// depend on where hills and trees happen to fall; and helpers to script inputs.
-function quiet(seed = 7) {
-  const w = new World({ seed });
-  w.zones = [];
-  Object.assign(w.terrain, { height: () => 0, ground: () => 0, inWater: () => false, slope: () => 0, near: () => [] });
-  w.player.y = 0;
-  return w;
-}
-function run(w, frames, input = {}) {
-  const events = [];
-  for (let i = 0; i < frames; i++) {
-    w.step(typeof input === 'function' ? input(i) : input);
-    events.push(...w.drainEvents());
-  }
-  return events;
-}
-// Put a virus `dist` metres in front of the player (+z), awake and facing it.
-function place(w, type, dist, state = 'chase') {
-  const p = w.player;
-  const zone = { id: 99, x: p.x, z: p.z + dist, roster: [type] };
-  const e = w.spawnEnemy(type, zone, 0);
-  e.x = p.x;
-  e.z = p.z + dist;
-  e.y = w.terrain.ground(e.x, e.z) + (e.def.hover ?? 0);
-  e.spawnT = 0;
-  e.yaw = Math.PI;
-  e.state = state;
-  w.drainEvents();
-  return e;
-}
+import { quiet, run, place } from './world_helpers.js';
 
 test('terrain is deterministic, flat at the spawn, and keeps rifts and trees out of the lake', () => {
   const a = makeTerrain(5);
