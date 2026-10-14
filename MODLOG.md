@@ -178,3 +178,35 @@ Every Gauntlet encounter now wins 83-100%; before these fixes Dead Signal (void2
 were at 0%. The bot reads every telegraph perfectly but never heals or plans chip combos, so this
 measures fairness ("can it be dodged at all?") more than difficulty. The Gauntlet bosses (V1) win
 83-100%; the boss packs report that their V3 and Ω versions beat the bot, as intended.
+
+## 6. Open-world prototype
+
+The owner moved the direction off the grid: "a fighting game that's open world like Palworld", using a
+3D mech they generated with Tripo AI. Route: same architecture as the grid game (a deterministic headless
+sim plus a separate view), with three.js r186 on WebGL2 for the view (picked from the research report:
+smallest strict-CSP-safe option that reaches ~97% of browsers).
+
+### Gotchas
+1. **Symptom:** the rigged GLB rendered as nothing, and posing it sent vertices to ~1e37. **Cause:**
+   Tripo's export left every bone at the origin (no translations) and wrote garbage inverse bind
+   matrices; the skin weights themselves were fine. **Fix:** `tools/repair_glb.py` puts each joint at
+   the centroid of the vertices weighted to both the bone and its parent (the blend zone), writes the
+   rest pose as translations and rebuilds the bind matrices. Its first export was an OBJ, which can't
+   hold a rig at all: ask for GLB.
+2. **Symptom:** a "delete" event never arrived. **Cause:** the event payload had a `type` field (the
+   enemy type) that overwrote the event's own `type`. **Fix:** payloads use `enemy`, never `type`.
+3. **Symptom:** an aim-assist test failed only on some seeds. **Cause:** the target stood behind a
+   ridge, so the shot hit the ground first. **Fix:** mechanics tests run on flat, empty ground; terrain
+   gets its own tests.
+4. **Design:** sealed rifts used to reopen after 75 s, which read as a bug. Rifts now stay sealed, and
+   sealing all six starts a tougher wave (+40% HP, +25% damage).
+
+### Oracles
+- `tests/world.test.js` (14 tests): movement, jump/dash, buster/charge, aim assist, counters, every
+  virus attack, data pickup, rift waves, respawn, determinism, a 6,000-frame fuzz.
+- A headless bot sweep (4 seeds x 5 min): 46-56 deletes per run, no knockdowns, so a perfect dodger
+  wins; humans will find it harder.
+- `tools/world_shots.mjs`: Playwright screenshots of the real page with the demo pilot; fails on any
+  page error. Checked on desktop and at phone size with touch controls.
+- Not verified: real-GPU frame rate. Headless Chromium renders in software. F3 shows FPS, and slow
+  frames lower the resolution automatically.

@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CyberMetal Open World</title>
+<style>
+  /* One deliberate visual world: a neon cockpit HUD over a sunny 3D landscape. */
+  :root {
+    --bg: #05070f;
+    --panel: rgba(8, 12, 28, 0.72);
+    --edge: rgba(138, 176, 255, 0.55);
+    --ink: #e4ecff;
+    --muted: #8a9cc8;
+    --cyan: #6ae8ff;
+    --pink: #ff5ae0;
+    --good: #6affa0;
+    --bad: #ff5a5a;
+    --gold: #ffd84a;
+    color-scheme: dark;
+  }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); overflow: hidden; }
+  body { box-sizing: border-box; padding-inline: 16px; padding-block: 12px; font: 14px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-user-select: none; user-select: none; }
+  #app { position: relative; width: 100%; height: 100%; border-radius: 12px; overflow: hidden; box-shadow: 0 0 0 1px var(--edge), 0 12px 40px rgba(40, 80, 200, 0.25); }
+  #view { position: absolute; inset: 0; width: 100%; height: 100%; display: block; outline: none; touch-action: none; }
+  #view:focus-visible { box-shadow: inset 0 0 0 2px var(--cyan); }
+  .hud { position: absolute; inset: 0; pointer-events: none; }
+  .panel { position: absolute; top: 12px; left: 12px; padding: 10px 12px; min-width: 210px; max-width: calc(100% - 200px); background: var(--panel); border: 1px solid var(--edge); border-radius: 10px; backdrop-filter: blur(4px); }
+  .row { display: flex; align-items: center; gap: 8px; }
+  .row + .row { margin-top: 6px; }
+  .lbl { width: 30px; font: 700 11px/1 ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: 0.08em; color: var(--muted); }
+  .bar { position: relative; flex: 1; height: 10px; border-radius: 5px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+  .bar i { position: absolute; inset: 0 auto 0 0; width: 100%; border-radius: 5px; background: linear-gradient(90deg, #39d98a, var(--good)); transition: width 0.12s; }
+  .bar i.low { background: linear-gradient(90deg, #d83a3a, var(--bad)); }
+  #chRow { opacity: 0.35; transition: opacity 0.15s; }
+  #chRow.on { opacity: 1; }
+  #chFill { background: linear-gradient(90deg, #2fa8d8, var(--cyan)); transition: none; }
+  #chFill.full { background: linear-gradient(90deg, #c040ff, var(--pink)); }
+  #hpNum { width: 30px; text-align: right; font: 700 13px/1 ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
+  .stats { margin-top: 8px; display: flex; gap: 14px; font: 700 11px/1 ui-monospace, Menlo, monospace; letter-spacing: 0.06em; color: var(--muted); }
+  #data { color: var(--good); }
+  #minimap { position: absolute; top: 12px; right: 12px; width: 150px; height: 150px; }
+  #crosshair { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; border: 2px solid rgba(255, 255, 255, 0.85); border-radius: 50%; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5); }
+  #crosshair::after { content: ""; position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px; border-radius: 50%; background: #fff; }
+  #crosshair.lock { border-color: var(--bad); transform: scale(0.8); }
+  #toast { position: absolute; left: 50%; top: 22%; transform: translate(-50%, -8px); font: 800 22px/1.1 system-ui, sans-serif; letter-spacing: 0.12em; text-shadow: 0 2px 0 #000, 0 0 18px rgba(0, 0, 0, 0.6); opacity: 0; transition: opacity 0.2s, transform 0.2s; white-space: nowrap; }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+  #nums { position: absolute; inset: 0; overflow: hidden; }
+  .num { position: absolute; left: 0; top: 0; font: 800 16px/1 system-ui, sans-serif; color: #fff; text-shadow: 0 2px 0 #000, 0 0 6px rgba(0, 0, 0, 0.7); white-space: nowrap; will-change: transform; }
+  .num.big { font-size: 22px; color: var(--pink); }
+  .num.counter { font-size: 20px; color: var(--gold); }
+  .num.hurt { color: var(--bad); }
+  #hint { position: absolute; left: 12px; bottom: 12px; padding: 8px 10px; max-width: calc(100% - 24px); background: var(--panel); border: 1px solid var(--edge); border-radius: 8px; font-size: 12px; color: var(--muted); }
+  #hint b { color: var(--ink); font-weight: 600; }
+  #start { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; background: radial-gradient(ellipse at center, rgba(5, 7, 15, 0.55), rgba(5, 7, 15, 0.88)); cursor: pointer; }
+  #start[hidden] { display: none; }
+  .card { width: min(460px, 100%); padding: 22px 22px 18px; background: rgba(8, 12, 28, 0.9); border: 1px solid var(--edge); border-radius: 14px; box-shadow: 0 0 40px rgba(106, 232, 255, 0.15); }
+  .card h1 { margin: 0; font: 900 28px/1 system-ui, sans-serif; letter-spacing: 0.04em; text-wrap: balance; }
+  .card h1 span { color: var(--cyan); }
+  .card .tag { margin: 8px 0 14px; color: var(--muted); }
+  .keys { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 13px; }
+  .keys dt { font: 700 12px/1.4 ui-monospace, Menlo, monospace; color: var(--cyan); }
+  .keys dd { margin: 0; color: var(--ink); }
+  .go { margin-top: 16px; padding: 10px 14px; text-align: center; border-radius: 10px; background: linear-gradient(90deg, #1b3a8a, #3a1b8a); font-weight: 800; letter-spacing: 0.1em; }
+  /* Touch controls (shown on touch screens). */
+  #touch { display: none; position: absolute; inset: 0; pointer-events: none; }
+  body.touch #touch { display: block; }
+  body.touch #hint { display: none; }
+  #touch [data-look] { position: absolute; top: 0; right: 0; width: 55%; height: 70%; pointer-events: auto; touch-action: none; }
+  .stick { position: absolute; left: 18px; bottom: 18px; width: 120px; height: 120px; border-radius: 50%; background: rgba(255, 255, 255, 0.07); border: 1px solid var(--edge); pointer-events: auto; touch-action: none; }
+  .stick i { position: absolute; left: 50%; top: 50%; width: 48px; height: 48px; margin: -24px 0 0 -24px; border-radius: 50%; background: rgba(106, 232, 255, 0.35); border: 1px solid var(--cyan); }
+  .btns { position: absolute; right: 18px; bottom: 18px; display: grid; grid-template-columns: repeat(2, 64px); gap: 10px; pointer-events: auto; }
+  .btns button { width: 64px; height: 64px; border-radius: 50%; border: 1px solid var(--edge); background: rgba(8, 12, 28, 0.6); color: var(--ink); font: 800 12px/1 system-ui, sans-serif; letter-spacing: 0.06em; touch-action: none; }
+  .btns button.on { background: rgba(106, 232, 255, 0.35); }
+  .btns .fire { grid-column: 2; grid-row: 1 / span 2; height: 138px; border-radius: 32px; color: var(--cyan); }
+  @media (max-width: 560px) {
+    .panel { min-width: 0; max-width: calc(100% - 130px); }
+    #minimap { width: 104px; height: 104px; }
+    #toast { font-size: 16px; }
+  }
+  @media (prefers-reduced-motion: reduce) { #toast, .bar i { transition: none; } }
+</style>
+<script type="importmap">{"imports":{"three":"../node_modules/three/build/three.module.js","three/addons/":"../node_modules/three/examples/jsm/"}}</script>
+</head>
+<body>
+<div id="app">
+  <canvas id="view" tabindex="0" aria-label="CyberMetal Open World: a 3D world. Click to play."></canvas>
+  <div class="hud" aria-hidden="true">
+    <div class="panel">
+      <div class="row"><span class="lbl">HP</span><div class="bar"><i id="hpFill"></i></div><span id="hpNum">120</span></div>
+      <div class="row" id="chRow"><span class="lbl">CHG</span><div class="bar"><i id="chFill" style="width:0"></i></div><span style="width:30px"></span></div>
+      <div class="stats"><span id="data">DATA 0</span><span id="rifts">RIFTS 0/6</span></div>
+    </div>
+    <canvas id="minimap" width="300" height="300"></canvas>
+    <div id="crosshair"></div>
+    <div id="toast"></div>
+    <div id="nums"></div>
+    <div id="hint"><b>WASD</b> move · <b>Mouse</b> aim · <b>Click / J</b> blast, hold to charge · <b>Space</b> jump · <b>Shift</b> dash · <b>Q/E</b> turn</div>
+  </div>
+  <div id="touch" aria-hidden="true">
+    <div data-look></div>
+    <div class="stick" data-stick><i data-knob></i></div>
+    <div class="btns">
+      <button data-btn="jump">JUMP</button>
+      <button class="fire" data-btn="fire">BLAST</button>
+      <button data-btn="dash">DASH</button>
+    </div>
+  </div>
+  <div id="start" hidden>
+    <div class="card">
+      <h1>CYBERMETAL <span>OPEN WORLD</span></h1>
+      <p class="tag">Viruses are leaking out of the net into the real world. Find the six rifts, blast what comes out and seal them.</p>
+      <dl class="keys">
+        <dt>WASD</dt><dd>Move (the camera decides forward)</dd>
+        <dt>Mouse</dt><dd>Aim and look (click locks the mouse, Esc frees it)</dd>
+        <dt>Click / J</dt><dd>Blast · hold, then release for a charge shot</dd>
+        <dt>Space</dt><dd>Jump over shockwaves</dd>
+        <dt>Shift</dt><dd>Dash (you can't be hit mid-dash)</dd>
+        <dt>Q / E</dt><dd>Turn the camera · wheel to zoom</dd>
+        <dt>Gamepad</dt><dd>Sticks · A jump · B dash · X or RT blast</dd>
+      </dl>
+      <div class="go">CLICK TO PLAY</div>
+    </div>
+  </div>
+</div>
+<script type="module" src="../src/world/main.js"></script>
+</body>
+</html>
