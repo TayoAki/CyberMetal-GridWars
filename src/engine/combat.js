@@ -134,7 +134,7 @@ export function lob(b, user, hit, tc, tr, opts = {}) {
     const cells = opts.cells ? opts.cells(tc, tr) : [[tc, tr]];
     for (const [c, r] of cells) {
       if (!inside(c, r)) continue;
-      b.emit('fx', { fx: opts.landFx ?? 'explosion', col: c, row: r });
+      b.emit('fx', { fx: opts.landFx ?? 'explosion', col: c, row: r, level: opts.level ?? user.level });
       b.hitPanel(s, c, r);
       if (opts.crack) b.field.crack(c, r, !!b.entityAt(c, r));
       if (opts.breakPanel) b.field.breakPanel(c, r, !!b.entityAt(c, r));
@@ -158,7 +158,7 @@ export function drop(b, user, hit, c, r, opts = {}) {
       yield;
     }
     s.data.landed = true;
-    b.emit('fx', { fx: opts.landFx ?? 'explosion', col: c, row: r });
+    b.emit('fx', { fx: opts.landFx ?? 'explosion', col: c, row: r, level: opts.level ?? user.level });
     b.emit('sfx', { name: opts.sfx ?? 'explode' });
     b.hitPanel(s, c, r);
     if (opts.crack) b.field.crack(c, r, !!b.entityAt(c, r));

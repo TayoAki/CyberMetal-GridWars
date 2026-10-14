@@ -225,7 +225,7 @@ export class Battle {
     if (target.guardTimer > 0 && target.guard && !hit.breaksGuard) {
       res.blocked = true;
       res.reflected = true;
-      this.emit('fx', { fx: 'guard', col: target.col, row: target.row });
+      this.emit('fx', { fx: 'guard', col: target.col, row: target.row, dir: target.facing });
       this.emit('sfx', { name: 'guard' });
       if (target.guard.reflect > 0) this.reflectShot(target, target.guard.reflect);
       return res;

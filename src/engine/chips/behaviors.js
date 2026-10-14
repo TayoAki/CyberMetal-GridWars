@@ -100,12 +100,15 @@ function stepForward(b, u, steps) {
   };
 }
 
-function* summon(b, u, naviType, frames, body) {
+function* summon(b, u, chip, naviType, frames, body) {
   u.hidden = true;
-  b.emit('fx', { fx: 'summon', navi: naviType, col: u.col, row: u.row, dir: u.facing });
+  // The chip's version (Voltframe V2 -> 2) picks the navi's colours; a giga chip shows version 1.
+  const level = Number(/[1-3]$/.exec(chip.def.key)?.[0] ?? 1);
+  b.emit('fx', { fx: 'summon', navi: naviType, level, col: u.col, row: u.row, dir: u.facing });
   b.emit('sfx', { name: 'summon' });
   u.setAnim('summon');
   u.data.summon = naviType;
+  u.data.summonLevel = level;
   yield* wait(14);
   yield* body();
   yield* wait(frames);
@@ -670,7 +673,7 @@ export const BEHAVIORS = {
   // ------------------------------------------------------------ navi chips
 
   *navi_volt(b, u, chip) {
-    yield* summon(b, u, 'voltframe', 24, function* () {
+    yield* summon(b, u, chip, 'voltframe', 24, function* () {
       b.emit('fx', { fx: 'flash' });
       b.emit('sfx', { name: 'flash' });
       yield* wait(10);
@@ -679,7 +682,7 @@ export const BEHAVIORS = {
   },
 
   *navi_feral(b, u, chip) {
-    yield* summon(b, u, 'feralis', 16, function* () {
+    yield* summon(b, u, chip, 'feralis', 16, function* () {
       const c = u.col + 3 * u.facing;
       for (let k = 0; k < 2; k++) {
         b.emit('sfx', { name: 'claw' });
@@ -690,7 +693,7 @@ export const BEHAVIORS = {
   },
 
   *navi_tide(b, u, chip) {
-    yield* summon(b, u, 'tidecaller', 14, function* () {
+    yield* summon(b, u, chip, 'tidecaller', 14, function* () {
       const shots = chip.def.params.shots ?? 8;
       for (let i = 0; i < shots; i++) {
         b.emit('sfx', { name: 'bubble' });
@@ -703,7 +706,7 @@ export const BEHAVIORS = {
   },
 
   *navi_pyre(b, u, chip) {
-    yield* summon(b, u, 'pyreclaw', 20, function* () {
+    yield* summon(b, u, chip, 'pyreclaw', 20, function* () {
       const c = b.field.grabColumn(u.team);
       if (c >= 0) {
         b.emit('sfx', { name: 'flame' });
@@ -716,17 +719,19 @@ export const BEHAVIORS = {
   },
 
   *navi_iron(b, u, chip) {
-    yield* summon(b, u, 'ironclad', 20, function* () {
+    yield* summon(b, u, chip, 'ironclad', 20, function* () {
       const t = nearestOpponent(b, u);
       if (t) {
-        drop(b, u, H(chip), t.col, t.row, { delay: 26, type: 'fist', breakPanel: true, landFx: 'quake', sfx: 'hammer' });
+        const level = u.data.summonLevel ?? 1;
+        const fist = drop(b, u, H(chip), t.col, t.row, { delay: 26, type: 'piston', breakPanel: true, landFx: 'pistonhit', sfx: 'hammer', level });
+        fist.data.level = level;
         yield* wait(34);
       }
     });
   },
 
   *navi_sabre(b, u, chip) {
-    yield* summon(b, u, 'sabre', 16, function* () {
+    yield* summon(b, u, chip, 'sabre', 16, function* () {
       const t = nearestOpponent(b, u);
       if (t) {
         b.emit('fx', { fx: 'slash', shape: 'wide', col: t.col - u.facing, row: t.row, dir: u.facing });
@@ -738,7 +743,7 @@ export const BEHAVIORS = {
   },
 
   *navi_briar(b, u, chip) {
-    yield* summon(b, u, 'briarix', 14, function* () {
+    yield* summon(b, u, chip, 'briarix', 14, function* () {
       for (let k = 0; k < (chip.def.params.lashes ?? 3); k++) {
         b.emit('sfx', { name: 'claw' });
         const src = source(u, H(chip, { flinch: k === 2 }));
@@ -752,7 +757,7 @@ export const BEHAVIORS = {
   },
 
   *navi_mender(b, u, chip) {
-    yield* summon(b, u, 'mender', 14, function* () {
+    yield* summon(b, u, chip, 'mender', 14, function* () {
       const t = nearestOpponent(b, u);
       if (t) {
         b.emit('sfx', { name: 'punch' });
@@ -767,7 +772,7 @@ export const BEHAVIORS = {
   },
 
   *navi_crusher(b, u, chip) {
-    yield* summon(b, u, 'crusher', 18, function* () {
+    yield* summon(b, u, chip, 'crusher', 18, function* () {
       const c = b.field.grabColumn(u.team);
       if (c >= 0) {
         b.emit('sfx', { name: 'hammer' });
@@ -778,13 +783,13 @@ export const BEHAVIORS = {
   },
 
   *navi_zeroday(b, u, chip) {
-    yield* summon(b, u, 'zeroday', 20, function* () {
+    yield* summon(b, u, chip, 'zeroday', 20, function* () {
       const area = opponentArea(b, u.team);
       for (let wave = 0; wave < 3; wave++) {
         b.emit('sfx', { name: 'bigexplode' });
         const src = source(u, H(chip));
         for (const [c, r] of area) {
-          b.emit('fx', { fx: 'darkburst', col: c, row: r });
+          b.emit('fx', { fx: 'nullburst', col: c, row: r, level: 1 });
           b.hitPanel(src, c, r);
         }
         yield* wait(16);

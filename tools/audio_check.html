@@ -57,6 +57,21 @@ function stats(buf, from = 0, to = buf ? buf.duration : 0) {
   return { peak, rms: Math.sqrt(sum / Math.max(1, n)), nan, end: (lastLoud + 1) / sr };
 }
 
+// Longest stretch (s) of near-silence inside [from, to): 50 ms windows under -54 dBFS RMS.
+function longestGap(buf, from = 0, to = buf.duration) {
+  const sr = buf.sampleRate, w = Math.floor(0.05 * sr);
+  const chans = [];
+  for (let c = 0; c < buf.numberOfChannels; c++) chans.push(buf.getChannelData(c));
+  let run = 0, best = 0;
+  for (let i = Math.floor(from * sr); i + w <= Math.min(buf.length, Math.floor(to * sr)); i += w) {
+    let sum = 0;
+    for (const d of chans) for (let j = i; j < i + w; j++) sum += d[j] * d[j];
+    if (Math.sqrt(sum / (w * chans.length)) < 0.002) best = Math.max(best, (run += 0.05));
+    else run = 0;
+  }
+  return best;
+}
+
 function mono(buf, from, len) {
   const sr = buf.sampleRate, i0 = Math.floor(from * sr), n = Math.floor(len * sr);
   const out = new Float32Array(n);
@@ -103,10 +118,11 @@ async function checkMusic(name) {
   const buf = await audio.renderOffline('music', name, 8);
   if (!buf) return add({ kind: 'music', name, ok: false, note: 'render returned null' });
   const s = stats(buf);
-  const ok = !s.nan && s.peak <= 1 && s.rms > MUSIC_MIN_RMS && info.mismatch.length === 0;
+  const gap = longestGap(buf, 0, info.loop ? buf.duration : Math.min(buf.duration, s.end));
+  const ok = !s.nan && s.peak <= 1 && s.rms > MUSIC_MIN_RMS && info.mismatch.length === 0 && gap <= 0.15;
   add({
     kind: 'music', name, duration: r4(buf.duration), peak: r4(s.peak), rms: r4(s.rms), nan: s.nan, ok,
-    note: `${info.bpm} bpm, ${info.key}, intro ${info.introSec.toFixed(2)} s, loop ${info.loopSec.toFixed(2)} s (${info.loopBars} bars)${info.loop ? '' : ', one-shot'}${info.mismatch.length ? ' MISMATCH ' + info.mismatch.join('; ') : ''}`,
+    note: `${info.bpm} bpm, ${info.key}, intro ${info.introSec.toFixed(2)} s, loop ${info.loopSec.toFixed(2)} s (${info.loopBars} bars)${info.loop ? '' : ', one-shot'}; longest gap ${gap.toFixed(2)} s${info.mismatch.length ? ' MISMATCH ' + info.mismatch.join('; ') : ''}`,
   });
   if (!info.loop) {
     // One-shot jingle: render it whole and report its real length.
@@ -119,10 +135,11 @@ async function checkMusic(name) {
   const loopAt = info.introSec + info.loopSec;
   const seam = await audio.renderOffline('music', name, 7, { from: loopAt - 3 });
   const pre = stats(seam, 0, 3), post = stats(seam, 3, 7);
+  const gap = longestGap(seam);
   add({
     kind: 'loop', name, duration: r4(seam.duration), peak: r4(Math.max(pre.peak, post.peak)), rms: r4(post.rms), nan: pre.nan || post.nan,
-    ok: !pre.nan && !post.nan && post.rms > MUSIC_MIN_RMS && pre.rms > MUSIC_MIN_RMS && Math.max(pre.peak, post.peak) <= 1,
-    note: `seam at ${loopAt.toFixed(2)} s; rms before ${pre.rms.toFixed(4)}, after ${post.rms.toFixed(4)}`,
+    ok: !pre.nan && !post.nan && post.rms > MUSIC_MIN_RMS && pre.rms > MUSIC_MIN_RMS && Math.max(pre.peak, post.peak) <= 1 && gap <= 0.15,
+    note: `seam at ${loopAt.toFixed(2)} s; rms before ${pre.rms.toFixed(4)}, after ${post.rms.toFixed(4)}; longest gap ${gap.toFixed(2)} s`,
   });
 }
 
@@ -135,11 +152,31 @@ async function fullLoop(name) {
   const ms = performance.now() - t0;
   const all = stats(buf), after = stats(buf, loopAt, loopAt + 6);
   const c = correlation(mono(buf, info.introSec + 0.5, 4), mono(buf, loopAt + 0.5, 4));
+  const gap = longestGap(buf);
   add({
     kind: 'fullloop', name, duration: r4(buf.duration), peak: r4(all.peak), rms: r4(after.rms), nan: all.nan,
-    ok: !all.nan && all.peak <= 1 && after.rms > MUSIC_MIN_RMS && c > 0.8,
-    note: `straight ${buf.duration.toFixed(1)} s render (${(ms / 1000).toFixed(1)} s); rms after loop point ${after.rms.toFixed(4)}; pass 1 vs pass 2 correlation ${c.toFixed(3)}`,
+    ok: !all.nan && all.peak <= 1 && after.rms > MUSIC_MIN_RMS && c > 0.8 && gap <= 0.15,
+    note: `straight ${buf.duration.toFixed(1)} s render (${(ms / 1000).toFixed(1)} s); rms after loop point ${after.rms.toFixed(4)}; pass 1 vs pass 2 correlation ${c.toFixed(3)}; longest gap ${gap.toFixed(2)} s`,
   });
+}
+
+// Whole-song dropout scan for a looping track: overlapping 12 s chunks (seeking with `from`), each
+// scanned after a 3 s lead-in so notes begun before the seek point can't read as gaps.
+async function scanGaps(name) {
+  const info = trackInfo(name);
+  const total = info.introSec + info.loopSec + 2;
+  let worst = 0, at = 0, peak = 0, nan = false;
+  for (let pos = 0; pos < total; pos += 9) {
+    const from = Math.max(0, pos - 3);
+    const buf = await audio.renderOffline('music', name, 12, { from });
+    const skip = pos - from;
+    const g = longestGap(buf, skip, buf.duration);
+    const st = stats(buf, skip);
+    peak = Math.max(peak, st.peak);
+    nan = nan || st.nan;
+    if (g > worst) { worst = g; at = pos; }
+  }
+  add({ kind: 'gaps', name, duration: r4(total), peak: r4(peak), nan, ok: !nan && peak <= 1 && worst <= 0.15, note: `whole intro+loop scanned; longest gap ${worst.toFixed(2)} s${worst ? ` (chunk at ${at.toFixed(0)} s)` : ''}` });
 }
 
 // Click-to-listen buttons (live playback; the first click unlocks audio).
@@ -215,6 +252,7 @@ try {
   for (const n of SFX_NAMES) await checkSfx(n);
   for (const t of TRACK_NAMES) await checkMusic(t);
   await fullLoop('battle');
+  for (const t of TRACK_NAMES) if (trackInfo(t).loop) await scanGaps(t);
   const unknown = await audio.renderOffline('sfx', 'definitely-not-a-sound', 1);
   add({ kind: 'api', name: 'unknown sfx', ok: unknown === null, note: 'renderOffline of an unknown name resolves to null' });
 } catch (e) {

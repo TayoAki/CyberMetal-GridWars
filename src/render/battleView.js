@@ -49,7 +49,11 @@ export class BattleView {
     for (const ev of events) {
       switch (ev.type) {
         case 'fx':
-          if (ev.fx === 'flash') this.screenFlash = 24;
+          // The flash effect draws its own full-screen pop; with Reduce flash on, a dim veil replaces it.
+          if (ev.fx === 'flash' && this.calm) {
+            this.screenFlash = 24;
+            break;
+          }
           this.fx.push({ ev, age: 0, dur: fxDuration(ev.fx) });
           if (ev.fx === 'explosion' || ev.fx === 'quake') this.shake = Math.max(this.shake, 4);
           break;
@@ -277,10 +281,9 @@ export class BattleView {
     const y = floor - (e.z ?? 0);
     // Summon: the player's slot shows the called navi.
     if (e === this.b.player && e.data.summon) {
-      const fake = { ...e, type: e.data.summon, anim: 'summon', animT: e.animT, facing: 1, level: 1, data: {}, hidden: false };
+      const fake = { ...e, type: e.data.summon, anim: 'summon', animT: e.animT, facing: 1, level: e.data.summonLevel ?? 1, data: {}, hidden: false };
       ellipse(ctx, x, floor, 10, 3, 'rgba(0,0,0,0.35)');
-      if (ENTITY_SPRITES[e.data.summon]) drawEntitySprite(ctx, fake, x, y, t);
-      else drawEntitySprite(ctx, fake, x, y, t);
+      drawEntitySprite(ctx, fake, x, y, t);
       return;
     }
     if (e.hidden) return;
@@ -315,24 +318,25 @@ export class BattleView {
     else drawEntitySprite(ctx, e, x, y, t);
     ctx.globalAlpha = 1;
 
-    // Status overlays.
+    // Status overlays, sized for the body: navi bodies stand 38-62 px tall, the rest about 32.
+    const tall = e.kind === 'navi' ? 1 : 0;
     if (e.stunTimer > 0 && e.alive) {
       for (let i = 0; i < 3; i++) {
         const a = t / 6 + (i * Math.PI * 2) / 3;
-        const sxp = x + Math.round(Math.cos(a) * 9);
-        const syp = y - 34 + Math.round(Math.sin(a) * 3);
+        const sxp = x + Math.round(Math.cos(a) * (9 + tall * 3));
+        const syp = y - 34 - tall * 18 + Math.round(Math.sin(a) * 3);
         rect(ctx, sxp, syp, 2, 2, i % 2 ? '#ffe85a' : '#ffffff');
       }
     }
     if (e.barrierHp > 0) {
-      const pulse = 15 + ((t >> 3) % 2);
-      ring(ctx, x, y - 14, pulse, t % 6 < 3 ? '#9ae8ff' : '#5ab8ff');
-      ring(ctx, x, y - 14, pulse - 1, 'rgba(154,232,255,0.35)');
+      const pulse = 15 + tall * 7 + ((t >> 3) % 2);
+      ring(ctx, x, y - 14 - tall * 9, pulse, t % 6 < 3 ? '#9ae8ff' : '#5ab8ff');
+      ring(ctx, x, y - 14 - tall * 9, pulse - 1, 'rgba(154,232,255,0.35)');
     }
     if (e.auraPower > 0) {
       for (let i = 0; i < 8; i++) {
         const a = t / 8 + (i * Math.PI) / 4;
-        rect(ctx, x + Math.round(Math.cos(a) * 15), y - 16 + Math.round(Math.sin(a) * 18), 2, 2, i % 2 ? '#ff7ae0' : '#ffd0f8');
+        rect(ctx, x + Math.round(Math.cos(a) * (15 + tall * 6)), y - 16 - tall * 9 + Math.round(Math.sin(a) * (18 + tall * 9)), 2, 2, i % 2 ? '#ff7ae0' : '#ffd0f8');
       }
     }
     if (e.guardTimer > 0 && e.kind !== 'player' && !ENTITY_SPRITES[e.type]) {
@@ -387,7 +391,16 @@ export class BattleView {
     const fill = Math.round((gw * b.gauge) / TIMING.GAUGE_FULL);
     rect(ctx, gx, gy, fill, 9, full ? (t % 12 < 6 ? '#ffd23a' : '#fff07a') : '#3ad0ff');
     rect(ctx, gx, gy, fill, 2, full ? '#fff8c8' : '#a8f0ff');
-    drawText(ctx, 'CUSTOM', gx + gw / 2, gy + 1, full ? '#5a3a00' : '#0a1a3a', { align: 'center' });
+    // The label reads light over the empty part of the bar and dark over the filled part.
+    drawText(ctx, 'CUSTOM', gx + gw / 2, gy + 1, '#7f9ad8', { align: 'center' });
+    if (fill > 0) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(gx, gy, fill, 9);
+      ctx.clip();
+      drawText(ctx, 'CUSTOM', gx + gw / 2, gy + 1, full ? '#5a3a00' : '#0a1a3a', { align: 'center' });
+      ctx.restore();
+    }
     if (full && b.phase === 'fight' && t % 30 < 20) drawText(ctx, 'PRESS L / R', gx + gw / 2, gy + 12, '#ffe04a', { align: 'center', outline: '#2a1a00' });
 
     // Queued chips: icons stacked above the player, the next chip's name at the bottom left.
