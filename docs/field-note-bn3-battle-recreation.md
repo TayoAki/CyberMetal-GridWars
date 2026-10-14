@@ -104,6 +104,10 @@ All offsets are ROM file offsets; add 0x08000000 for the bus address.
   battle screenshots.
 - **End to end:** Playwright drives title → Gauntlet → an autopilot battle → results → map, and fails on
   any page error.
+- **Balance sweep:** a headless autopilot plays every encounter with several seeds and reports win rate,
+  length and damage taken by source (`node tools/balance.mjs 6`). The bot dodges using only what the
+  game telegraphs (marked panels, wind-up animations, spell headings). An encounter it loses every time
+  usually can't be dodged at all; that is a design bug, not a skill check.
 - **Not verified:** timings against the real game. Gauge fill, charge time, i-frames and virus attack
   damage are believed, not measured. The next step is mGBA Lua with a save state at a battle.
 
@@ -120,6 +124,19 @@ All offsets are ROM file offsets; add 0x08000000 for the bus address.
    as a module. **Fix:** use the glob `tests/*.test.js`.
 5. **Symptom:** an off-by-one in a gauge test. **Cause:** the gauge fills, and an L press on that same
    frame opens the Custom Screen, which is intended. **Fix:** test L one frame *before* full.
+6. **Symptom:** repeated taps were lost in headless Chromium. **Cause:** frames arrive in bursts, so a
+   release and the next press land between two samples and merge into one held press. **Fix:** queue
+   held-state transitions per button and replay at most one per frame.
+7. **Symptom:** a "harmless" telemetry change broke exact-count tests in a content pack. **Cause:** the
+   engine called a content callback early to record its landing cells; the callback drew from the
+   seeded RNG, which shifted every later roll. **Fix:** never call content callbacks speculatively;
+   content leaves static hints (`data.blast`) instead.
+8. **Symptom:** one Lv3 meteor virus won every time. **Cause:** each meteor cracked a panel, and
+   stepping off a cracked panel breaks it, so the player's area became holes within a minute. **Fix:**
+   only the Ω version's aimed meteors crack. Panel-removing hazards need a budget.
+9. **Symptom:** making the bot read exact blast shapes made an ice stage worse. **Cause:** on ice a step
+   slides to the next non-ice panel, so the planned dodge slid back into the blast. **Fix:** plan in
+   real steps, slides included, and rerun the whole sweep after every bot change.
 
 ## Assets
 - All original, drawn in code as pixel-string sprites and primitives, with an original bitmap font.
@@ -129,5 +146,6 @@ All offsets are ROM file offsets; add 0x08000000 for the bus address.
 ## Open questions
 - Measure gauge, charge and i-frame timings in an emulator.
 - Locate the PA recipe check in code.
-- Style Change and the full Navi Customizer puzzle are not recreated.
+- Style Change is simplified: beating a boss unlocks a type or an element to wear, instead of styles
+  earned by how you fight. The Navi Customizer's block puzzle is a plain memory budget.
 - Local versus netbattles.
