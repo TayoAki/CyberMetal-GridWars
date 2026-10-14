@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Chip Art Sheet</title>
+<style>
+  body { margin: 0; background: #1a1d2b; color: #cfd6ff; font: 12px monospace; }
+  canvas { image-rendering: pixelated; display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script type="module">
+// Core-art preview sheet. Query params:
+//   (default) mode=chips  every chip: 14x14 icon, 56x48 art, name, element icon      &cols=6 &t=0 &scale=3
+//             &keys=cannon,sword (subset)  &elements=1 (also the 9x9 element icons row)
+//   mode=frames  entity animation strips over animT: &entity=player &anims=sword,hammer &frames=0,3,6,9
+//                &facing=1 &charge=0 &t=0 &level=1 &data={"fuse":60,"fuseMax":180}
+//   mode=scene   mock 240x160 battle screens: &fx=slash:wide,buster &spells=flames,meteor &ages=0,4,8,12
+//                spell options go after a colon too (spells=fist:drop). Each item is one row of screens.
+import { CHIPS } from '../src/engine/chips/library.js';
+import '../src/engine/chips/pa.js';
+import { drawChipIcon, drawChipArt, drawElementIcon } from '../src/render/chipart.js';
+import { drawEntitySprite, drawSpellSprite, drawFxSprite, fxDuration } from '../src/render/sprites/index.js';
+import { drawText } from '../src/render/font.js';
+import { rect, frame, ellipse } from '../src/render/pixel.js';
+import { floorPoint, PANEL_W, PANEL_H, FIELD_Y } from '../src/render/layout.js';
+
+const q = new URLSearchParams(location.search);
+const mode = q.get('mode') ?? 'chips';
+const scale = Number(q.get('scale') ?? 3);
+const list = (k, d = '') => (q.get(k) ?? d).split(',').filter(Boolean);
+
+let W = 240;
+let H = 160;
+let paint = () => {};
+
+if (mode === 'chips') {
+  const keys = q.get('keys') ? list('keys') : Object.keys(CHIPS);
+  const cols = Number(q.get('cols') ?? 6);
+  const t = Number(q.get('t') ?? 0);
+  const CW = 66;
+  const CHT = 80;
+  const extra = q.get('elements') ? 20 : 0;
+  W = cols * CW + 4;
+  H = Math.ceil(keys.length / cols) * CHT + 4 + extra;
+  paint = (ctx) => {
+    rect(ctx, 0, 0, W, H, '#202436');
+    if (extra) {
+      ['null', 'fire', 'aqua', 'elec', 'wood'].forEach((el, i) => {
+        drawElementIcon(ctx, el, 4 + i * 40, 6);
+        drawText(ctx, el, 16 + i * 40, 6, '#9fb0ff', { mini: true });
+      });
+    }
+    keys.forEach((key, i) => {
+      const def = CHIPS[key];
+      const x = 4 + (i % cols) * CW;
+      const y = 4 + extra + Math.floor(i / cols) * CHT;
+      rect(ctx, x - 1, y - 1, CW - 4, CHT - 4, '#262b40');
+      if (!def) {
+        drawText(ctx, `?${key}`, x, y, '#ff6a6a');
+        return;
+      }
+      drawChipArt(ctx, def, x + 2, y, t);
+      drawChipIcon(ctx, def, x + 2, y + 50);
+      drawElementIcon(ctx, def.element, x + 18, y + 52);
+      drawText(ctx, def.name, x + 29, y + 51, '#ffffff', { mini: false, scale: 1 });
+      drawText(ctx, `${def.behavior}`.slice(0, 13), x + 2, y + 66, '#7a83b8', { mini: true });
+      if (def.klass !== 'standard') drawText(ctx, def.klass, x + 44, y + 66, '#ffd27a', { mini: true });
+    });
+  };
+} else if (mode === 'frames') {
+  const entity = q.get('entity') ?? 'player';
+  const anims = list('anims', 'idle');
+  const frames = list('frames', '0,2,4,6,8,10,12,14').map(Number);
+  const facing = Number(q.get('facing') ?? 1);
+  const charge = Number(q.get('charge') ?? 0);
+  const t0 = Number(q.get('t') ?? 0);
+  const level = Number(q.get('level') ?? 1);
+  const data = JSON.parse(q.get('data') ?? '{}');
+  const CW = Number(q.get('cw') ?? 64);
+  const CHT = Number(q.get('ch') ?? 64);
+  W = 70 + frames.length * CW;
+  H = anims.length * CHT + 12;
+  paint = (ctx) => {
+    rect(ctx, 0, 0, W, H, '#202436');
+    frames.forEach((f, j) => drawText(ctx, `T${f}`, 70 + j * CW + 4, 2, '#ffd27a', { mini: true }));
+    anims.forEach((anim, i) => {
+      const y0 = 12 + i * CHT;
+      drawText(ctx, anim, 2, y0 + 4, '#9fb0ff');
+      rect(ctx, 0, y0 + CHT - 1, W, 1, '#2c3150');
+      frames.forEach((f, j) => {
+        const x = 70 + j * CW + CW / 2;
+        const y = y0 + CHT - 10;
+        rect(ctx, x - 20, y, 40, 1, '#3a4170');
+        ellipse(ctx, x, y, 10, 3, 'rgba(0,0,0,0.35)');
+        const e = { type: entity, anim, animT: f, facing, level, team: facing > 0 ? 'red' : 'blue', element: 'null', data: { charge, ...data }, hp: 100, maxHp: 100, z: 0, offsetX: 0, offsetY: 0, alive: true, kind: 'player' };
+        drawEntitySprite(ctx, e, x, y, t0 + f);
+      });
+    });
+  };
+} else if (mode === 'scene') {
+  // Mock battle screens: a plain 6x3 field, AXIOM at (1,1), a target dummy at (4,1).
+  const items = [...list('fx').map((s) => ['fx', s]), ...list('spells').map((s) => ['spell', s])];
+  const ages = list('ages', '0,4,8,12').map(Number);
+  const SW = 240;
+  const SH = 160;
+  const GAP = 4;
+  W = ages.length * (SW + GAP) + 4;
+  H = items.length * (SH + GAP + 10) + 4;
+  const player = { type: 'player', anim: 'idle', animT: 0, facing: 1, level: 1, team: 'red', element: 'null', data: {}, hp: 100, maxHp: 100, z: 0, alive: true, col: 1, row: 1 };
+  const drawField = (ctx) => {
+    rect(ctx, 0, 0, SW, SH, '#0b1a3a');
+    for (let r = 0; r < 3; r++) {
+      for (let c = 0; c < 6; c++) {
+        const x = c * PANEL_W;
+        const y = FIELD_Y + r * PANEL_H;
+        const red = c < 3;
+        rect(ctx, x, y, PANEL_W, PANEL_H, red ? '#4a0c10' : '#0c1450');
+        rect(ctx, x + 1, y + 1, PANEL_W - 2, 17, red ? '#e05454' : '#5272e4');
+        rect(ctx, x + 4, y + 3, PANEL_W - 8, 12, red ? '#ee7070' : '#7090f0');
+        rect(ctx, x + 1, y + 18, PANEL_W - 2, 5, red ? '#9a2626' : '#26369a');
+      }
+    }
+  };
+  const dummy = (ctx, c, r) => {
+    const p = floorPoint(c, r);
+    ellipse(ctx, p.x, p.y, 10, 3, 'rgba(0,0,0,0.35)');
+    rect(ctx, p.x - 8, p.y - 24, 16, 24, '#4a5a7a');
+    frame(ctx, p.x - 8, p.y - 24, 16, 24, '#0c0f1c');
+  };
+  paint = (ctx) => {
+    rect(ctx, 0, 0, W, H, '#202436');
+    items.forEach(([kind, spec], i) => {
+      const [name, opt] = spec.split(':');
+      ages.forEach((age, j) => {
+        const ox = 4 + j * (SW + GAP);
+        const oy = 4 + i * (SH + GAP + 10);
+        drawText(ctx, `${name}${opt ? ':' + opt : ''} @${age}`, ox, oy, '#9fb0ff', { mini: true });
+        ctx.save();
+        ctx.translate(ox, oy + 8);
+        ctx.beginPath();
+        ctx.rect(0, 0, SW, SH);
+        ctx.clip();
+        drawField(ctx);
+        dummy(ctx, 4, 1);
+        const pp = floorPoint(1, 1);
+        ellipse(ctx, pp.x, pp.y, 10, 3, 'rgba(0,0,0,0.35)');
+        drawEntitySprite(ctx, { ...player, anim: q.get('anim') ?? 'idle', animT: age }, pp.x, pp.y, age);
+        if (kind === 'fx') {
+          const ev = { fx: name, col: 1, row: 1, dir: 1, toCol: 4, hit: true, shape: opt ?? 'wide', element: q.get('element') ?? 'null', navi: opt ?? 'mender', panel: opt ?? 'lava' };
+          if (['explosion', 'burst', 'bubble', 'flame', 'ice', 'punch', 'quake', 'guard', 'barrierup', 'barrierhit', 'barrierbreak', 'aurablock', 'aurabreak', 'stun', 'panelfall', 'lance', 'claw', 'darkburst', 'geyser', 'rock'].includes(name)) ev.col = 4;
+          if (name === 'fan') ev.dir = -1;
+          const dur = fxDuration(name);
+          if (age < dur) {
+            const p = floorPoint(ev.col, ev.row);
+            drawFxSprite(ctx, ev, p.x, p.y, age);
+          } else drawText(ctx, `done (${dur})`, 4, 4, '#ff9a9a', { mini: true });
+        } else {
+          const s = { type: name, t: age, x: 3, y: 1, z: 0, dir: 1, team: 'red', data: {}, element: 'null', hit: {}, col: 3, row: 1 };
+          if (opt === 'drop' || ['meteor', 'geyser', 'eruption'].includes(name)) {
+            s.data.delay = 30;
+            s.data.progress = Math.min(1, age / 30);
+            if (age >= 30) s.data.landed = true;
+            s.x = 4;
+          }
+          if (['flames', 'zone', 'plasma', 'tornado', 'firetower'].includes(name)) {
+            const cells = name === 'flames' ? [[0, 0], [1, 0], [2, 0], [0, 1], [2, 1], [0, 2], [1, 2], [2, 2]] : name === 'firetower' ? [[3, 0], [3, 1], [3, 2]] : name === 'zone' ? [[3, 0], [3, 1], [4, 1]] : [[3, 1]];
+            s.data.cells = cells;
+            s.x = cells[0][0];
+            s.y = cells[0][1];
+          }
+          if (['bomb', 'cannonball', 'iceball', 'lavaball'].includes(name)) {
+            const k = Math.min(1, age / 34);
+            s.x = 1 + 3 * k;
+            s.z = 40 * 4 * k * (1 - k);
+          }
+          if (name === 'ratton' && opt === 'turned') s.data.turned = 1;
+          if (name === 'reticle') s.data.progress = Math.min(1, age / 40);
+          if (name === 'yoyo') s.owner = player;
+          const p = floorPoint(s.x, s.y);
+          drawSpellSprite(ctx, s, p.x, p.y, age);
+        }
+        ctx.restore();
+      });
+    });
+  };
+}
+
+const buf = document.createElement('canvas');
+buf.width = W;
+buf.height = H;
+const ctx = buf.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+paint(ctx);
+const c = document.getElementById('c');
+c.width = W * scale;
+c.height = H * scale;
+const g = c.getContext('2d');
+g.imageSmoothingEnabled = false;
+g.drawImage(buf, 0, 0, W * scale, H * scale);
+window.__ready = true;
+</script>
+</body>
+</html>
