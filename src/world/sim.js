@@ -805,6 +805,10 @@ export class World {
     if (!key) return;
     const c = (this.chips[key] ??= { deletes: 0, level: 0 });
     c.deletes++;
+    // Enough deletes of this family teach a forge mod (it still costs DATA to unlock).
+    for (const m of MOD_KEYS) {
+      if (MODS[m].learn?.from === e.type && MODS[m].learn.deletes === c.deletes && !this.programs.has(m)) this.emit('mod-ready', { mod: m });
+    }
     const level = chipLevel(c.deletes);
     if (level > c.level) {
       c.level = level;
@@ -942,7 +946,7 @@ export class World {
         shot.pierce = true;
         shot.hitIds = new Set();
       }
-      if (homing) shot.homing = homing.id;
+      if (homing && i === 0) shot.homing = homing.id; // Split's side shots fly straight
       if (fx?.burst) {
         if (shot.splash > 0) shot.splash *= 1.35;
         else {
@@ -1229,6 +1233,7 @@ export class World {
     }
     const soaked = e.soak > 0;
     if (soaked) e.soak -= DT;
+    if (e.shockImmune > 0) e.shockImmune -= DT;
     if (e.flinch > 0) {
       e.flinch -= DT;
       e.vx *= 0.88;
@@ -1293,19 +1298,22 @@ export class World {
     if (!e.alive) return;
     const fx = src.fx ?? null;
     const element = fx?.element ?? src.element ?? null;
-    let amount = dmg;
+    // Bonuses add up rather than multiply (as Battle Network 4-6 changed it): a weakness is +100%, a critical
+    // +100%, a counter +100% (+200% with the Overclock core). So a weak critical counter is ×4, not ×8.
+    let bonus = 0;
     // Elements (Battle Network): the element that beats the virus's own deals double damage.
     const weak = !!element && ELEMENTS[element].beats === e.def.element;
-    if (weak) amount *= 2;
+    if (weak) bonus += 1;
     // Critical mod: every fourth hit from a forged weapon with it deals double.
     let crit = false;
     if (fx?.crit && ++this.critCount % 4 === 0) {
-      amount *= 2;
+      bonus += 1;
       crit = true;
     }
     const counter = e.state === 'windup';
+    if (counter) bonus += this.kit.counter - 1;
+    const amount = dmg * (1 + bonus);
     if (counter) {
-      amount *= this.kit.counter;
       e.state = 'recover';
       e.t = 0.9;
       this.stats.counters++;
@@ -1379,10 +1387,15 @@ export class World {
       e.burn = STATUS.burn.ticks;
     } else if (element === 'aqua') e.soak = STATUS.soak.time;
     else if (element === 'elec') {
+      // Shock pips build to a stun; then the virus resists for a while and needs more hits next time.
+      if (e.shockImmune > 0) return;
+      const { hits, stun, immune } = STATUS.shock;
       e.shock = (e.shock ?? 0) + 1;
-      if (e.shock >= STATUS.shock.hits) {
+      if (e.shock >= hits[Math.min(e.shockLevel ?? 0, hits.length - 1)]) {
         e.shock = 0;
-        e.flinch = Math.max(e.flinch, STATUS.shock.stun); // a stun gets through revenge armor
+        e.shockLevel = (e.shockLevel ?? 0) + 1;
+        e.shockImmune = stun + immune;
+        e.flinch = Math.max(e.flinch, stun); // a stun gets through revenge armor
         if (e.state === 'windup') {
           e.state = 'recover';
           e.t = 0.8;
@@ -1480,6 +1493,7 @@ export class World {
     if (op === 'unlock') {
       const mod = MODS[cmd.mod];
       if (!mod || this.programs.has(cmd.mod)) return;
+      if (!this.modLearned(cmd.mod)) return deny('learn', { mod: cmd.mod, from: mod.learn.from, need: mod.learn.deletes - this.deletesOf(mod.learn.from) });
       if (this.wallet < mod.price) return deny('data', { mod: cmd.mod });
       this.wallet -= mod.price;
       this.programs.add(cmd.mod);
@@ -1522,6 +1536,17 @@ export class World {
       }
       return this.emit('design-deleted', { id: design.id, name: design.name });
     }
+  }
+
+  // How many of a virus family the player has deleted (the chips keep count).
+  deletesOf(type) {
+    return this.chips[CHIP_OF[type]]?.deletes ?? 0;
+  }
+
+  // Has the player deleted enough of the right viruses to unlock this mod with DATA?
+  modLearned(mod) {
+    const learn = MODS[mod]?.learn;
+    return !learn || this.deletesOf(learn.from) >= learn.deletes;
   }
 
   // The kit from the loadout, with the equipped forged designs applied.
@@ -1783,7 +1808,7 @@ export class World {
     h = (h + (p.lock ?? 0) * 7 + this.deck.length * 5 + this.stats.strikes * 3 + this.wallet * 11) | 0;
     for (const slot of SLOTS) for (const ch of this.loadout[slot]) h = (h * 31 + ch.charCodeAt(0)) | 0;
     h = (h + this.designs.length * 17 + (this.equipped.arm ?? 0) * 3 + (this.equipped.gun ?? 0) * 5 + this.critCount + Math.round(this.leech * 100)) | 0;
-    for (const e of this.enemies) h = (h * 7 + Math.round((e.burn ?? 0) * 10) + Math.round((e.soak ?? 0) * 10)) | 0;
+    for (const e of this.enemies) h = (h * 7 + Math.round((e.burn ?? 0) * 10) + Math.round((e.soak ?? 0) * 10) + (e.shock ?? 0) * 3 + (e.shockLevel ?? 0) * 5 + Math.round((e.shockImmune ?? 0) * 10)) | 0;
     return (h + this.shots.length * 101 + this.stats.data * 13) | 0;
   }
 }

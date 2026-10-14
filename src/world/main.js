@@ -56,12 +56,25 @@ const garage = new Garage(document.getElementById('garage'), world, {
     audio.play('buzz');
   },
   onClose: () => {
+    document.body.classList.remove('garage-open');
     view.showcase = 0;
     input.reset();
     audio.play('cancel');
     canvas.focus();
   },
+  // The forge draws the design being edited on the mech.
+  onPreview: (design) => {
+    view.preview = design;
+  },
 });
+// The garage menu sits beside the mech (to the right on wide screens, below on tall ones), and the camera
+// frames the mech in the space left over.
+function frameShowcase() {
+  const portrait = canvas.clientHeight > canvas.clientWidth * 1.05;
+  view.showcaseFrame = portrait ? { x: 0, y: 0.58, dist: 6.2 } : { x: -0.5, y: 0, dist: 3.8 };
+}
+frameShowcase();
+addEventListener('resize', frameShowcase);
 function toggleGarage() {
   if (garage.open) return garage.close();
   if (!started || auto) return;
@@ -72,11 +85,13 @@ function toggleGarage() {
   }
   document.exitPointerLock?.();
   view.showcase = 1;
+  document.body.classList.add('garage-open');
   garage.show();
   audio.play('customopen');
 }
+const typing = (el) => !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable === true);
 addEventListener('keydown', (e) => {
-  if (e.code === 'KeyG' && !garage.open && !e.ctrlKey && !e.metaKey && !e.altKey) toggleGarage();
+  if (e.code === 'KeyG' && !garage.open && !e.ctrlKey && !e.metaKey && !e.altKey && !typing(e.target)) toggleGarage();
 });
 document.getElementById('garageBtn')?.addEventListener('click', (e) => {
   e.stopPropagation();
@@ -91,7 +106,13 @@ const SFX = {
   'charge-start': 'charge',
   'charge-full': 'chargefull',
   impact: (e) => (e.team === 'enemy' || ['charge', 'cannon', 'deflect'].includes(e.kind) ? 'explode' : e.surface === 'enemy' ? 'hit' : null),
-  'enemy-hit': (e) => (e.counter ? 'counter' : e.kind === 'finisher' || e.kind === 'react' ? 'hammer' : e.kind === 'melee' ? 'punch' : null),
+  'enemy-hit': (e) => {
+    if (e.kind === 'burn') return ['flame', { volume: 0.35 }];
+    const hit = e.counter ? 'counter' : e.kind === 'finisher' || e.kind === 'react' ? 'hammer' : e.kind === 'melee' ? 'punch' : null;
+    // A weakness hit adds its element's sound (Battle Network's flame, bubble, zap and wind).
+    const el = e.weak && { fire: 'flame', aqua: 'bubble', elec: 'zap', wood: 'wind' }[e.element];
+    return el ? [...(hit ? [hit] : []), [el, { volume: 0.7 }]] : hit;
+  },
   swing: (e) => {
     const arm = world.loadout.arm;
     if (arm === 'breaker') return ['hammer', { pitch: e.finisher ? 0.8 : 1 }];
@@ -117,6 +138,16 @@ const SFX = {
   'part-bought': 'confirm',
   'part-equipped': 'select',
   'garage-denied': 'buzz',
+  'design-saved': ['confirm', 'pa'],
+  'design-deleted': 'deselect',
+  'program-unlocked': 'gaugefull',
+  'mod-ready': 'pa',
+  dummies: 'summon',
+  burst: 'explode',
+  arc: ['zap', { pitch: 1.4 }],
+  stun: 'zap',
+  'wave-cast': 'wave',
+  leech: (e) => (e.amount >= 3 ? 'recover' : null),
   delete: 'delete',
   hurt: 'hurt',
   down: 'playerdelete',
@@ -142,10 +173,11 @@ function sound(ev) {
   const p = world.player;
   const d = ev.x !== undefined ? Math.hypot(ev.x - p.x, ev.z - p.z) : 0;
   const volume = Math.max(0.15, 1 - d / 60);
-  if (typeof out === 'string' || (Array.isArray(out) && typeof out[1] === 'object')) out = [out];
+  const single = (x) => typeof x === 'string' || (Array.isArray(x) && typeof x[0] === 'string' && x[1] && typeof x[1] === 'object' && !Array.isArray(x[1]));
+  if (single(out)) out = [out];
   for (const one of out) {
     const [name, opts] = typeof one === 'string' ? [one, {}] : one;
-    audio.play(name, { volume, ...opts });
+    audio.play(name, { ...opts, volume: volume * (opts.volume ?? 1) });
   }
 }
 
@@ -208,12 +240,13 @@ function handle(ev) {
   hud.onEvent(ev);
   sound(ev);
   if (ev.type === 'respawn') view.faceCamera(0);
+  if (ev.type === 'dummies') view.faceCamera(world.player.yaw); // look at the training dummies
   if (SAVE_ON.has(ev.type)) dirty = true;
-  if (ev.type.startsWith('part-') || ev.type === 'garage-denied') garage.render();
+  garage.onEvent(ev);
 }
 
 // Save a few seconds after progress changes, and when the page is hidden.
-const SAVE_ON = new Set(['part-found', 'part-bought', 'part-equipped', 'chip-learn', 'pickup']);
+const SAVE_ON = new Set(['part-found', 'part-bought', 'part-equipped', 'chip-learn', 'pickup', 'delete', 'design-saved', 'design-deleted', 'program-unlocked']);
 let dirty = false;
 let saveT = 0;
 document.addEventListener('visibilitychange', () => {

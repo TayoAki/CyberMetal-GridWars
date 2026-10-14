@@ -27,6 +27,9 @@ const PAD = { a: 0, b: 1, x: 2, y: 3, lb: 4, rb: 5, lt: 6, rt: 7, left: 14, righ
 // LB + face button -> chip slot (X, Y, B, A like KH2's square, triangle, circle, cross).
 const PAD_CHIPS = [PAD.x, PAD.y, PAD.b, PAD.a];
 
+// Is the key going to a text box (the forge's name or code)? Then it is typing, not playing.
+const typing = (el) => !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable === true);
+
 export class WorldInput {
   // win: the window to listen on (a stand-in in tests).
   constructor(canvas, touchRoot = null, win = globalThis) {
@@ -54,6 +57,7 @@ export class WorldInput {
     };
     win.addEventListener('keydown', (e) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return; // leave browser shortcuts (reload, find...) alone
+      if (typing(e.target)) return; // the forge's name and code boxes
       if (isGameKey(e.code)) e.preventDefault();
       if (e.repeat) return;
       press(e.code);

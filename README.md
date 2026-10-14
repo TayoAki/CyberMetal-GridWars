@@ -15,8 +15,9 @@ from the owner's own BN3 ROM. None of the ROM's bytes ship in this repo.
 The next direction for the project: the same kind of fights, taken off the grid into a 3D world (think
 Palworld's open landscapes), fought like Kingdom Hearts 2 with Mega Man X's buster on top. Viruses are
 leaking out of the net into the real world; find the six rifts, fight what comes out and seal them. Every
-virus family you delete teaches you its signature attack as a chip, so Battle Network's chips live on, and
-your mech's parts decide your moves, Medabots and Custom Robo style.
+virus family you delete teaches you its signature attack as a chip, so Battle Network's chips live on,
+your mech's parts decide your moves, Medabots and Custom Robo style, and in the forge you design weapons of
+your own.
 
 - **Run it:** `npm install`, `npm run serve`, then open http://127.0.0.1:8123/world/. Or `npm run build` and
   open `dist/world.html` (one file, works offline). Add `?auto=1` to watch the demo pilot play.
@@ -31,7 +32,7 @@ your mech's parts decide your moves, Medabots and Custom Robo style.
   | Reaction command | F (when a gold prompt shows) | Y | The gold button |
   | Chips | 1, 2, 3 | Hold LB + X, Y, B | Chip buttons |
   | Jump / dodge | Space / Shift | A / B | JUMP / DODGE |
-  | Garage (out of combat) | G | Back | GARAGE |
+  | Garage and forge (out of combat) | G | Back | GARAGE |
 
   Without mouse capture (some embedded pages), drag with the right button or use Q/E to turn and K to
   shoot. **F3** shows the frame rate.
@@ -77,13 +78,34 @@ your mech's parts decide your moves, Medabots and Custom Robo style.
     - **Core:** Standard, Fortress (more HP), Link (faster, stronger chips), Overclock (×3 counters, stronger
       reactions).
     - **Getting parts:** sealing a rift turns up a part you don't have; DATA from viruses buys the rest.
+  - **The forge (design your own weapons):** the garage's FORGE tab. Modelled on Warframe's modular weapons
+    (a base part plus mods in a capacity budget), inside Battle Network's NaviCust memory and element wheel,
+    with Zelda: Tears of the Kingdom's Fuse in mind: viruses teach the effects (see the research notes).
+    - **Base:** an arm or gun part you own; it keeps its moves (combo or fire mode).
+    - **Look:** four shapes per base (sabers come Straight, Curved, Serrated or Twin; breakers as a drum,
+      sledge, mace or axe; lances as a spear, trident, drill or glaive; guns standard, long, twin or heavy),
+      size S/M/L (on arm weapons a little reach against speed), and body and glow colours from 12.
+    - **Element:** Battle Network's Fire > Wood > Elec > Aqua > Fire. Double damage on the virus it beats
+      (Fire on Rivets, Aqua on Plinkers, Elec on Dartfins), plus an effect: Fire burns, Aqua soaks (slower
+      viruses and attacks), Elec stuns after a few hits (then the virus resists for a while), Wood heals you.
+      Null leaves 2 MB more for mods. Each element has a glyph as well as a colour.
+    - **Mods:** up to three that fit the weapon's memory (10 MB): Heavy, Swift, Reach, Split, Burst,
+      Critical, Chain, Wave, Pierce, Homing, Quick Charge. Five are there from the start; the others are
+      learned by deleting their virus family (the Rivet's slam teaches Wave, the Dartfin's dive Homing...),
+      then unlocked with DATA. Bonuses add up rather than multiply.
+    - **Editor:** live preview on your mech, exact numbers against what you have equipped, a summary of
+      every effect, a RANDOM button, and TEST to try it on training dummies (one of each virus; they never
+      break or fight back). Six weapons at most, saved with your progress.
+    - **Share codes:** SHARE gives a code like `CMW-0410-62B2-…` (Crockford base32 with a version and a 16-bit
+      checksum, so typos are caught); IMPORT loads one. Forging it needs the base part and the mods.
   - **Rewards:** data drops that heal you and pay for parts.
   - **Progression:** six rifts; sealing all six starts a tougher wave.
   - **HUD:** the lock-on target's health, a command panel with the reaction prompt and chip deck, a
     rotating minimap, damage numbers, and the grid game's synth sounds and music.
 - **How it's built:** like the grid game, a deterministic 60 Hz simulation (`src/world/sim.js`, no
-  rendering; combat data in `src/world/combat.js`, parts in `src/world/parts.js`) is drawn by a separate
-  view (`src/world/view.js`, three.js r186 on WebGL2; part meshes in `src/world/gear.js`). Garage commands
+  rendering; combat data in `src/world/combat.js`, parts in `src/world/parts.js`, the forge in
+  `src/world/forge.js`) is drawn by a separate view (`src/world/view.js`, three.js r186 on WebGL2; part and
+  forged-weapon meshes in `src/world/gear.js`; the garage and forge menu in `src/world/garage.js`). Garage commands
   reach the simulation through its input, so a session replays exactly. The simulation has its own tests (`tests/world*.test.js`), and a headless bot
   that locks on, combos, reacts and uses chips plays it for balance checks.
 - **The model:** `assets/mecha.glb` was generated by the project owner with Tripo AI. Tripo's export had

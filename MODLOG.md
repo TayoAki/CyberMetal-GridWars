@@ -319,3 +319,71 @@ design talks. Route:
 - **Scripted captures:** every arm mid-swing, the quake and pierce, all four guns, Hover glide,
   Sprinters, Treads, garage close-ups of four loadouts, and the garage on desktop and on phone portrait
   and landscape, bought by keyboard and by touch. No page errors.
+
+### 6d. The forge: players design their own weapons
+
+The owner asked for "a feature that lets users create and design their own weapons with effects", and for the
+closest existing game to model it on. Two research passes (notes in `research_notes/Weapon creator
+reference/`, kept local): the closest matches and the design practice.
+- **Model:** Warframe's modular weapons and mods (a part decides the behaviour; effects are mods in a
+  capacity budget; elements carry statuses), inside Battle Network's NaviCust memory and element wheel. From
+  Zelda: Tears of the Kingdom's Fuse, enemies feed the effects: each virus family teaches mods. Elden Ring's
+  Ashes of War (a learned skill bound to a weapon) is the obvious next step: one chip per design.
+- **A design is a recipe, not code** (`src/world/forge.js`): an owned base part (keeps its moves), a form
+  (4 shapes, S/M/L, 12-colour body and glow), one element, up to three mods within 10 MB (+2 for Null).
+  Everything is an index into fixed tables, so every design is valid, balanced by the budget, deterministic
+  and short enough for a share code.
+- **The World applies it** to the kit (`applyDesign`): strike and gun numbers scaled, plus effects checked on
+  hits (`armFx`, `gunFx`): weakness ×2, burn, soak, shock, leech, critical, chain, burst, wave, pierce,
+  homing, split. Forge commands (`forge`, `equip-design`, `delete-design`, `unlock`, `dummy`) travel in the
+  step input like the rest of the garage. Saves are v2 (designs, programs, equipped; v1 still loads).
+- **Virus elements:** Rivet Wood, Plinker Fire, Dartfin Aqua; chips carry their virus's element. No virus is
+  Elec yet, so Wood has no prey (its summary says so).
+- **The editor** (garage FORGE tab, `src/world/garage.js`): live preview on the mech (the view draws the draft
+  through `view.preview`), exact numbers against the equipped weapon, per-effect summary, MB cells like the
+  NaviCust, learn progress on locked mods, RANDOM, SHARE/IMPORT, TEST (training dummies), UNDO, two-step
+  DELETE. Keyboard (arrows move along and between rows), gamepad (LB/RB tabs, d-pad, A) and touch.
+- **Looks** (`src/world/gear.js`): parametric meshes per base and shape (extruded blade outlines, a mace, an
+  axe, a drill thread, guns long/twin/heavy), built on demand and disposed when replaced. The view adds
+  element particles on the blade and gun, element-coloured trails, impacts and weakness bursts, chain
+  lightning, burst blasts, the Wave's ground crescent, burn/soak/stun on viruses and rings under dummies.
+
+#### Gotchas
+1. **Symptom (found by the design-practice agent):** Elec locked a virus out of acting 99.7% of the time
+   under ≥3 hits/s, and Elec + Chain froze whole packs (0 hits taken against 8 with Null). **Cause:** every
+   third hit stunned for 1 s, through revenge armor. **Fix:** after a stun the virus resists for 3 s (BN6's
+   paralysis window) and needs more hits next time, 3 then 5 then 7 (Monster Hunter's rising tolerance).
+   Now 45-56% locked against 38-47% for Null; a test fails if it creeps back.
+2. **Symptom (same agent):** 5 of 350k one-character insertions decoded to a different design. **Cause:**
+   an insertion shifts the name-length byte, and CRC-8 then passed 1 in 256 times. **Fix:** CRC-16, an exact
+   length and zero-padding check, and fixed append-only code tables (bases, elements, mods), so reordering
+   the catalog can never change what an old code means. Tests try every insertion, deletion and
+   substitution on several codes.
+3. **Symptom:** a weak critical counter dealt ×8 (Overclock ×12). **Fix:** bonuses add up (+100% weak,
+   +100% critical, +100% counter, +200% with Overclock), as Battle Network 4-6 did.
+4. **Symptom:** Homing + Split on the Buster was the one combo far ahead in the bot sweep (+19% deletes),
+   because all three shots homed. **Fix:** only the centre shot homes (+8% now).
+5. **Symptom:** burn dealt three or four ticks depending on float sums. **Fix:** burn counts whole ticks.
+   **Symptom:** Wood healed fractions of HP. **Fix:** a bank pays out whole HP.
+6. **Symptom:** the first click after typing a name did nothing. **Cause:** the name box's blur redrew the
+   buttons between press and release. **Fix:** controls are only redrawn when their markup changes.
+7. **Symptom:** typing W, A, S, D or Space in the name box moved or jumped instead. **Fix:** the game's
+   keys, the G shortcut and the garage's own keys ignore text boxes.
+8. **Symptom:** the parts list showed under the forge. **Cause:** a class's `display: grid` beat the
+   `hidden` attribute. **Fix:** `[hidden] { display: none }` for that panel.
+9. **Layout:** the garage covered the mech, so the preview was hidden. It now docks right on wide screens
+   and at the bottom on tall ones, and the camera frames the mech in the space left (pulled back for long
+   weapons); the forge's actions stay pinned at the bottom of the card.
+
+#### Oracles
+- `tests/world_forge.test.js` (32 tests): validation, memory and the Null bonus, names; share-code round
+  trips (400 random designs, sloppy retyping) and every one-character typo, insertion and deletion; forge,
+  equip, edit, delete, unlock and learn commands and every refusal; applying designs (and that the catalog
+  never changes); each element's weakness; chip elements; burn, soak, shock (with the resist window and
+  rising tolerance), leech; a lock-share check; additive bonuses; every mod in a real fight; training
+  dummies; saves (v2, junk, v1); a determinism and NaN fuzz forging random designs.
+- **Bot sweep** (3 seeds × 3 min per weapon, 19 weapons): 130-150 deletes against 139 for the plain Saber,
+  no knockdowns.
+- **Browser runs:** the forge driven by mouse, keyboard (typing a name full of game keys, arrow navigation)
+  and touch on desktop and phone portrait and landscape; forge + equip, unlock, share then import, a bad
+  code, test on dummies; close-ups of all 32 shapes. No page errors.

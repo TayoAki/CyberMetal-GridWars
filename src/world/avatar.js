@@ -108,9 +108,9 @@ class Avatar {
     this.gear = new Gear(this.bones, this.group);
   }
 
-  // Show the equipped parts.
-  setLoadout(loadout) {
-    this.gear.setLoadout(loadout);
+  // Show the equipped parts, with forged designs ({ arm, gun }) drawn in place of their stock parts.
+  setLoadout(loadout, designs = {}) {
+    this.gear.setLoadout(loadout, designs);
   }
 
   // World positions of the weapon's slash-trail base and tip; false while it is put away.

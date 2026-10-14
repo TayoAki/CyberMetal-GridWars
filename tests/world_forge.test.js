@@ -181,6 +181,15 @@ test('a code with any one character wrong is caught, and junk is refused with a 
     }
   }
   assert.ok(body.length >= 25 && tries === body.length * 31);
+  // A character added or left off anywhere is caught too (by the length check and the 16-bit checksum).
+  const rng = new Rng(3);
+  for (let k = 0; k < 12; k++) {
+    const b = encodeDesign(normalizeDesign(randomDesign(rng)).design).slice(4).replace(/-/g, '');
+    for (let i = 0; i <= b.length; i++) {
+      if (i < b.length) assert.ok(decodeDesign(b.slice(0, i) + b.slice(i + 1)).error, `missed a deletion at ${i} of ${b}`);
+      for (const ch of B32) assert.ok(decodeDesign(b.slice(0, i) + ch + b.slice(i)).error, `missed an insertion of ${ch} at ${i} of ${b}`);
+    }
+  }
   assert.match(decodeDesign('').error, /isn't a weapon code/);
   assert.match(decodeDesign('my sword, please!').error, /isn't a weapon code/);
   assert.match(decodeDesign('hello world').error, /too short/, 'looks like code letters, but far too few');
@@ -196,15 +205,34 @@ test('a code with any one character wrong is caught, and junk is refused with a 
 
 // ------------------------------------------------------------------ the forge in the garage
 
-test('forging needs the base part and the mod programs; unlocking a program costs DATA', () => {
+test('forging needs the base part and the mod programs; a program is learned from viruses, then costs DATA', () => {
   const w = quiet();
   let ev = run(w, 1, { garage: { op: 'forge', design: design('arm', 'lance') } });
   assert.deepEqual([types(ev, 'garage-denied')[0]?.reason, types(ev, 'garage-denied')[0]?.part], ['locked', 'lance']);
   w.owned.add('lance');
   ev = run(w, 1, { garage: { op: 'forge', design: design('arm', 'lance', { mods: ['chain'] }) } });
   assert.deepEqual([types(ev, 'garage-denied')[0]?.reason, types(ev, 'garage-denied')[0]?.mod], ['program', 'chain']);
+  // Chain is the Dartfin's: it takes five Dartfin deletes before DATA can unlock it.
+  assert.deepEqual(MODS.chain.learn, { from: 'dartfin', deletes: 5 });
+  w.wallet = 100;
+  ev = run(w, 1, { garage: { op: 'unlock', mod: 'chain' } });
+  assert.deepEqual([types(ev, 'garage-denied')[0]?.reason, types(ev, 'garage-denied')[0]?.need], ['learn', 5]);
+  const ready = [];
+  for (let i = 0; i < 5; i++) {
+    w.killEnemy(dummy(w, 'dartfin', 40));
+    ready.push(...types(run(w, 1), 'mod-ready').map((x) => x.mod));
+  }
+  assert.deepEqual(ready, ['homing', 'chain'], 'the third Dartfin teaches Homing, the fifth Chain');
+  assert.equal(w.deletesOf('dartfin'), 5);
+  w.pickups = [];
+  w.wallet = 10;
   ev = run(w, 1, { garage: { op: 'unlock', mod: 'chain' } });
   assert.equal(types(ev, 'garage-denied')[0]?.reason, 'data');
+  // Training dummies teach nothing.
+  run(w, 1, { garage: { op: 'dummy' } });
+  for (const e of w.enemies) if (e.dummy) w.killEnemy(e);
+  assert.equal(w.deletesOf('rivet'), 0);
+  for (const e of w.enemies) if (e.dummy) e.alive = false;
   w.wallet = 100;
   ev = run(w, 1, { garage: { op: 'unlock', mod: 'chain' } });
   assert.deepEqual(types(ev, 'program-unlocked')[0], { type: 'program-unlocked', mod: 'chain', price: MODS.chain.price });
@@ -419,21 +447,55 @@ test('Aqua soaks: a soaked virus moves at 55% and its wind-ups take longer', () 
   assert.ok(!(e.soak > 0));
 });
 
-test('Elec shocks: every third hit stuns, even through revenge armor', () => {
+test('Elec shocks: three hits stun, even through revenge armor; then it resists, and needs more hits next time', () => {
   const w = quiet();
   wield(w, design('gun', 'buster', { element: 'elec' }));
   const e = tough(dummy(w, 'plinker', 6));
   e.armor = 99;
-  const stunsAfter = [];
-  for (let n = 1; n <= 6; n++) {
-    const ev = shootAt(w, e, 1, 10);
+  const stuns = [];
+  for (let n = 1; n <= 100; n++) {
+    const ev = shootAt(w, e, 1, 10); // six hits a second
     assert.ok(types(ev, 'enemy-hit')[0]?.armored, 'armored hits');
     if (types(ev, 'stun').length) {
-      stunsAfter.push(n);
-      assert.ok(e.flinch > STATUS.shock.stun - 10 * DT);
+      stuns.push(n);
+      assert.ok(e.flinch > STATUS.shock.stun - 10 * DT, 'stunned through the armor');
     }
   }
-  assert.deepEqual(stunsAfter, [3, 6]);
+  // Stunned on hit 3; then 4 s (24 hits) of resistance; then 5 more hits; then 7, and 7 from then on.
+  const gap = (STATUS.shock.stun + STATUS.shock.immune) / (10 * DT);
+  assert.equal(stuns[0], 3);
+  assert.equal(stuns[1], stuns[0] + gap + 5);
+  assert.equal(stuns[2], stuns[1] + gap + 7);
+  assert.equal(stuns[3], stuns[2] + gap + 7);
+});
+
+// The share of frames a virus can't act (flinching or stunned) under steady fire. (The design-practice notes
+// measured the first version of Elec at 99.7%: a permanent lock.)
+function lockShare(element, taps = 4, seconds = 20) {
+  const w = quiet();
+  wield(w, design('gun', 'buster', { element }));
+  const e = place(w, 'rivet', 6, 'chase');
+  e.hp = e.maxHp = 1e6;
+  const gap = Math.round(60 / taps);
+  let locked = 0;
+  for (let i = 0; i < seconds * 60; i++) {
+    run(w, 1, { shoot: i % gap === 0, aimPoint: center(e) });
+    if (e.flinch > 0) locked++;
+    if (Math.hypot(e.x - w.player.x, e.z - w.player.z) < 3) {
+      // Keep it at range: a Rivet that reaches the player would start its own slam.
+      e.x = w.player.x;
+      e.z = w.player.z + 6;
+    }
+  }
+  return locked / (seconds * 60);
+}
+
+test('Elec can\'t lock a virus down: under rapid fire it acts about as often as with no element', () => {
+  for (const taps of [3, 6]) {
+    const none = lockShare('none', taps);
+    const elec = lockShare('elec', taps);
+    assert.ok(elec < 0.65 && elec - none < 0.25, `${taps}/s: Null ${none.toFixed(2)}, Elec ${elec.toFixed(2)}`);
+  }
 });
 
 test('Wood leeches: hits heal whole HP, a share of the damage dealt, never past full', () => {
@@ -472,6 +534,23 @@ test('Heavy hits harder; Critical doubles every fourth hit', () => {
   const hits = types(shootAt(w, e, 8, 10), 'enemy-hit');
   assert.deepEqual(hits.map((h) => h.amount), [6, 6, 6, 12, 6, 6, 6, 12]);
   assert.deepEqual(hits.map((h) => h.crit), [false, false, false, true, false, false, false, true]);
+});
+
+test('bonuses add up rather than multiply: a weak critical is ×3, a weak counter ×3', () => {
+  const w = quiet();
+  wield(w, design('gun', 'buster', { element: 'fire', mods: ['crit'] }));
+  const e = tough(dummy(w, 'rivet', 6));
+  const hits = types(shootAt(w, e, 4, 10), 'enemy-hit').filter((h) => h.kind !== 'burn');
+  assert.deepEqual(hits.map((h) => h.amount), [12, 12, 12, 18]);
+  // A counter (hitting a Rivet as it winds up) on top of its weakness: +100% +100%.
+  const w2 = quiet();
+  wield(w2, design('gun', 'buster', { element: 'fire' }));
+  const r = place(w2, 'rivet', 6, 'windup');
+  r.t = 0.75;
+  r.hp = r.maxHp = 500;
+  const hit = types(shootAt(w2, r), 'enemy-hit')[0];
+  assert.ok(hit.counter && hit.weak);
+  assert.equal(hit.amount, 6 * 3);
 });
 
 test('Chain: a hit arcs to the nearest other virus within 6 m for half damage, once', () => {
@@ -662,6 +741,7 @@ test('a save keeps designs, unlocked programs and what is equipped, and refuses 
   w.wallet = 500;
   w.owned.add('lance');
   w.owned.add('spreader');
+  w.chips.findash = { deletes: 5, level: 2 }; // five Dartfins deleted: Chain is learned
   w.garage({ op: 'unlock', mod: 'chain' });
   w.garage({ op: 'forge', design: design('arm', 'lance', { name: 'Volt Pike', element: 'elec', mods: ['chain', 'reach'] }) });
   w.garage({ op: 'forge', design: design('gun', 'spreader', { name: 'Ember Fan', element: 'fire', form: { color: 4, glow: 6, shape: 2 }, mods: ['split'] }) });

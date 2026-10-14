@@ -2,6 +2,7 @@ import { WORLD_SIZE, WATER_LEVEL } from './terrain.js';
 import { CHARGE } from './sim.js';
 import { CHIPS, CHIP_LEVELS } from './combat.js';
 import { PARTS, SLOTS } from './parts.js';
+import { ELEMENTS, MODS, FORM } from './forge.js';
 
 // The open world's HUD, in plain DOM over the 3D canvas: HP and charge bars, data and rift counters, the
 // crosshair, floating damage numbers, toasts and a rotating minimap centred on the player; and, for close
@@ -114,18 +115,46 @@ export class Hud {
     this.toastT = time;
   }
 
-  number(x, y, z, text, cls) {
+  number(x, y, z, text, cls, color = null) {
     const el = document.createElement('div');
     el.className = `num ${cls}`;
     el.textContent = text;
+    if (color) el.style.color = color;
     this.el.nums.appendChild(el);
     this.nums.push({ x, y, z, el, age: 0, drift: (Math.random() - 0.5) * 0.6 });
   }
 
   onEvent(ev) {
     switch (ev.type) {
-      case 'enemy-hit':
-        this.number(ev.x, ev.y, ev.z, ev.counter ? `${ev.amount} COUNTER!` : String(ev.amount), ev.counter ? 'counter' : ev.amount >= 40 ? 'big' : '');
+      case 'enemy-hit': {
+        // Forged weapons tag their numbers: WEAK (the element beats the virus's), CRIT, and small burn ticks.
+        const tags = [ev.crit && 'CRIT', ev.weak && 'WEAK'].filter(Boolean).join(' ');
+        if (ev.counter) this.number(ev.x, ev.y, ev.z, `${ev.amount} COUNTER!`, 'counter');
+        else if (ev.kind === 'burn') this.number(ev.x, ev.y, ev.z, String(ev.amount), 'tick', css(ELEMENTS.fire.color));
+        else if (tags) this.number(ev.x, ev.y, ev.z, `${ev.amount} ${ev.weak ? `${ELEMENTS[ev.element].glyph} ` : ''}${tags}!`, 'weak', ev.weak ? css(ELEMENTS[ev.element].color) : '#ffd84a');
+        else this.number(ev.x, ev.y, ev.z, String(ev.amount), ev.kind === 'arc' ? 'tick' : ev.amount >= 40 ? 'big' : '');
+        break;
+      }
+      case 'leech':
+        this.number(ev.x, ev.y, ev.z, `+${ev.amount}`, 'heal');
+        break;
+      case 'stun':
+        this.number(ev.x, ev.y + 0.3, ev.z, 'STUN', 'weak', css(ELEMENTS.elec.color));
+        break;
+      case 'design-saved':
+        this.toast(`FORGED · ${ev.name.toUpperCase()}`, '#ffd84a', 1.8);
+        break;
+      case 'design-deleted':
+        this.toast(`DELETED · ${ev.name.toUpperCase()}`, '#8a9cc8', 1.6);
+        break;
+      case 'mod-ready':
+        this.toast(`MOD LEARNED · ${MODS[ev.mod].name.toUpperCase()} · UNLOCK IT IN THE FORGE`, '#6affa0', 3);
+        break;
+      case 'program-unlocked':
+        this.toast(`PROGRAM UNLOCKED · ${MODS[ev.mod].name.toUpperCase()} · −${ev.price} DATA`, '#6affa0', 2);
+        break;
+      case 'dummies':
+        this.toast(`TRAINING DUMMIES · TRY YOUR WEAPON · ${this.mode === 'touch' ? 'TAP GARAGE' : this.mode === 'pad' ? 'BACK' : 'G'} TO RETURN`, '#6ae8ff', 3.4);
         break;
       case 'armor':
         this.number(ev.x, ev.y + 0.4, ev.z, 'ARMOR', 'armor');
@@ -162,13 +191,25 @@ export class Hud {
       case 'part-bought':
         this.toast(`BOUGHT ${PARTS[ev.part].name.toUpperCase()} · −${ev.price} DATA`, css(PARTS[ev.part].color), 1.6);
         break;
-      case 'part-equipped':
-        this.toast(`${PARTS[ev.part].name.toUpperCase()} EQUIPPED`, css(PARTS[ev.part].color), 1.6);
+      case 'part-equipped': {
+        const d = ev.design ? this.world.designs.find((x) => x.id === ev.design) : null;
+        if (d) this.toast(`${d.name.toUpperCase()} EQUIPPED`, css(FORM.palette[d.form.glow]), 1.6);
+        else this.toast(`${PARTS[ev.part].name.toUpperCase()} EQUIPPED`, css(PARTS[ev.part].color), 1.6);
         break;
-      case 'garage-denied':
-        if (ev.reason === 'combat') this.toast('VIRUSES NEARBY · FINISH THE FIGHT FIRST', '#ff6a6a', 2);
-        else if (ev.reason === 'data') this.toast('NOT ENOUGH DATA', '#ff6a6a', 1.6);
+      }
+      case 'garage-denied': {
+        const text = {
+          combat: 'VIRUSES NEARBY · FINISH THE FIGHT FIRST',
+          data: 'NOT ENOUGH DATA',
+          program: ev.mod && `UNLOCK ${MODS[ev.mod].name.toUpperCase()} FIRST`,
+          learn: ev.mod && `DELETE ${ev.need} MORE ${ev.from.toUpperCase()}${ev.need === 1 ? '' : 'S'} TO LEARN ${MODS[ev.mod].name.toUpperCase()}`,
+          locked: ev.part && `YOU DON'T OWN THE ${PARTS[ev.part].name.toUpperCase()} YET`,
+          full: 'SIX WEAPONS MAX · DELETE ONE FIRST',
+          design: ev.message && `CAN'T FORGE THAT: ${ev.message.toUpperCase()}`,
+        }[ev.reason];
+        if (text) this.toast(text, '#ff6a6a', 2);
         break;
+      }
       case 'hurt':
         this.number(ev.x, ev.y, ev.z, `-${ev.amount}`, 'hurt');
         break;
@@ -207,10 +248,18 @@ export class Hud {
       this.dataShown = w.wallet;
       el.data.textContent = `DATA ${w.wallet}`;
     }
-    const kit = Object.values(w.loadout).join();
+    // The kit line: each part, or the name of the forged weapon in its slot.
+    const forged = { arm: w.kit.armDesign, gun: w.kit.gunDesign };
+    const kit = `${Object.values(w.loadout).join()}|${forged.arm?.name}/${forged.arm?.form.glow}|${forged.gun?.name}/${forged.gun?.form.glow}`;
     if (el.kit && kit !== this.kitShown) {
       this.kitShown = kit;
-      el.kit.innerHTML = SLOTS.map((slot) => `<span style="color:${css(PARTS[w.loadout[slot]].color)}">${PARTS[w.loadout[slot]].name.toUpperCase()}</span>`).join('');
+      el.kit.replaceChildren(...SLOTS.map((slot) => {
+        const span = document.createElement('span');
+        const d = forged[slot];
+        span.style.color = css(d ? FORM.palette[d.form.glow] : PARTS[w.loadout[slot]].color);
+        span.textContent = (d ? d.name : PARTS[w.loadout[slot]].name).toUpperCase();
+        return span;
+      }));
     }
     const sealed = w.zones.filter((z) => z.state === 'cleared').length;
     el.rifts.textContent = `RIFTS ${sealed}/${w.zones.length}${w.wave > 1 ? ` · WAVE ${w.wave}` : ''}`;
@@ -255,10 +304,21 @@ export class Hud {
     if (!el.target) return;
     el.target.classList.toggle('on', !!t);
     if (!t) return;
-    el.tgName.textContent = NAMES[t.type] ?? t.type.toUpperCase();
-    el.tgHp.textContent = `${Math.max(0, Math.ceil(t.hp))} / ${t.maxHp}`;
+    // Name and element (what beats it), and any status a forged weapon left on it.
+    const el2 = ELEMENTS[t.def.element];
+    const name = `${NAMES[t.type] ?? t.type.toUpperCase()}${t.dummy ? ' DUMMY' : ''}`;
+    if (el.tgName.dataset.shown !== `${name}/${t.def.element}`) {
+      el.tgName.dataset.shown = `${name}/${t.def.element}`;
+      const tag = document.createElement('span');
+      tag.className = 'elem';
+      tag.style.color = css(el2?.color ?? 0xc8d4e8);
+      tag.textContent = el2 ? ` · ${el2.glyph} ${el2.name.toUpperCase()}` : '';
+      el.tgName.replaceChildren(name, tag);
+    }
+    el.tgHp.textContent = t.dummy ? 'TRAINING' : `${Math.max(0, Math.ceil(t.hp))} / ${t.maxHp}`;
     el.tgFill.style.width = `${Math.max(0, t.hp / t.maxHp) * 100}%`;
-    el.tgState.textContent = t.state === 'windup' ? 'ATTACKING · HIT IT NOW TO COUNTER' : t.armor > 0 ? 'ARMORED · DODGE AND WAIT' : '';
+    const status = [t.burn > 0 && 'BURNING', t.soak > 0 && 'SOAKED', t.shockImmune > 0 ? 'SHOCK-PROOF' : t.shock > 0 && `SHOCK ${'●'.repeat(t.shock)}`].filter(Boolean).join(' · ');
+    el.tgState.textContent = t.state === 'windup' ? 'ATTACKING · HIT IT NOW TO COUNTER' : t.armor > 0 ? 'ARMORED · DODGE AND WAIT' : status;
   }
 
   // The reaction command and chip shortcuts (desktop panel and touch buttons).

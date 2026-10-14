@@ -1,11 +1,23 @@
 // A demo pilot for the open world (?auto=1): heads for the nearest open rift and fights what comes out the way
 // a player would: locks on, closes in and mashes combos, shoots from range, uses its chips, takes every
 // reaction command it is offered, jumps shockwaves and dodges dives. Between fights it visits the garage:
-// it buys parts it can afford and tries each new part it owns, so the demo shows them all in time. Used for
+// it buys parts it can afford and tries each new part it owns, then forges a few weapons of its own (unlocking
+// their mods with DATA) and wears each in turn, so the demo shows them all in time. Used for
 // the attract demo, browser smoke tests and showcase clips. It steers the camera while roaming; locked on, the
 // view frames the target itself.
 
 import { PARTS, STARTER } from './parts.js';
+import { MODS, MAX_DESIGNS } from './forge.js';
+
+// Weapons the demo pilot forges once it owns the base.
+const PRESETS = [
+  { name: 'Ember Edge', slot: 'arm', base: 'saber', form: { shape: 1, size: 1, color: 11, glow: 5 }, element: 'fire', mods: ['heavy', 'burst'] },
+  { name: 'Leaf Buster', slot: 'gun', base: 'buster', form: { shape: 2, size: 1, color: 8, glow: 7 }, element: 'wood', mods: ['swift', 'homing'] },
+  { name: 'Volt Pike', slot: 'arm', base: 'lance', form: { shape: 1, size: 2, color: 2, glow: 6 }, element: 'elec', mods: ['reach', 'chain'] },
+  { name: 'Tide Fan', slot: 'gun', base: 'spreader', form: { shape: 3, size: 1, color: 1, glow: 9 }, element: 'aqua', mods: ['split'] },
+  { name: 'Quake Axe', slot: 'arm', base: 'breaker', form: { shape: 3, size: 2, color: 4, glow: 5 }, element: 'fire', mods: ['wave'] },
+  { name: 'Storm Rail', slot: 'gun', base: 'railgun', form: { shape: 1, size: 1, color: 2, glow: 6 }, element: 'elec', mods: ['quick', 'split'] },
+];
 
 const wrap = (a) => {
   while (a > Math.PI) a -= Math.PI * 2;
@@ -17,6 +29,7 @@ export function makeBot(world, { garage = true } = {}) {
   let t = 0;
   let chargeUntil = 0;
   const tried = new Set(Object.values(STARTER));
+  const wore = new Set();
   return (view) => {
     t++;
     const p = world.player;
@@ -33,6 +46,24 @@ export function makeBot(world, { garage = true } = {}) {
       const buy = Object.keys(PARTS).find((k) => !world.owned.has(k) && PARTS[k].price <= world.wallet);
       if (buy) {
         out.garage = { op: 'buy', part: buy };
+        return out;
+      }
+      // The forge: wear each weapon it has forged, then make the next preset it can (unlocking its mods
+      // first, once the viruses have taught them).
+      const wear = world.designs.find((d) => !wore.has(d.id));
+      if (wear) {
+        wore.add(wear.id);
+        out.garage = { op: 'equip-design', id: wear.id };
+        return out;
+      }
+      const preset = PRESETS.find((d) => world.owned.has(d.base) && !world.designs.some((x) => x.name === d.name));
+      const locked = preset?.mods.find((m) => !world.programs.has(m));
+      if (preset && locked && world.modLearned(locked) && MODS[locked].price <= world.wallet) {
+        out.garage = { op: 'unlock', mod: locked };
+        return out;
+      }
+      if (preset && !locked && world.designs.length < MAX_DESIGNS) {
+        out.garage = { op: 'forge', design: preset };
         return out;
       }
     }

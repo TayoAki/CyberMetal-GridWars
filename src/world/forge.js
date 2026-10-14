@@ -9,7 +9,8 @@ import { ENEMY_TYPES } from './enemies.js';
 //   element  Battle Network's Fire, Aqua, Elec or Wood (double damage on the virus element it beats, plus a
 //            status effect), or Null, which leaves more memory for mods
 //   mods     up to three effects that must fit the weapon's memory (MB), like Battle Network chips and
-//            NaviCust programs; some are unlocked with DATA
+//            NaviCust programs. Some are learned by deleting viruses (each family teaches its own), then
+//            unlocked with DATA, the way Zelda's Fuse and Warframe turn enemy drops into weapon effects.
 // Pure data and helpers; the World applies them in its fixed step and the view draws them.
 
 export const MAX_DESIGNS = 6;
@@ -18,39 +19,45 @@ export const CAPACITY = 10; // MB of mods a weapon can hold
 export const NULL_BONUS = 2; // extra MB when the weapon has no element
 export const NAME_MAX = 16;
 
-// Battle Network's weakness cycle: Fire > Wood > Elec > Aqua > Fire. `beats` takes double damage.
+// Battle Network's weakness cycle: Fire > Wood > Elec > Aqua > Fire. `beats` takes double damage. Each element
+// has a glyph as well as a colour, so it reads without colour vision.
 export const ELEMENTS = {
-  none: { name: 'Null', color: 0xc8d4e8, beats: null, effect: `+${NULL_BONUS} MB of memory for mods` },
-  fire: { name: 'Fire', color: 0xff6a2a, beats: 'wood', effect: 'burns (damage over time)' },
-  aqua: { name: 'Aqua', color: 0x3ab8ff, beats: 'fire', effect: 'soaks (slows viruses and their attacks)' },
-  elec: { name: 'Elec', color: 0xffe14a, beats: 'aqua', effect: 'shocks (every third hit stuns)' },
-  wood: { name: 'Wood', color: 0x5ae06a, beats: 'elec', effect: 'leeches (hits heal you a little)' },
+  none: { name: 'Null', glyph: '○', color: 0xc8d4e8, beats: null, effect: `+${NULL_BONUS} MB of memory for mods` },
+  fire: { name: 'Fire', glyph: '▲', color: 0xff6a2a, beats: 'wood', effect: 'burns (damage over time)' },
+  aqua: { name: 'Aqua', glyph: '◆', color: 0x3ab8ff, beats: 'fire', effect: 'soaks (slows viruses and their attacks)' },
+  elec: { name: 'Elec', glyph: 'ϟ', color: 0xffe14a, beats: 'aqua', effect: 'shocks (a few hits stun, then it resists for a while)' },
+  wood: { name: 'Wood', glyph: '♣', color: 0x5ae06a, beats: 'elec', effect: 'leeches (hits heal you a little)' },
 };
 export const ELEMENT_KEYS = Object.keys(ELEMENTS);
 export const STATUS = {
   burn: { ticks: 4, every: 0.5, dmg: 4 }, // a fire hit (re)starts four ticks, one each half second
   soak: { time: 2.5, speed: 0.55, clock: 0.65 }, // movement and attack timing while soaked
-  shock: { hits: 3, stun: 1.0 },
+  // Shock builds a pip per hit; a full set stuns for `stun` s. Then the virus resists for `immune` s (no pips;
+  // Battle Network 6's paralysis window) and needs more hits next time (Monster Hunter's rising tolerance), so
+  // rapid fire can't keep it locked.
+  shock: { hits: [3, 5, 7], stun: 1.0, immune: 3.0 },
   leech: 0.12, // fraction of damage healed (whole HP, the remainder carries over)
 };
 
-// Mods (programs). `slots`: where they fit; `not`: bases they don't apply to; `price`: DATA to unlock (0 =
-// unlocked from the start).
+// Mods (programs). `slots`: where they fit; `not`: bases they don't apply to. `learn`: the virus family whose
+// deletes teach it (and how many), after which `price` DATA unlocks it; mods without `learn` are unlocked
+// from the start. Each virus teaches what it does itself: the Rivet's slam is the Wave, the Plinker's
+// charged cannon is Quick Charge and Pierce, the Dartfin's dive is Homing and its darting is Chain.
 export const MODS = {
   heavy: { name: 'Heavy', cost: 3, price: 0, slots: ['arm', 'gun'], desc: '+30% damage and knockback, 15% slower.' },
   swift: { name: 'Swift', cost: 3, price: 0, slots: ['arm', 'gun'], desc: 'Strikes 15% faster; fires 25% faster.' },
   reach: { name: 'Reach', cost: 2, price: 0, slots: ['arm'], desc: '+25% reach and lunges 3 m further.' },
   split: { name: 'Split', cost: 4, price: 0, slots: ['gun'], desc: 'Shots split into a fan (side shots 60%).' },
   burst: { name: 'Burst', cost: 4, price: 0, slots: ['arm', 'gun'], desc: 'Finishers explode; shots burst on impact.' },
-  crit: { name: 'Critical', cost: 3, price: 50, slots: ['arm', 'gun'], desc: 'Every fourth hit deals double damage.' },
-  chain: { name: 'Chain', cost: 5, price: 80, slots: ['arm', 'gun'], desc: 'Hits arc to another virus nearby for half damage.' },
-  wave: { name: 'Wave', cost: 4, price: 60, slots: ['arm'], desc: 'Finishers send a shockwave racing along the ground.' },
-  pierce: { name: 'Pierce', cost: 4, price: 50, slots: ['gun'], not: ['bomber', 'railgun'], desc: 'Shots pass through viruses.' },
-  homing: { name: 'Homing', cost: 4, price: 60, slots: ['gun'], not: ['railgun'], desc: 'Shots curve toward your target.' },
-  quick: { name: 'Quick Charge', cost: 3, price: 40, slots: ['gun'], desc: 'Charges 35% faster.' },
+  crit: { name: 'Critical', cost: 3, price: 50, learn: { from: 'rivet', deletes: 3 }, slots: ['arm', 'gun'], desc: 'Every fourth hit deals double damage.' },
+  chain: { name: 'Chain', cost: 5, price: 80, learn: { from: 'dartfin', deletes: 5 }, slots: ['arm', 'gun'], desc: 'Hits arc to another virus nearby for half damage.' },
+  wave: { name: 'Wave', cost: 4, price: 60, learn: { from: 'rivet', deletes: 5 }, slots: ['arm'], desc: 'Finishers send a shockwave racing along the ground.' },
+  pierce: { name: 'Pierce', cost: 4, price: 50, learn: { from: 'plinker', deletes: 5 }, slots: ['gun'], not: ['bomber', 'railgun'], desc: 'Shots pass through viruses.' },
+  homing: { name: 'Homing', cost: 4, price: 60, learn: { from: 'dartfin', deletes: 3 }, slots: ['gun'], not: ['railgun'], desc: 'Shots curve toward your target.' },
+  quick: { name: 'Quick Charge', cost: 3, price: 40, learn: { from: 'plinker', deletes: 3 }, slots: ['gun'], desc: 'Charges 35% faster.' },
 };
 export const MOD_KEYS = Object.keys(MODS);
-export const STARTER_MODS = MOD_KEYS.filter((k) => MODS[k].price === 0);
+export const STARTER_MODS = MOD_KEYS.filter((k) => !MODS[k].learn);
 
 export const FORM = {
   shapes: {
@@ -160,30 +167,60 @@ export function applyDesign(kit, design) {
   return kit;
 }
 
+// The numbers the forge shows for a weapon: [label, value, unit, decimals, higher is better], read from a kit
+// (with or without a design applied), so they are exactly what the game uses.
+export function weaponStats(kit, slot) {
+  if (slot === 'arm') {
+    const a = kit.arm;
+    const g = a.ground;
+    return [
+      ['Combo dmg', g.reduce((n, s) => n + s.dmg, 0), '', 0, true],
+      ['Finisher', g.at(-1).dmg, '', 0, true],
+      ['Reach', Math.max(...g.map((s) => s.reach)), 'm', 1, true],
+      ['Lunge', a.magnet, 'm', 0, true],
+      ['Combo time', g.slice(0, -1).reduce((n, s) => n + s.cancel, 0) + g.at(-1).dur, 's', 2, false],
+    ];
+  }
+  const g = kit.gun;
+  const fx = kit.gunFx;
+  return [
+    ['Fire rate', 1 / g.cooldown, '/s', 1, true],
+    ['Full charge', g.charge.full, 's', 2, false],
+    ['Damage', fx?.heavy ? 130 : 100, '%', 0, true],
+    ['Shots', fx?.split ? 3 : 1, '×', 0, true],
+  ];
+}
+
 // ---------------------------------------------------------------- share codes
 // A design packs into a few bytes, written in Crockford base32 (no I, L, O, U, so codes survive being read
-// aloud or retyped) with a version and a checksum against typos: "CMW-XXXX-XXXX-...".
+// aloud or retyped) with a version and a 16-bit checksum against typos: "CMW-XXXX-XXXX-...".
+// The tables below give each base, element and mod its number in a code. Only ever add to their ends: moving
+// or removing an entry would change what every old code means.
 
 const B32 = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 const CODE_VERSION = 1;
-const ALL_BASES = [...BASES.arm, ...BASES.gun];
+const CODE_BASES = ['saber', 'breaker', 'lance', 'claws', 'buster', 'spreader', 'railgun', 'bomber'];
+const CODE_ELEMENTS = ['none', 'fire', 'aqua', 'elec', 'wood'];
+const CODE_MODS = ['heavy', 'swift', 'reach', 'split', 'burst', 'crit', 'chain', 'wave', 'pierce', 'homing', 'quick'];
 
-function crc8(bytes) {
-  let c = 0;
+// CRC-16/CCITT: catches every change confined to 16 bits in a row (any one mistyped character), and all but
+// about 1 in 65,000 of the rest.
+function crc16(bytes) {
+  let c = 0xffff;
   for (const b of bytes) {
-    c ^= b;
-    for (let i = 0; i < 8; i++) c = c & 0x80 ? ((c << 1) ^ 0x07) & 0xff : (c << 1) & 0xff;
+    c ^= b << 8;
+    for (let i = 0; i < 8; i++) c = c & 0x8000 ? ((c << 1) ^ 0x1021) & 0xffff : (c << 1) & 0xffff;
   }
   return c;
 }
 
 export function encodeDesign(design) {
   const name = cleanName(design.name);
-  const modBits = design.mods.reduce((n, m) => n | (1 << MOD_KEYS.indexOf(m)), 0);
+  const modBits = design.mods.reduce((n, m) => n | (1 << CODE_MODS.indexOf(m)), 0);
   const bytes = [
     CODE_VERSION,
-    ALL_BASES.indexOf(design.base),
-    ELEMENT_KEYS.indexOf(design.element),
+    CODE_BASES.indexOf(design.base),
+    CODE_ELEMENTS.indexOf(design.element),
     design.form.shape | (design.form.size << 2),
     design.form.color | (design.form.glow << 4),
     modBits & 0xff,
@@ -191,7 +228,8 @@ export function encodeDesign(design) {
     name.length,
     ...[...name].map((ch) => ch.charCodeAt(0)),
   ];
-  bytes.push(crc8(bytes));
+  const crc = crc16(bytes);
+  bytes.push(crc >> 8, crc & 0xff);
   let bits = 0;
   let acc = 0;
   let out = '';
@@ -222,20 +260,20 @@ export function decodeDesign(code) {
       bits -= 8;
     }
   }
-  if (bytes.length < 9) return { error: 'That code is too short' };
+  if (bytes.length < 10) return { error: 'That code is too short' };
   if (bytes[0] !== CODE_VERSION) return { error: 'That code is from another version' };
   const n = bytes[7];
-  if (bytes.length < 9 + n) return { error: 'That code is cut off' };
-  // Exactly the right length, and the padding bits after the last byte are zero: a code with any one
-  // character changed, added or left off is always caught (here or by the checksum).
-  if (raw.length !== Math.ceil(((9 + n) * 8) / 5) || acc & ((1 << bits) - 1)) return { error: 'That code has a typo' };
+  if (bytes.length < 10 + n) return { error: 'That code is cut off' };
+  // Exactly the right length, zero padding bits after the last byte, and the checksum: a mistyped character
+  // is always caught, and one added or left off all but never.
+  if (raw.length !== Math.ceil(((10 + n) * 8) / 5) || acc & ((1 << bits) - 1)) return { error: 'That code has a typo' };
   const body = bytes.slice(0, 8 + n);
-  if (crc8(body) !== bytes[8 + n]) return { error: 'That code has a typo' };
-  const base = ALL_BASES[bytes[1]];
-  const element = ELEMENT_KEYS[bytes[2]];
-  if (!base || !element) return { error: 'That code has a typo' };
+  if (crc16(body) !== ((bytes[8 + n] << 8) | bytes[9 + n])) return { error: 'That code has a typo' };
+  const base = CODE_BASES[bytes[1]];
+  const element = CODE_ELEMENTS[bytes[2]];
   const modBits = bytes[5] | (bytes[6] << 8);
-  const mods = MOD_KEYS.filter((_, i) => modBits & (1 << i));
+  if (!base || !element || modBits >> CODE_MODS.length) return { error: 'That code is from a newer version' };
+  const mods = CODE_MODS.filter((_, i) => modBits & (1 << i));
   return normalizeDesign({
     name: String.fromCharCode(...body.slice(8)),
     slot: BASES.arm.includes(base) ? 'arm' : 'gun',
@@ -260,7 +298,7 @@ export function designSummary(design) {
   else {
     const weak = weakViruses(design.element);
     const prey = weak.length ? `double damage to ${weak.join(' and ')} (${ELEMENTS[el.beats].name})` : `double damage to ${ELEMENTS[el.beats].name} viruses (none out here yet)`;
-    out.push(`${el.name}: ${el.effect}; ${prey}`);
+    out.push(`${el.glyph} ${el.name}: ${el.effect}; ${prey}`);
   }
   if (design.slot === 'arm') {
     const [r, t] = FORM.sizeEffect[design.form.size];

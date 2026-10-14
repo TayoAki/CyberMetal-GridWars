@@ -6,6 +6,7 @@ import { makeEnemyModel } from './models.js';
 import { loadAvatar } from './avatar.js';
 import { CHIPS } from './combat.js';
 import { PARTS } from './parts.js';
+import { ELEMENTS, FORM } from './forge.js';
 
 // The open world's view: reads the simulation and draws it with three.js. It owns everything purely visual
 // (camera, effects, telegraph markers) and never changes the simulation. It also turns the camera into the
@@ -27,6 +28,15 @@ const SHOT_LOOK = {
   pellet: [0xfff6c0, 0xffd84a, 4], blast: [0xffffff, 0xffb83a, 4.5], needle: [0xf4ecff, 0xb08aff, 5], bomb: [0x2a1a14, 0xff7a3a, 4],
 };
 const TRAIL_COLOR = { charge: 0xff7ae8, cannon: 0xffc83a, pellet: 0xffd84a, blast: 0xffb83a, needle: 0xb08aff, bomb: 0xff7a3a };
+// How a forged weapon's element shows: embers rise off Fire, droplets fall off Aqua, sparks jump off Elec and
+// motes drift off Wood. [colours, rise speed, gravity, size, life, jitter]
+const ELEMENT_FX = {
+  fire: [[0xff6a2a, 0xffa03a, 0xffe08a], 2.2, -1.5, 0.2, 0.42, 0.6],
+  aqua: [[0x3ab8ff, 0x9ae0ff, 0xe0f6ff], -0.4, 7, 0.13, 0.55, 0.4],
+  elec: [[0xffe14a, 0xfff6c0, 0xffffff], 0, 0, 0.15, 0.12, 6],
+  wood: [[0x5ae06a, 0xa8f05a, 0xd8ffb0], 0.7, -0.2, 0.17, 0.75, 0.5],
+};
+const designKey = (d) => (d ? `${d.base}/${d.form.shape}/${d.form.size}/${d.form.color}/${d.form.glow}/${d.element}` : '-');
 const reduceMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 export async function createView(canvas, world, avatarBuffer, opts = {}) {
@@ -79,6 +89,13 @@ class WorldView {
     this.shotMats = new Map();
     this.loadoutKey = '';
     this.showcase = 0; // 0..1: the garage's slow orbit around the mech
+    // Where the mech sits on screen in the garage ({ x, y } in -1..1, and the camera distance), so the menu
+    // can sit beside it; and the forge's design being edited, drawn on the mech instead of the equipped one.
+    this.showcaseFrame = { x: 0, y: 0, dist: 3.6 };
+    this.preview = null;
+    this.arcs = []; // Chain mod lightning, fading out
+    this.stunned = new Map(); // virus id -> time its Elec stun ends (for sparks)
+    this.waveGeo = new THREE.CylinderGeometry(1, 1.15, 0.9, 20, 1, true, -0.95, 1.9).translate(0, 0.1, -0.7);
     // KH2's soft target: a small pale marker on the virus the next strike will home in on.
     this.softMark = new THREE.Sprite(new THREE.SpriteMaterial({ map: reticleTexture(), color: 0xf4ecd0, depthTest: false, depthWrite: false, transparent: true, opacity: 0.55 }));
     this.softMark.renderOrder = 9;
@@ -421,8 +438,15 @@ class WorldView {
       this.cam.yaw += dt * 0.45;
       this.cam.pitch += (-0.12 - this.cam.pitch) * (1 - Math.exp(-dt * 3));
     }
-    const pivot = new THREE.Vector3(px, py + 1.55 + k * 0.45 - sk * 0.45, pz).addScaledVector(right, this.shoulder() * (1 - sk));
-    const want = pivot.clone().addScaledVector(fwd, -(this.cam.dist + k * 1.6 - sk * (this.cam.dist - 3.6)));
+    // In the garage, slide the camera so the mech sits where the menu leaves room (showcaseFrame).
+    // Long weapons (a Lance, a large size) get the camera pulled back so they stay in frame.
+    const g = this.avatar?.gear?.arm;
+    const reach = g ? g.trail[1] * g.size : 1.3;
+    const f = { ...this.showcaseFrame, dist: this.showcaseFrame.dist + Math.max(0, reach - 1.3) * 1.3 };
+    const half = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * f.dist;
+    const side = -f.x * half * this.camera.aspect * sk;
+    const pivot = new THREE.Vector3(px, py + 1.55 + k * 0.45 - sk * 0.45 - f.y * half * sk, pz).addScaledVector(right, this.shoulder() * (1 - sk) + side);
+    const want = pivot.clone().addScaledVector(fwd, -(this.cam.dist + k * 1.6 - sk * (this.cam.dist - f.dist)));
     // Keep the camera out of the ground (check a few points back from the pivot).
     for (let k = 0.5; k <= 1.001; k += 0.25) {
       const x = pivot.x + (want.x - pivot.x) * k;
@@ -543,6 +567,48 @@ class WorldView {
         this.dust.ring(ev.x, ev.y, ev.z, 14, 0xb8ad90, { speed: 6, size: 0.8, life: 0.45 });
         P.burst(ev.x, ev.y + 1, ev.z, 18, PARTS.lance.color, { speed: 6, size: 0.4, life: 0.3 });
         break;
+      case 'arc':
+        this.addArc(ev);
+        break;
+      case 'burst': {
+        // Burst mod: a blast in the weapon's element (white if Null).
+        const color = ELEMENTS[ev.element]?.color ?? 0xf4f8ff;
+        P.burst(ev.x, ev.y, ev.z, 40, color, { speed: ev.radius * 3.5, size: 0.6, life: 0.45 });
+        P.burst(ev.x, ev.y, ev.z, 12, 0xffffff, { speed: 4, size: 1.2, life: 0.22 });
+        P.ring(ev.x, ev.y - 0.6, ev.z, 26, color, { speed: ev.radius * 3, size: 0.6, life: 0.4 });
+        this.flash(ev.x, ev.y, ev.z, color, ev.radius * 1.6, 0.18);
+        this.shakeAt(ev, 0.25);
+        break;
+      }
+      case 'wave-cast': {
+        const color = ELEMENTS[ev.element]?.color ?? this.armGlow();
+        this.dust.ring(ev.x, ev.y, ev.z, 16, 0xb8ad90, { speed: 6, size: 0.8, life: 0.45 });
+        P.burst(ev.x, ev.y + 0.5, ev.z, 20, color, { speed: 7, size: 0.45, life: 0.35 });
+        break;
+      }
+      case 'stun':
+        this.stunned.set(ev.id, this.time + 1);
+        P.burst(ev.x, ev.y, ev.z, 26, ELEMENTS.elec.color, { speed: 7, size: 0.3, life: 0.3, jitter: 1 });
+        this.flash(ev.x, ev.y, ev.z, 0xfff6c0, 2.6, 0.12);
+        break;
+      case 'leech': {
+        // Wood: motes drift from the hit back into the player.
+        const p = this.world.player;
+        for (let k = 0; k < 6; k++) P.emit(p.x + (Math.random() - 0.5) * 0.8, p.y + 0.4 + Math.random() * 1.4, p.z + (Math.random() - 0.5) * 0.8, 0, 1.2, 0, ELEMENTS.wood.color, 0.25, 0.5);
+        break;
+      }
+      case 'dummies':
+        for (const id of ev.ids) {
+          const e = this.world.enemy(id);
+          if (e) for (let k = 0; k < 24; k++) P.emit(e.x + (Math.random() - 0.5), e.y + Math.random() * 2, e.z + (Math.random() - 0.5), 0, 3 + Math.random() * 3, 0, 0x6ae8ff, 0.45, 0.8);
+        }
+        break;
+      case 'design-saved': {
+        // A sparkle on the mech when a weapon is forged.
+        const p = this.world.player;
+        P.burst(p.x, p.y + 1.2, p.z, 40, 0xffd84a, { speed: 5, size: 0.35, life: 0.6 });
+        break;
+      }
       case 'armor-break':
         P.burst(ev.x, ev.y, ev.z, 30, 0xffb060, { speed: 10, size: 0.55, life: 0.45 });
         this.flash(ev.x, ev.y, ev.z, 0xffd8a0, 4, 0.16);
@@ -553,8 +619,9 @@ class WorldView {
       case 'impact': {
         const enemy = ev.team === 'enemy';
         const big = ['charge', 'cannonball', 'cannon', 'deflect', 'bomb'].includes(ev.kind);
-        const color = enemy ? 0xff9a3a : TRAIL_COLOR[ev.kind] ?? 0x7af0ff;
+        const color = enemy ? 0xff9a3a : ELEMENTS[ev.element]?.color ?? TRAIL_COLOR[ev.kind] ?? 0x7af0ff;
         const small = ev.kind === 'pellet' || ev.kind === 'needle';
+        if (ev.splash > 0 && !enemy && !big) P.ring(ev.x, ev.y, ev.z, 18, color, { speed: ev.splash * 3, size: 0.5, life: 0.35 });
         P.burst(ev.x, ev.y, ev.z, big ? 46 : ev.kind === 'mid' ? 18 : small ? 4 : 9, color, { speed: big ? 11 : 6, size: big ? 0.7 : small ? 0.25 : 0.35, life: big ? 0.7 : 0.35 });
         if (big) {
           P.burst(ev.x, ev.y, ev.z, 14, 0xffffff, { speed: 4, size: 1.2, life: 0.25 });
@@ -567,12 +634,20 @@ class WorldView {
       }
       case 'enemy-hit': {
         this.enemyViews.get(ev.id)?.hit();
-        if (['melee', 'finisher', 'react', 'chip'].includes(ev.kind)) {
+        const elColor = ELEMENTS[ev.element]?.color;
+        if (['melee', 'finisher', 'react', 'chip', 'swordwave'].includes(ev.kind)) {
           const big = ev.kind === 'finisher' || ev.kind === 'react';
-          P.burst(ev.x, ev.y, ev.z, big ? 34 : 16, ev.armored ? 0xffa050 : 0xd8fbff, { speed: big ? 12 : 8, size: big ? 0.6 : 0.4, life: 0.3 });
+          P.burst(ev.x, ev.y, ev.z, big ? 34 : 16, ev.armored ? 0xffa050 : elColor ?? 0xd8fbff, { speed: big ? 12 : 8, size: big ? 0.6 : 0.4, life: 0.3 });
           this.flash(ev.x, ev.y, ev.z, big ? 0xffe9a0 : 0xffffff, big ? 4.2 : 2.6, 0.12);
           if (big) this.shakeAt(ev, 0.3);
         }
+        // A weakness hit bursts in the element's colour, bigger.
+        if (ev.weak && elColor) {
+          P.burst(ev.x, ev.y, ev.z, 22, elColor, { speed: 9, size: 0.5, life: 0.4 });
+          this.flash(ev.x, ev.y, ev.z, elColor, 3.4, 0.16);
+        }
+        if (ev.crit) this.flash(ev.x, ev.y, ev.z, 0xffd84a, 3.8, 0.16);
+        if (ev.kind === 'burn') P.burst(ev.x, ev.y, ev.z, 8, ELEMENTS.fire.color, { speed: 3, size: 0.3, life: 0.4, up: 2 });
         if (ev.counter) this.flash(ev.x, ev.y, ev.z, 0xffd84a, 5, 0.18);
         break;
       }
@@ -688,6 +763,54 @@ class WorldView {
     }
   }
 
+  // The equipped (or previewed) arm weapon's glow colour: a forged design's, else the part's.
+  armGlow() {
+    const d = this.drawn?.arm;
+    return d ? FORM.palette[d.form.glow] : PARTS[this.world.loadout.arm].color;
+  }
+
+  // One particle of an element's effect at `at` (see ELEMENT_FX).
+  emitElement(element, at, scale = 1) {
+    const [colors, rise, grav, size, life, jitter] = ELEMENT_FX[element];
+    const j = () => (Math.random() - 0.5) * jitter;
+    this.particles.emit(at.x + (Math.random() - 0.5) * 0.12, at.y + (Math.random() - 0.5) * 0.12, at.z + (Math.random() - 0.5) * 0.12,
+      j(), rise + j(), j(), colors[Math.floor(Math.random() * colors.length)], size * scale * (0.7 + Math.random() * 0.6), life * (0.7 + Math.random() * 0.6), { grav, drag: element === 'elec' ? 6 : 1.2 });
+  }
+
+  // Chain mod: a jagged bolt between two viruses that flickers out.
+  addArc(ev) {
+    const color = ELEMENTS[ev.element]?.color ?? 0xbff4ff;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(10 * 3), 3));
+    const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+    line.frustumCulled = false;
+    line.renderOrder = 5;
+    this.scene.add(line);
+    this.arcs.push({ line, ev, age: 0, life: 0.22 });
+    this.flash(ev.x1, ev.y1, ev.z1, color, 2.2, 0.14);
+  }
+
+  updateArcs(dt) {
+    for (const a of this.arcs) {
+      a.age += dt;
+      const pos = a.line.geometry.attributes.position;
+      const { x0, y0, z0, x1, y1, z1 } = a.ev;
+      for (let i = 0; i < 10; i++) {
+        const t = i / 9;
+        const wob = i === 0 || i === 9 ? 0 : 0.45;
+        pos.setXYZ(i, x0 + (x1 - x0) * t + (Math.random() - 0.5) * wob, y0 + (y1 - y0) * t + (Math.random() - 0.5) * wob, z0 + (z1 - z0) * t + (Math.random() - 0.5) * wob);
+      }
+      pos.needsUpdate = true;
+      a.line.material.opacity = Math.max(0, 1 - a.age / a.life);
+    }
+    for (const a of this.arcs.filter((x) => x.age >= x.life)) {
+      this.scene.remove(a.line);
+      a.line.geometry.dispose();
+      a.line.material.dispose();
+    }
+    this.arcs = this.arcs.filter((x) => x.age < x.life);
+  }
+
   // A brief glow pop (hit flashes).
   flash(x, y, z, color, size, life) {
     let f = this.flashes.find((x) => x.age >= x.life);
@@ -770,10 +893,19 @@ class WorldView {
     // Player. During hit-stop the pose holds still with the world.
     const frozen = w.hitstop > 0;
     const av = this.avatar;
-    const key = Object.values(w.loadout).join();
+    // The parts and forged designs to draw (the forge's preview stands in for its slot while editing).
+    const loadout = { ...w.loadout };
+    const designs = { arm: w.kit.armDesign ?? null, gun: w.kit.gunDesign ?? null };
+    const pv = this.showcase ? this.preview : null;
+    if (pv) {
+      loadout[pv.slot] = pv.base;
+      designs[pv.slot] = pv;
+    }
+    this.drawn = designs;
+    const key = `${Object.values(loadout).join()}|${designKey(designs.arm)}|${designKey(designs.gun)}`;
     if (key !== this.loadoutKey) {
       this.loadoutKey = key;
-      av.setLoadout(w.loadout);
+      av.setLoadout(loadout, designs);
     }
     av.group.position.set(px, py, pz);
     av.group.rotation.y = p.yaw;
@@ -792,16 +924,24 @@ class WorldView {
         this.trail.cut();
         this.trailAction = act;
         const gold = act.kind === 'react' || act.def?.finisher;
-        this.trail.setColor(gold ? FINISH_COLOR : act.kind === 'chip' ? CHIPS.findash.color : PARTS[w.loadout.arm].color);
+        this.trail.setColor(gold ? FINISH_COLOR : act.kind === 'chip' ? CHIPS.findash.color : this.armGlow());
       }
       this.trail.push(this.tb, this.tt);
     }
     this.trail.update(frozen ? 0 : dt);
+    // A forged weapon's element streams off the blade while it is out (and off the gun now and then).
+    const armEl = this.drawn.arm?.element;
+    if (ELEMENT_FX[armEl] && !frozen && av.bladeEnds(this.tb, this.tt)) {
+      const n = swinging ? 3 : Math.random() < dt * 40 ? 1 : 0;
+      for (let k = 0; k < n; k++) this.emitElement(armEl, this.tmp.lerpVectors(this.tb, this.tt, 0.25 + Math.random() * 0.75), 1);
+    }
     // FinDash leaves fins of light behind.
     if (act?.kind === 'chip' && act.name === 'findash' && !frozen) {
       for (let k = 0; k < 3; k++) this.particles.emit(px + (Math.random() - 0.5) * 0.8, py + 0.6 + Math.random() * 0.9, pz + (Math.random() - 0.5) * 0.8, -p.vx * 0.15, 0.5, -p.vz * 0.15, 0x5af0ff, 0.5, 0.3);
     }
     const hand = av.gunMuzzle(this.tmp.clone());
+    const gunEl = this.drawn.gun?.element;
+    if (ELEMENT_FX[gunEl] && !frozen && p.alive && Math.random() < dt * (this.showcase ? 24 : 6)) this.emitElement(gunEl, hand, 0.7);
     // Hover legs: jets under the feet while airborne, a soft trail while gliding.
     if (p.alive && w.loadout.legs === 'hover' && !p.onGround && !frozen && Math.random() < (p.gliding ? 0.9 : 0.5)) {
       this.particles.emit(px + (Math.random() - 0.5) * 0.5, py - 0.05, pz + (Math.random() - 0.5) * 0.5, 0, -3 - Math.random() * 2, 0, PARTS.hover.color, 0.45, 0.3, { drag: 2 });
@@ -840,6 +980,7 @@ class WorldView {
     this.updateReticle(dt);
     this.updateFlashes(dt);
     this.updateBeams(dt);
+    this.updateArcs(dt);
     this.particles.update(dt);
     this.dust.update(dt);
 
@@ -871,6 +1012,20 @@ class WorldView {
       v.model.scale.setScalar(Math.max(0.01, grow * shrink));
       v.model.visible = e.spawnT <= 0 || Math.floor(this.time * 20) % 2 === 0;
       v.update(e, this.time, dt, this.camera);
+      // Status effects from forged weapons, and a hologram ring under training dummies.
+      if (e.alive && dt > 0) {
+        const at = this.tmp.set(e.x + (Math.random() - 0.5) * e.def.radius * 1.4, e.y + Math.random() * e.def.height, e.z + (Math.random() - 0.5) * e.def.radius * 1.4);
+        if (e.burn > 0 && Math.random() < dt * 30) this.emitElement('fire', at, 1.4);
+        if (e.soak > 0 && Math.random() < dt * 14) this.emitElement('aqua', at.setY(e.y + e.def.height), 1.2);
+        if ((this.stunned.get(e.id) ?? 0) > this.time && Math.random() < dt * 40) this.emitElement('elec', at.setY(e.y + e.def.height + 0.2), 1.3);
+      }
+      if (e.dummy && !v.dummyRing) {
+        v.dummyRing = new THREE.Mesh(new THREE.RingGeometry(e.def.radius + 0.2, e.def.radius + 0.35, 40).rotateX(-Math.PI / 2),
+          new THREE.MeshBasicMaterial({ color: 0x6ae8ff, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false }));
+        v.dummyRing.position.y = 0.06 - (e.def.hover ?? 0);
+        v.root.add(v.dummyRing);
+      }
+      if (v.dummyRing) v.dummyRing.material.opacity = 0.45 + 0.25 * Math.sin(this.time * 4 + e.id);
     }
     for (const [id, v] of this.enemyViews) {
       if (!seen.has(id)) {
@@ -888,6 +1043,7 @@ class WorldView {
       let v = this.shotViews.get(s.id);
       if (v && v.userData.look !== s.team + s.kind) {
         this.scene.remove(v); // a deflected cannonball changes sides
+        this.dropShot(v);
         v = null;
       }
       if (!v) {
@@ -896,8 +1052,16 @@ class WorldView {
         this.scene.add(v);
       }
       v.position.set(s.x + s.vx * lead, s.y + s.vy * lead, s.z + s.vz * lead);
-      // Trail.
-      const color = s.team === 'enemy' ? 0xff8a30 : TRAIL_COLOR[s.kind] ?? 0x6ae8ff;
+      if (s.kind === 'swordwave') {
+        // The Wave mod's crescent skims the ground, kicking up dust and its element.
+        v.rotation.y = Math.atan2(s.vx, s.vz);
+        v.children[0].material.opacity = Math.min(0.8, s.life * 2);
+        if (Math.random() < 0.6) this.dust.emit(v.position.x, v.position.y - 0.45, v.position.z, (Math.random() - 0.5) * 2, 1, (Math.random() - 0.5) * 2, 0xb8ad90, 0.6, 0.4, { grow: 1.2, drag: 3 });
+        if (ELEMENT_FX[s.fx?.element]) this.emitElement(s.fx.element, v.position, 1.6);
+        continue;
+      }
+      // Trail: a forged gun's shots trail its element.
+      const color = s.team === 'enemy' ? 0xff8a30 : ELEMENTS[s.fx?.element]?.color ?? TRAIL_COLOR[s.kind] ?? 0x6ae8ff;
       const n = s.kind === 'pellet' ? (Math.random() < 0.4 ? 1 : 0) : s.kind === 'buster' || s.kind === 'needle' ? 1 : 3;
       for (let k = 0; k < n; k++) this.particles.emit(v.position.x, v.position.y, v.position.z, (Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 0.6, color, s.r * 2.2, 0.18, { drag: 4 });
       if (s.kind === 'bomb') v.children[1].material.opacity = Math.floor(this.time * 10) % 2 ? 1 : 0.45; // blinking fuse
@@ -905,9 +1069,16 @@ class WorldView {
     for (const [id, v] of this.shotViews) {
       if (!seen.has(id)) {
         this.scene.remove(v);
+        this.dropShot(v);
         this.shotViews.delete(id);
       }
     }
+  }
+
+  // Free what a shot view owns (its glow sprites' materials; spheres and their materials are shared).
+  dropShot(v) {
+    v.userData.own?.dispose();
+    for (const c of v.children) if (c.isSprite) c.material.dispose();
   }
 
   // A shared sphere for a radius and a shared flat material for a colour (shots come and go all the time).
@@ -925,8 +1096,20 @@ class WorldView {
       // A cannonball: dark iron in an orange glow, or a cyan one once it has been batted back.
       g.add(this.sphere(s.r * 0.85, s.team === 'enemy' ? 0x3a1c10 : 0x10283a));
       g.add(glowSprite(s.team === 'enemy' ? 0xff7a20 : 0x6ae8ff, s.r * (s.team === 'enemy' ? 4 : 5.5)));
+    } else if (s.kind === 'swordwave') {
+      const color = ELEMENTS[s.fx?.element]?.color ?? this.armGlow();
+      if (!this.shotMats.has(`wave${color}`)) {
+        this.shotMats.set(`wave${color}`, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+      }
+      const m = new THREE.Mesh(this.waveGeo, this.shotMats.get(`wave${color}`).clone());
+      m.renderOrder = 3;
+      g.userData.own = m.material; // its own material (it fades on its own)
+      g.add(m, glowSprite(color, 2.6));
     } else {
-      const [core, glow, size] = SHOT_LOOK[s.kind] ?? [0xffffff, 0x6ae8ff, 5];
+      const [core, base, size] = SHOT_LOOK[s.kind] ?? [0xffffff, 0x6ae8ff, 5];
+      // A forged gun's shots glow in its glow colour.
+      const d = this.world.kit.gunDesign;
+      const glow = s.fx && d ? FORM.palette[d.form.glow] : base;
       g.add(this.sphere(s.r * (s.kind === 'bomb' ? 0.9 : 0.6), core));
       g.add(glowSprite(glow, s.r * size));
       if (s.kind === 'charge') g.add(glowSprite(0x9a8bff, s.r * 7.5));
