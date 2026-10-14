@@ -131,3 +131,32 @@ The next agent could measure all of these with mGBA's Lua scripting and a save s
 ## 5. Build log
 
 (see below, newest last)
+
+- **Engine core** (`src/engine/`): a deterministic 60 Hz sim. A 20-test rules bench caught all three
+  one-defect mutants it was checked against.
+- **Contract** (`docs/CONTRACT.md`): pinned so content could be built in parallel, one file per
+  contributor (virus packs A/B, boss packs A/B, core art, audio).
+- **Renderer, Custom Screen UI, input, game shell:**
+  - title with an attract demo, Gauntlet (8 areas), Free Battle (boss V2/V3/Ω), Folder, Programs;
+  - Style Change (element plus type, unlocked by bosses);
+  - Chip Shop, How to Play, Options, Credits.
+- **Oracles:**
+  - `npm test` (136 tests);
+  - `tools/smoke.mjs`, a Playwright run through the real UI;
+  - `tools/balance.mjs`, an autopilot sweep of every encounter with damage attributed by enemy type.
+
+### Gotchas found while building
+1. **Symptom:** repeated taps of the same key were lost in headless Chromium runs. **Cause:** animation
+   frames arrived in bursts, so a release and the next press landed between two samples and merged
+   into one held press. **Fix:** `Input` queues held-state transitions per button and replays at most
+   one per frame, so every press and release is seen.
+2. **Symptom:** after a "harmless" telemetry change, two of a content pack's exact-count tests failed.
+   **Cause:** `lob()` called the content's `cells` callback an extra time to record the landing cells.
+   Some callbacks use `b.rng`, so the extra call shifted the seeded RNG sequence. **Fix:** never call
+   content callbacks speculatively; record only static data.
+3. **Symptom:** the autopilot died to late areas. **Cause:** the player's HP grew +20 per boss while
+   late-game damage is 60-150 per hit. **Fix:** a first boss clear adds 80 HP, about 660 by area 8,
+   which matches BN3's late-game scale.
+4. **Symptom:** a data field set by the engine was silently replaced. **Cause:** a pack wrote its own
+   value (`'plus'`, a string) to `data.blast` on the same spell. **Fix:** engine-owned spell data uses
+   names packs don't (`data.landing`); `docs/CONTRACT.md` lists the engine's keys.

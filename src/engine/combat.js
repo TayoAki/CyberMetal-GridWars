@@ -119,7 +119,6 @@ export function lob(b, user, hit, tc, tr, opts = {}) {
   s.x = fromX;
   s.y = fromY;
   s.data.target = { col: tc, row: tr };
-  s.data.landing = opts.cells ? opts.cells(tc, tr) : [[tc, tr]]; // where it will land (for telegraph-aware logic)
   s.script = (function* () {
     for (let t = 1; t <= frames; t++) {
       const k = t / frames;

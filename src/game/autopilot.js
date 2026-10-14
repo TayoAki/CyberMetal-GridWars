@@ -16,7 +16,12 @@ function dangerMap(b) {
     if (!s.alive || s.team === TEAM.RED) continue;
     const r = Math.round(s.y);
     if (s.data?.cells) for (const [c, rr] of s.data.cells) add(c, rr);
-    if (s.data?.target) add(s.data.target.col, s.data.target.row);
+    // A lob lands on its target; assume a plus-shaped blast to be safe (its cells callback may consume
+    // the battle RNG, so it is never called ahead of time).
+    if (s.data?.target) {
+      const { col: tc, row: tr } = s.data.target;
+      for (const [c, rr] of [[tc, tr], [tc + 1, tr], [tc - 1, tr], [tc, tr - 1], [tc, tr + 1]]) add(c, rr);
+    }
     if (Array.isArray(s.data?.landing)) for (const [c, rr] of s.data.landing) add(c, rr);
     if (s.data?.delay !== undefined || s.type === 'reticle') {
       add(s.col, s.row);
