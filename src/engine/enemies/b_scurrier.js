@@ -13,10 +13,10 @@ export const SCURRIER = {
   hp: [40, 100, 160, 230],
   element: 'null',
   levels: [
-    { attack: 20, hops: 3, hop: 16, glide: 6, windup: 24, speed: 10, rest: 56 },
-    { attack: 50, hops: 4, hop: 13, glide: 5, windup: 20, speed: 8, rest: 46 },
-    { attack: 80, hops: 5, hop: 10, glide: 4, windup: 16, speed: 7, rest: 38 },
-    { attack: 120, hops: 6, hop: 8, glide: 3, windup: 12, speed: 5, rest: 30 },
+    { attack: 20, hops: 3, hop: 16, glide: 6, windup: 28, speed: 10, rest: 84 },
+    { attack: 50, hops: 4, hop: 13, glide: 5, windup: 22, speed: 8, rest: 66 },
+    { attack: 80, hops: 5, hop: 10, glide: 4, windup: 18, speed: 7, rest: 64 },
+    { attack: 120, hops: 6, hop: 8, glide: 3, windup: 14, speed: 5, rest: 46 },
   ],
   onSpawn(b, e) {
     e.data.vx = e.facing;

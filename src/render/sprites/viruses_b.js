@@ -5,7 +5,7 @@
 // effects. Bodies are pixel-string art authored facing right, built once at module load with the small
 // grid helpers below (shaded orbs, polygons, stamps), and drawn with sprite() and per-level palettes.
 
-import { sprite, recolor, rect, px, line, ellipse, disc, ring, mix } from '../pixel.js';
+import { sprite, recolor, rect, px, line, ellipse, disc } from '../pixel.js';
 import { PANEL_W, PANEL_H } from '../layout.js';
 
 const OUTLINE = '#0c0f1c';
@@ -166,6 +166,34 @@ function fl(e) {
   return e && e.facing < 0 ? -1 : 1;
 }
 
+// Ω aura: the silhouette, dilated in the glow colour and pulsing, drawn just outside the dark outline.
+const glowPals = new WeakMap();
+function glowPalette(pal, color) {
+  let byColor = glowPals.get(pal);
+  if (!byColor) glowPals.set(pal, (byColor = new Map()));
+  let gp = byColor.get(color);
+  if (!gp) {
+    gp = Object.freeze(Object.fromEntries(Object.keys(pal).map((k) => [k, color])));
+    byColor.set(color, gp);
+  }
+  return gp;
+}
+
+function aura(ctx, rows, pal, x, y, flip, color, t) {
+  const gp = glowPalette(pal, color);
+  const alpha = 0.42 + 0.22 * Math.sin(t / 9);
+  for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) sprite(ctx, rows, gp, x + dx, y + dy, { anchor: 'feet', flip, outline: color, alpha });
+}
+
+// Draw a body sprite; Ω bodies get their aura first.
+function body(ctx, e, rows, pal, x, y, t, glow) {
+  const flip = fl(e) < 0;
+  if (lv(e) === 4) aura(ctx, rows, pal, x, y, flip, glow, t);
+  sprite(ctx, rows, pal, x, y, { anchor: 'feet', flip, outline: OUTLINE });
+}
+
+const OMEGA_GLOW = '#d050ff';
+
 // ================================================================ WATCHER (sentinel eye in a tesla cradle)
 //
 // Two sprites: the pylon (pedestal, coil column and a U-shaped electrode cradle) stands on the floor; the
@@ -317,11 +345,10 @@ function drawWatcher(ctx, e, x, y, t) {
   const L = lv(e);
   const pal = WATCHER_PAL[L];
   const F = fl(e);
-  const flip = F < 0;
   const anim = e.anim ?? 'idle';
   const k = e.animT ?? 0;
   const glow = ELEC_GLOW[L];
-  sprite(ctx, WATCHER_PYLON, pal, x, y, { anchor: 'feet', flip, outline: OUTLINE });
+  body(ctx, e, WATCHER_PYLON, pal, x, y, t, OMEGA_GLOW);
 
   let eye;
   let ex = 0;
@@ -344,7 +371,7 @@ function drawWatcher(ctx, e, x, y, t) {
   }
   const eyeX = x + F * ex;
   const eyeY = y - 14 + ey;
-  sprite(ctx, eye, pal, eyeX, eyeY, { anchor: 'feet', flip, outline: OUTLINE });
+  body(ctx, e, eye, pal, eyeX, eyeY, t, OMEGA_GLOW);
 
   // Arcs jump between the electrodes and the pod.
   const busy = anim === 'windup' || anim === 'attack';
@@ -521,7 +548,6 @@ function flameTongue(ctx, x, y, h, cols, t, seed) {
 function drawCinderkite(ctx, e, x, y, t) {
   const L = lv(e);
   const F = fl(e);
-  const flip = F < 0;
   const anim = e.anim ?? 'idle';
   const k = e.animT ?? 0;
   const seed = (e.id ?? 0) * 13;
@@ -540,7 +566,7 @@ function drawCinderkite(ctx, e, x, y, t) {
   } else if (anim === 'hurt' || anim === 'delete') rows = KITE.hurt;
   const bob = Math.round(Math.sin((t + seed) / 11) * 2);
   const fy = y - 3 + bob - lift;
-  sprite(ctx, rows, pal, x, fy, { anchor: 'feet', flip, outline: OUTLINE });
+  body(ctx, e, rows, pal, x, fy, t, OMEGA_GLOW);
 
   // Flames lick from the upper tips; bigger while calling meteors.
   const cols = FLAME[L];
@@ -665,7 +691,6 @@ const FROST_MIST = { 1: ['#ffffff', '#c8f0ff', '#7ac8f0'], 2: ['#ffffff', '#c8d4
 function drawFrostbit(ctx, e, x, y, t) {
   const L = lv(e);
   const F = fl(e);
-  const flip = F < 0;
   const anim = e.anim ?? 'idle';
   const k = e.animT ?? 0;
   const pal = FROST_PAL[L];
@@ -675,7 +700,7 @@ function drawFrostbit(ctx, e, x, y, t) {
   else if (anim === 'windup') rows = FROST.windup[k < 8 ? 0 : 1];
   else if (anim === 'attack') rows = FROST.attack[(t >> 2) % 2];
   else if (anim === 'hurt' || anim === 'delete') rows = FROST.hurt;
-  sprite(ctx, rows, pal, x, y, { anchor: 'feet', flip, outline: OUTLINE });
+  body(ctx, e, rows, pal, x, y, t, OMEGA_GLOW);
 
   if (anim === 'move') {
     // Ice spray kicked up by the slide.
@@ -759,7 +784,7 @@ function buildSporeling({ squash = 0, face = 'open', glow = false, mouth = 'smil
   const fx = Math.round(cx - 0.5);
   if (face === 'open') stamp(g, fx, fy, ['wk..wk', 'kk..kk', 'kk..kk']);
   else if (face === 'shut') stamp(g, fx, fy + 1, ['kk..kk', '.k...k']);
-  else if (face === 'happy') stamp(g, fx, fy, ['.k...k.', 'k.k.k.k']);
+  else if (face === 'happy') stamp(g, fx - 1, fy, ['.k....k.', 'k.k..k.k']);
   else if (face === 'puffed') stamp(g, fx, fy + 1, ['kk..kk']);
   else if (face === 'x') stamp(g, fx - 1, fy, ['k.k..k.k', '.k....k.', 'k.k..k.k']);
   if (face === 'puffed') {
@@ -847,7 +872,7 @@ function drawSporeling(ctx, e, x, y, t) {
     rect(ctx, x - 7, y - 2, 14, 1, DIRT[0]);
     return;
   }
-  sprite(ctx, rows, pal, x, y + dy, { anchor: 'feet', flip, outline: OUTLINE });
+  body(ctx, e, rows, pal, x, y + dy, t, '#3aff8a');
   if (anim === 'windup' || anim === 'attack') {
     const dust = SPORE_DUST[L];
     for (let i = 0; i < 5; i++) {
@@ -972,7 +997,6 @@ const SCURRY_PAL = {
 function drawScurrier(ctx, e, x, y, t) {
   const L = lv(e);
   const F = fl(e);
-  const flip = F < 0;
   const anim = e.anim ?? 'idle';
   const k = e.animT ?? 0;
   const pal = SCURRY_PAL[L];
@@ -990,7 +1014,7 @@ function drawScurrier(ctx, e, x, y, t) {
     rows = SCURRY.hurt;
     dx = -2;
   }
-  sprite(ctx, rows, pal, x + F * dx, y + dy, { anchor: 'feet', flip, outline: OUTLINE });
+  body(ctx, e, rows, pal, x + F * dx, y + dy, t, OMEGA_GLOW);
   if (anim === 'move') {
     // Speed lines behind.
     for (let i = 0; i < 3; i++) {
@@ -1009,37 +1033,51 @@ function drawScurrier(ctx, e, x, y, t) {
 
 // ================================================================ spells
 
-// kitemark: the fiery target painted on a panel before a meteor lands (drawn under bodies).
+// kitemark: the fiery target painted on a panel before a meteor lands (drawn under bodies). The outer
+// ring blinks faster as the meteor nears, an inner ring closes in, and the centre heats up.
 function drawKiteMark(ctx, s, x, y, t) {
   const L = ownerLevel(s);
   const cols = FLAME[L];
   const p = Math.max(0, Math.min(1, s.data?.progress ?? 0));
-  const blink = p > 0.7 ? (t >> 1) % 2 : (t >> 2) % 2;
-  const cy = y - 8;
-  // Outer ring and corner ticks.
-  ring2(ctx, x, cy, 15, 6, blink ? cols[2] : cols[1]);
-  const r = Math.max(2, Math.round(13 * (1 - p)));
-  ring2(ctx, x, cy, r + 1, Math.max(1, Math.round((r + 1) * 0.42)), cols[3]);
-  for (const [ax, ay] of [[-17, 0], [17, 0], [0, -8], [0, 8]]) {
-    rect(ctx, x + ax - (ax ? 1 : 0), cy + ay - (ay ? 0 : 0), ax ? 3 : 1, 1, blink ? cols[3] : cols[2]);
+  const blink = p > 0.7 ? (t >> 1) % 2 : (t >> 3) % 2;
+  const cy = y - 9;
+  if (p > 0.45) {
+    const k = (p - 0.45) / 0.55;
+    ellipse(ctx, x, cy, Math.round(5 + k * 8), Math.round(2 + k * 3), cols[0]);
+    ellipse(ctx, x, cy, Math.round(3 + k * 5), Math.round(1 + k * 2), cols[1]);
+    if (k > 0.5) ellipse(ctx, x, cy, Math.round(1 + k * 3), 1, cols[2]);
   }
-  if (p > 0.55) ellipse(ctx, x, cy, Math.round(4 + p * 6), Math.round(2 + p * 2), cols[1]);
-  if (p > 0.55) ellipse(ctx, x, cy, Math.round(2 + p * 3), Math.round(1 + p), cols[2]);
+  ring2(ctx, x, cy, 15, 6, blink ? cols[3] : cols[2]);
+  const r = Math.max(3, Math.round(14 * (1 - p)));
+  ring2(ctx, x, cy, r, Math.max(1, Math.round(r * 0.42)), cols[3]);
+  // Corner ticks.
+  const tc = blink ? cols[3] : cols[1];
+  rect(ctx, x - 18, cy, 3, 1, tc);
+  rect(ctx, x + 16, cy, 3, 1, tc);
+  rect(ctx, x, cy - 8, 1, 2, tc);
+  rect(ctx, x, cy + 7, 1, 2, tc);
 }
 
-// An axis-aligned ellipse outline (rx, ry), pixel-exact.
+// A 1px axis-aligned ellipse outline (rx, ry), pixel-exact: each scanline fills the gap between the outer
+// ellipse and the one a pixel inside it.
 function ring2(ctx, cx, cy, rx, ry, color) {
   cx = Math.round(cx);
   cy = Math.round(cy);
+  rx = Math.round(rx);
+  ry = Math.round(ry);
+  if (rx < 1 || ry < 1) return;
   ctx.fillStyle = color;
-  let px0 = null;
-  for (let a = 0; a < 64; a++) {
-    const ang = (a / 64) * Math.PI * 2;
-    const xx = cx + Math.round(Math.cos(ang) * rx);
-    const yy = cy + Math.round(Math.sin(ang) * ry);
-    if (px0 && px0[0] === xx && px0[1] === yy) continue;
-    ctx.fillRect(xx, yy, 1, 1);
-    px0 = [xx, yy];
+  const half = (r, rr, dy) => (Math.abs(dy) > rr ? -1 : Math.round(r * Math.sqrt(Math.max(0, 1 - (dy * dy) / ((rr + 0.5) * (rr + 0.5))))));
+  for (let dy = -ry; dy <= ry; dy++) {
+    const o = half(rx, ry, dy);
+    const i = Math.min(o - 1, half(rx - 1, ry - 1, dy));
+    const edge = Math.abs(dy) === ry || i < 0;
+    if (edge) ctx.fillRect(cx - o, cy + dy, o * 2 + 1, 1);
+    else {
+      const w = Math.max(1, o - i);
+      ctx.fillRect(cx - o, cy + dy, w, 1);
+      ctx.fillRect(cx + o - w + 1, cy + dy, w, 1);
+    }
   }
 }
 
@@ -1168,20 +1206,32 @@ function drawSporeCloud(ctx, s, x, y, t) {
   });
 }
 
-// sporemound: the rumbling dirt mound that marks where a Sporeling will pop up.
+// sporemound: the rumbling dirt mound that marks where a Sporeling will pop up: the floor cracks, the
+// mound swells and shakes, and pebbles hop off it.
 function drawSporeMound(ctx, s, x, y, t) {
   const p = Math.max(0, Math.min(1, s.data?.progress ?? 0));
-  const shake = (t >> 1) % 2 ? 1 : -1;
-  const w = Math.round(6 + p * 6);
-  const h = Math.round(2 + p * 3);
-  ellipse(ctx, x + shake, y - 1, w, h, DIRT[0]);
-  ellipse(ctx, x + shake - 1, y - 2, Math.max(1, w - 3), Math.max(1, h - 1), DIRT[1]);
-  rect(ctx, x - w + shake, y - 1, w * 2, 1, DIRT[2]);
-  for (let i = 0; i < 3; i++) {
-    const q = ((t + i * 4) % 12) / 12;
-    px(ctx, x + (i - 1) * 5 + shake, y - h - 1 - Math.round(q * 5), DIRT[i % 2]);
+  const shake = (t >> 1) % 2 ? 1 : 0;
+  const cy = y - 3;
+  // Cracks spreading over the panel.
+  const reach = Math.round(5 + p * 9);
+  for (const [dx, dy] of [[-1, -0.35], [1, -0.3], [-0.8, 0.3], [0.9, 0.35], [0.1, -0.5]]) {
+    line(ctx, x, cy, x + Math.round(dx * reach), cy + Math.round(dy * reach * 0.8), DIRT[2]);
   }
-  line(ctx, x - 2 + shake, y - h, x + shake, y - h + 2, DIRT[2]);
+  // The mound.
+  const w = Math.round(5 + p * 6);
+  const h = Math.round(2 + p * 3);
+  ellipse(ctx, x + shake, cy, w, h, DIRT[2]);
+  ellipse(ctx, x + shake, cy - 1, w - 1, h - 1, DIRT[0]);
+  ellipse(ctx, x + shake - 1, cy - 2, Math.max(1, w - 3), Math.max(1, h - 2), DIRT[1]);
+  px(ctx, x + shake - 2, cy - h, '#c8a070');
+  // Pebbles hopping off.
+  for (let i = 0; i < 3; i++) {
+    const q = ((t + i * 5) % 14) / 14;
+    const side = i === 1 ? 1 : -1;
+    const ex = x + side * (2 + Math.round(q * (4 + i * 2)));
+    const ey = cy - h - Math.round(Math.sin(q * Math.PI) * (4 + i));
+    rect(ctx, ex, ey, i === 0 ? 2 : 1, 1, DIRT[i % 2]);
+  }
 }
 
 // The crawling bomb: a little iron bomb-mouse on wheels whose tail is the lit fuse. Views: side (facing
@@ -1322,6 +1372,7 @@ function drawKiteBurst(ctx, fx, x, y, age) {
   if (age < 4) {
     disc(ctx, x, cy - 6, 12 - age, cols[2]);
     disc(ctx, x, cy - 6, 8 - age, cols[3]);
+    return;
   }
   const r = 6 + age * 1.2;
   if (age < 16) {
@@ -1481,4 +1532,3 @@ export const FX_SPRITES = {
   scurryblast: { duration: 22, draw: drawScurryBlast },
 };
 
-void mix;

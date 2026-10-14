@@ -94,7 +94,6 @@ function* drift(b, e, s) {
     const [dc, dr] = go;
     b.moveEntity(e, e.col + dc, e.row + dr);
     e.setAnim('move');
-    e.data.drift = dc || dr;
     for (let f = 1; f <= s.glide; f++) {
       const k = 1 - f / s.glide;
       const ease = k * k * (3 - 2 * k);

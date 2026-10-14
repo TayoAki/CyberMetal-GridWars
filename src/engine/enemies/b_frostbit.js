@@ -14,8 +14,8 @@ export const FROSTBIT = {
   hp: [80, 100, 130, 260],
   element: 'aqua',
   levels: [
-    { attack: 20, step: 30, glide: 10, slides: 2, inhale: 34, wave: 8, freeze: false, rest: 62 },
-    { attack: 40, step: 26, glide: 9, slides: 2, inhale: 30, wave: 7, freeze: true, rest: 52 },
+    { attack: 20, step: 30, glide: 10, slides: 2, inhale: 36, wave: 8, freeze: false, rest: 80 },
+    { attack: 40, step: 26, glide: 9, slides: 2, inhale: 30, wave: 7, freeze: true, rest: 62 },
     { attack: 70, step: 22, glide: 8, slides: 3, inhale: 26, wave: 6, freeze: true, rest: 44 },
     { attack: 110, step: 18, glide: 7, slides: 3, inhale: 22, wave: 5, freeze: true, rest: 36 },
   ],
@@ -67,7 +67,6 @@ export const FROSTBIT = {
 function* slide(b, e, dc, dr, s) {
   if (!b.tryStep(e, dc, dr)) return false;
   e.setAnim('move');
-  e.data.slide = dr || dc;
   for (let f = 1; f <= s.glide; f++) {
     const k = 1 - f / s.glide;
     e.offsetX = -dc * k * k;
