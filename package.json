@@ -10,7 +10,8 @@
     "serve": "node tools/serve.mjs"
   },
   "devDependencies": {
-    "esbuild": "0.25.10"
+    "esbuild": "0.25.10",
+    "playwright": "1.56.1"
   },
   "license": "MIT"
 }

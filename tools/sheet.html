@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sprite Sheet</title>
+<style>
+  body { margin: 0; background: #1a1d2b; color: #cfd6ff; font: 12px monospace; }
+  canvas { image-rendering: pixelated; display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script type="module">
+// Contact sheet for sprite packs. Query params:
+//   ?entities=player,rivet  &anims=idle,move,...  &spells=shockwave,bomb  &fx=explosion,slash  &scale=3
+//   &chips=1 (draw every chip icon + art)
+import { ENTITY_SPRITES, SPELL_SPRITES, FX_SPRITES, drawEntitySprite, drawSpellSprite, drawFxSprite, fxDuration } from '../src/render/sprites/index.js';
+import { drawText } from '../src/render/font.js';
+import { rect } from '../src/render/pixel.js';
+
+const q = new URLSearchParams(location.search);
+const scale = Number(q.get('scale') ?? 3);
+const list = (k, all) => (q.get(k) === 'all' ? Object.keys(all) : (q.get(k) ?? '').split(',').filter(Boolean));
+const entities = list('entities', ENTITY_SPRITES);
+const anims = (q.get('anims') ?? 'idle,move,hurt').split(',');
+const spells = list('spells', SPELL_SPRITES);
+const fxs = list('fx', FX_SPRITES);
+const levels = (q.get('levels') ?? '1').split(',').map(Number);
+const CELL_W = 56, CELL_H = 60;
+
+const rows = [];
+for (const type of entities) for (const level of levels) for (const facing of [1, -1]) rows.push({ kind: 'entity', type, level, facing });
+for (const type of spells) rows.push({ kind: 'spell', type });
+for (const type of fxs) rows.push({ kind: 'fx', type });
+
+const cols = Math.max(anims.length, 6);
+const W = 80 + cols * CELL_W;
+const H = Math.max(1, rows.length) * CELL_H + 10;
+const buf = document.createElement('canvas');
+buf.width = W; buf.height = H;
+const ctx = buf.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+rect(ctx, 0, 0, W, H, '#202436');
+
+rows.forEach((row, i) => {
+  const y0 = i * CELL_H;
+  rect(ctx, 0, y0 + CELL_H - 1, W, 1, '#2c3150');
+  drawText(ctx, row.kind === 'entity' ? `${row.type} L${row.level} ${row.facing > 0 ? 'R' : 'L'}` : `${row.kind}:${row.type}`, 2, y0 + 2, '#9fb0ff');
+  for (let k = 0; k < cols; k++) {
+    const x = 80 + k * CELL_W + CELL_W / 2, y = y0 + CELL_H - 8;
+    rect(ctx, x - 20, y, 40, 1, '#3a4170');
+    if (row.kind === 'entity') {
+      const anim = anims[k];
+      if (!anim) continue;
+      const e = { type: row.type, anim, animT: 6 + k * 3, facing: row.facing, level: row.level, team: row.facing > 0 ? 'red' : 'blue', element: 'null', data: {}, hp: 100, maxHp: 100, z: 0, offsetX: 0, offsetY: 0, alive: anim !== 'delete' };
+      if (i === 0) drawText(ctx, anim, x - 20, 2 + CELL_H * 0, '#ffd27a');
+      drawEntitySprite(ctx, e, x, y, 30 + k * 7);
+    } else if (row.kind === 'spell') {
+      const s = { type: row.type, t: k * 6, x: 0, y: 0, z: k % 2 ? 12 : 0, dir: -1, team: 'blue', data: { progress: k / cols, cells: [[0, 0]] }, element: 'null', hit: {} };
+      drawSpellSprite(ctx, s, x, y, 20 + k * 6);
+    } else {
+      const dur = fxDuration(row.type);
+      const age = Math.floor((k / (cols - 1)) * (dur - 1));
+      drawFxSprite(ctx, { fx: row.type, dir: 1, shape: 'wide', element: 'null', col: 0, row: 0, toCol: 5 }, x, y, age);
+      drawText(ctx, String(age), x - 20, y + 2, '#7a83b8', { mini: true });
+    }
+  }
+});
+
+const c = document.getElementById('c');
+c.width = W * scale; c.height = H * scale;
+const g = c.getContext('2d');
+g.imageSmoothingEnabled = false;
+g.drawImage(buf, 0, 0, W * scale, H * scale);
+window.__ready = true;
+</script>
+</body>
+</html>

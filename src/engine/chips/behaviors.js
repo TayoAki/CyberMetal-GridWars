@@ -763,8 +763,8 @@ export const BEHAVIORS = {
     });
   },
 
-  *navi_null(b, u, chip) {
-    yield* summon(b, u, 'null', 20, function* () {
+  *navi_zeroday(b, u, chip) {
+    yield* summon(b, u, 'zeroday', 20, function* () {
       const area = opponentArea(b, u.team);
       for (let wave = 0; wave < 3; wave++) {
         b.emit('sfx', { name: 'bigexplode' });

@@ -10,6 +10,10 @@
 import { RIVET } from './rivet.js';
 import { PLINKER } from './plinker.js';
 import { DARTFIN } from './dartfin.js';
+import { FAMILIES as PACK_A } from './pack_a.js';
+import { FAMILIES as PACK_B } from './pack_b.js';
+import { FAMILIES as BOSSES_A } from './bosses/bosses_a.js';
+import { FAMILIES as BOSSES_B } from './bosses/bosses_b.js';
 
 export const ENEMIES = Object.create(null);
 
@@ -17,7 +21,7 @@ export function registerEnemy(def) {
   ENEMIES[def.type] = def;
 }
 
-for (const def of [RIVET, PLINKER, DARTFIN]) registerEnemy(def);
+for (const def of [RIVET, PLINKER, DARTFIN, ...PACK_A, ...PACK_B, ...BOSSES_A, ...BOSSES_B]) registerEnemy(def);
 
 export function makeEnemyStats(fam, level) {
   const i = Math.max(0, Math.min(3, (level | 0) - 1));

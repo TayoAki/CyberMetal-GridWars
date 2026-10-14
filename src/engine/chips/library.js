@@ -181,7 +181,7 @@ const rows = [
   ['crusher3', 'CrusherV3', N, 90, 'C', 57, 5, 'navi', 'navi_crusher', {}, 'Crusher V3.', 224, 'mega'],
 
   // Giga chip
-  ['nullstorm', 'NullStorm', N, 90, 'X', 98, 5, 'navi', 'navi_null', {}, 'Null unleashes a storm on every enemy panel.', 306, 'giga'],
+  ['zerostorm', 'ZeroStorm', N, 90, 'Z', 98, 5, 'navi', 'navi_zeroday', {}, 'ZeroDay unleashes a storm on every enemy panel.', 306, 'giga'],
 ];
 
 export const CHIPS = Object.create(null);
