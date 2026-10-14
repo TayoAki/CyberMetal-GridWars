@@ -33,6 +33,7 @@ export class BattleView {
     this.theme = opts.theme ?? 'boot';
     this.onSfx = opts.onSfx ?? (() => {});
     this.hud = opts.hud ?? true;
+    this.calm = !!opts.reduceFlash; // accessibility: dim full-screen flashes, no shake
     this.t = 0;
     this.fx = [];
     this.nums = [];
@@ -108,8 +109,8 @@ export class BattleView {
 
   draw(ctx) {
     const b = this.b;
-    const sx = this.shake > 0 ? ((this.t * 7) % 3) - 1 : 0;
-    const sy = this.shake > 0 ? ((this.t * 5) % 3) - 1 : 0;
+    const sx = this.shake > 0 && !this.calm ? ((this.t * 7) % 3) - 1 : 0;
+    const sy = this.shake > 0 && !this.calm ? ((this.t * 5) % 3) - 1 : 0;
     drawBackground(ctx, this.theme, this.t);
     ctx.save();
     ctx.translate(sx, sy);
@@ -123,7 +124,7 @@ export class BattleView {
     this.drawNumbers(ctx);
     ctx.restore();
     if (this.screenFlash > 0) {
-      ctx.globalAlpha = this.screenFlash / 24;
+      ctx.globalAlpha = (this.screenFlash / 24) * (this.calm ? 0.25 : 1);
       rect(ctx, 0, 0, SCREEN_W, SCREEN_H, '#ffffff');
       ctx.globalAlpha = 1;
     }

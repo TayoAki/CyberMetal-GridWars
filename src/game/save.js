@@ -62,7 +62,7 @@ function freshData() {
     style: { type: null, element: 'null' },
     progress: { area: 0, step: 0, hp: null, cleared: {}, bosses: {}, encounters: {}, finished: false },
     bits: 0,
-    options: { sfx: 0.8, music: 0.55, numbers: true },
+    options: { sfx: 0.8, music: 0.55, numbers: true, reduceFlash: false },
     records: { battles: 0, wins: 0, best: {} },
   };
 }

@@ -24,6 +24,7 @@ export class OptionsScene {
     return [
       { key: 'sfx', label: 'SOUND FX', value: bar(o.sfx) },
       { key: 'music', label: 'MUSIC', value: bar(o.music) },
+      { key: 'reduceFlash', label: 'REDUCE FLASH/SHAKE', value: o.reduceFlash ? 'ON' : 'OFF' },
       { key: 'reset', label: this.confirmReset ? 'REALLY RESET? (A)' : 'RESET SAVE', value: '' },
       { key: 'back', label: 'BACK', value: '' },
     ];
@@ -58,6 +59,12 @@ export class OptionsScene {
       leave();
       return;
     }
+    if (it.key === 'reduceFlash' && (edges.pressed.a || edges.pressed.left || edges.pressed.right)) {
+      o.reduceFlash = !o.reduceFlash;
+      this.apply();
+      this.game.audio.play('select');
+      return;
+    }
     if (!edges.pressed.a) return;
     if (it.key === 'reset') {
       if (this.confirmReset) {
@@ -80,7 +87,7 @@ export class OptionsScene {
     ctx.globalAlpha = 0.45;
     rect(ctx, 0, 0, 240, 160, '#03050c');
     ctx.globalAlpha = 1;
-    drawWindow(ctx, 20, 6, 200, 62, { title: 'OPTIONS' });
+    drawWindow(ctx, 20, 6, 200, 70, { title: 'OPTIONS' });
     this.items().forEach((it, i) => {
       const y = 22 + i * 11;
       const sel = i === this.cursor;
@@ -88,11 +95,11 @@ export class OptionsScene {
       drawText(ctx, it.label, 36, y, it.key === 'reset' && this.confirmReset ? UI.bad : sel ? UI.gold : UI.text);
       if (it.value) drawText(ctx, it.value, 210, y, UI.sub, { align: 'right' });
     });
-    drawWindow(ctx, 20, 72, 200, 72, { title: 'CONTROLS' });
+    drawWindow(ctx, 20, 80, 200, 66, { title: 'CONTROLS' });
     KEY_HELP.forEach(([what, keys], i) => {
-      drawText(ctx, what, 28, 86 + i * 10, UI.sub);
-      drawText(ctx, keys, 212, 86 + i * 10, UI.text, { align: 'right' });
+      drawText(ctx, what, 28, 94 + i * 10, UI.sub);
+      drawText(ctx, keys, 212, 94 + i * 10, UI.text, { align: 'right' });
     });
-    drawHints(ctx, '</>: adjust   A: select   B: back   Gamepads work too');
+    drawHints(ctx, '</>: adjust   A: select   B: back');
   }
 }

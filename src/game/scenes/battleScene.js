@@ -19,7 +19,7 @@ export class BattleScene {
       player: opts.player,
       shuffle: true,
     });
-    this.view = new BattleView(this.battle, { theme: opts.theme, onSfx: (n) => game.audio.play(n) });
+    this.view = new BattleView(this.battle, { theme: opts.theme, onSfx: (n) => game.audio.play(n), reduceFlash: !!game.save.data.options.reduceFlash });
     this.resultT = 0;
     this.reward = null;
     this.autopilot = opts.autopilot ?? null;
