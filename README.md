@@ -115,6 +115,9 @@ your own.
 
 ## Hosting both games
 
+**Live:** https://games-production-eed4.up.railway.app (menu), `/grid` and `/world`. Railway project
+`cybermetal-gridwars`, service `games`, deployed from this branch: every push redeploys it.
+
 `npm run build`, then `npm start`, serves a menu at `/`, the grid battler at `/grid` and the open world at
 `/world` (plus `/health`), on `$PORT` (default 8080). `tools/serve-dist.mjs` reads and gzips the built pages
 once at startup. Any Node 20+ host works; on Railway the default Node build (`npm install`, `npm run build`,
