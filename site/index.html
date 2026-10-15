@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CyberMetal GridWars</title>
+<meta name="description" content="Fan-made battle games in the spirit of Mega Man Battle Network. Play in your browser, no install.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%2305070f'/%3E%3Cpath d='M2 9h5v4H2zM9 9h5v4H9z' fill='%23ff5a6a'/%3E%3Cpath d='M9 3h5v4H9z' fill='%236ae8ff'/%3E%3Cpath d='M2 3h5v4H2z' fill='%233a7bff'/%3E%3C/svg%3E">
+<style>
+  /* The menu for the hosted games: the same neon-on-night look as the games themselves. */
+  :root {
+    --bg: #05070f;
+    --panel: rgba(12, 18, 40, 0.86);
+    --edge: rgba(138, 176, 255, 0.45);
+    --ink: #e4ecff;
+    --muted: #8a9cc8;
+    --cyan: #6ae8ff;
+    --pink: #ff5ae0;
+    --gold: #ffd84a;
+    --red: #ff6a7a;
+    --blue: #5a8cff;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--bg); }
+  body {
+    margin: 0; min-height: 100vh; padding: 32px 16px 24px; color: var(--ink); background:
+      radial-gradient(1200px 500px at 50% -10%, rgba(90, 140, 255, 0.22), transparent 70%),
+      linear-gradient(180deg, #070b1c, var(--bg) 60%);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 920px; margin: 0 auto; }
+  h1 { margin: 0; font: 900 clamp(28px, 6vw, 46px)/1.05 system-ui, sans-serif; letter-spacing: 0.08em; }
+  h1 span { color: var(--cyan); }
+  .tag { margin: 10px 0 28px; max-width: 60ch; color: var(--muted); }
+  .games { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+  .game {
+    display: grid; grid-template-rows: auto 1fr auto; gap: 12px; padding: 16px; border-radius: 16px; text-decoration: none; color: inherit;
+    background: var(--panel); border: 1px solid var(--edge); box-shadow: 0 10px 40px rgba(20, 40, 120, 0.25); transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+  }
+  .game:hover, .game:focus-visible { transform: translateY(-3px); border-color: var(--cyan); box-shadow: 0 14px 44px rgba(106, 232, 255, 0.2); outline: none; }
+  .art { height: 150px; border-radius: 10px; overflow: hidden; position: relative; }
+  /* GridWars: the 3x6 battlefield, red panels against blue. */
+  .grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; padding: 26px 14px 14px; background: linear-gradient(180deg, #0c1636, #101c44); }
+  .grid i { border-radius: 4px; height: 30px; background: linear-gradient(180deg, #ff8a96, var(--red)); box-shadow: inset 0 -5px 0 rgba(0, 0, 0, 0.25); }
+  .grid i:nth-child(6n + 4), .grid i:nth-child(6n + 5), .grid i:nth-child(6n) { background: linear-gradient(180deg, #8ab0ff, var(--blue)); }
+  /* Open World: sky, hills and a rift's beam. */
+  .world { background: linear-gradient(180deg, #3b7fd6 0%, #9cc8f4 55%, #5aa04a 56%, #3f7f36 100%); }
+  .world::before { content: ""; position: absolute; left: 0; right: 0; bottom: 30%; height: 38%; background: radial-gradient(60% 100% at 30% 100%, #4f8f3f 70%, transparent 71%), radial-gradient(50% 90% at 80% 100%, #477f39 70%, transparent 71%); }
+  .world::after { content: ""; position: absolute; left: 62%; top: 0; bottom: 34%; width: 10px; background: linear-gradient(180deg, transparent, var(--pink)); box-shadow: 0 0 18px var(--pink); }
+  h2 { margin: 0; font: 900 20px/1.2 system-ui, sans-serif; letter-spacing: 0.1em; }
+  .game p { margin: 6px 0 0; color: var(--muted); font-size: 14.5px; }
+  .play { justify-self: start; padding: 9px 16px; border-radius: 10px; background: rgba(255, 216, 74, 0.14); border: 1px solid var(--gold); color: var(--gold); font: 800 14px/1 system-ui, sans-serif; letter-spacing: 0.12em; }
+  .note { margin: 22px 0 0; padding: 12px 14px; border-radius: 12px; border: 1px dashed var(--edge); color: var(--muted); font-size: 14px; }
+  .note b { color: var(--ink); }
+  footer { max-width: 920px; margin: 28px auto 0; color: #6c7ca6; font-size: 12.5px; }
+  @media (prefers-reduced-motion: reduce) { .game { transition: none; } .game:hover, .game:focus-visible { transform: none; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>CYBERMETAL <span>GRIDWARS</span></h1>
+  <p class="tag">Fan-made battle games in the spirit of Mega Man Battle Network. They run in your browser, with no install: keyboard, gamepad or touch.</p>
+  <div class="games">
+    <a class="game" href="/grid">
+      <div class="art grid" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <div><h2>GRIDWARS</h2><p>The grid battler: real-time fights on a 3×6 field. Build a chip folder, chain Program Advances, beat bosses and earn their styles.</p></div>
+      <span class="play">PLAY ▸</span>
+    </a>
+    <a class="game" href="/world">
+      <div class="art world" aria-hidden="true"></div>
+      <div><h2>OPEN WORLD</h2><p>The 3D prototype: seal rifts with Kingdom Hearts-style combat, swap the parts that decide your moves, and design your own weapons in the forge.</p></div>
+      <span class="play">PLAY ▸</span>
+    </a>
+  </div>
+  <p class="note"><b>Your progress is saved in this browser, on this device.</b> Nothing is sent to a server, so there are no accounts, and progress doesn't follow you to another device or browser. Clearing this site's data starts you over.</p>
+</main>
+<footer>
+  A fan-made, non-commercial project, not affiliated with or endorsed by Capcom. Mega Man Battle Network is a trademark of Capcom; it is named only to describe the game rules recreated here. All code, art and music are original. The Open World mech was made with Tripo AI.
+</footer>
+</body>
+</html>

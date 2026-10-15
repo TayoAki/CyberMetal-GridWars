@@ -7,7 +7,11 @@
   "scripts": {
     "test": "node --test tests/*.test.js",
     "build": "node tools/build.mjs",
-    "serve": "node tools/serve.mjs"
+    "serve": "node tools/serve.mjs",
+    "start": "node tools/serve-dist.mjs"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "devDependencies": {
     "esbuild": "0.25.10",

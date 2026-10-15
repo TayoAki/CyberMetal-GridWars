@@ -113,6 +113,14 @@ your own.
   the joints from the skin weights and slims the texture. Tripo's terms decide commercial use: free-plan
   models may not be usable commercially.
 
+## Hosting both games
+
+`npm run build`, then `npm start`, serves a menu at `/`, the grid battler at `/grid` and the open world at
+`/world` (plus `/health`), on `$PORT` (default 8080). `tools/serve-dist.mjs` reads and gzips the built pages
+once at startup. Any Node 20+ host works; on Railway the default Node build (`npm install`, `npm run build`,
+`npm start`) needs no extra settings. The games keep progress in each player's browser (`localStorage`), so
+the server stores nothing.
+
 ## Play (grid battler)
 
 - **No install:** run `npm run build`, then open `dist/cybermetal-gridwars.html` in any modern browser.
