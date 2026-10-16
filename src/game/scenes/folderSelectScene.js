@@ -5,30 +5,12 @@ import { drawElementIcon } from '../../render/chipart.js';
 import { CHIPS } from '../../engine/chips/library.js';
 import { AREAS } from '../data/areas.js';
 import { PRESET_FOLDERS, folderCodes } from '../data/folders.js';
+import { folderFusions } from '../data/fusions.js';
 import { drawWindow, drawMenu, drawHints, moveCursor, UI } from '../ui.js';
 
 // The FOLDER menu: your own folder and the pre-built ones (data/folders.js). Pick one to equip it for
 // battles; your own folder can be edited, a pre-built one viewed. Pre-built folders unlock on reaching
 // their Gauntlet area.
-
-const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-
-// How a Program Advance is made from this folder's chips, e.g. "Cannon A B C" or "Sword WideSwrd LongSwrd L".
-export function paRecipeText(paKey, chips) {
-  const pa = CHIPS[paKey];
-  if (!pa?.recipe) return '';
-  const r = pa.recipe;
-  if (r.type === 'consecutive') {
-    const codes = [...new Set(chips.filter((c) => c.key === r.chip && c.code !== '*').map((c) => c.code))].sort();
-    const start = codes.find((c) => [...Array(r.count).keys()].every((i) => codes.includes(LETTERS[LETTERS.indexOf(c) + i])));
-    const run = start ? [...Array(r.count).keys()].map((i) => LETTERS[LETTERS.indexOf(start) + i]) : [];
-    return `${CHIPS[r.chip].name} ${run.join(' ')}`.trim();
-  }
-  // A set: the code every recipe chip has in this folder (a `*` chip goes with any code).
-  const has = r.chips.map((k) => new Set(chips.filter((c) => c.key === k).map((c) => c.code)));
-  const code = LETTERS.split('').find((L) => has.every((s) => s.has(L) || s.has('*'))) ?? (has.every((s) => s.has('*')) ? '*' : '');
-  return `${r.chips.map((k) => CHIPS[k].name).join(' ')} ${code}`.trim();
-}
 
 export class FolderSelectScene {
   constructor(game, back = null) {
@@ -189,12 +171,19 @@ export class FolderSelectScene {
         drawText(ctx, megas.join(' '), 148, y, '#7affe0');
         y += 10;
       }
-      for (const pa of r.pa ?? []) {
-        drawText(ctx, `PA ${CHIPS[pa].name}`, 113, y, UI.gold);
+      // Its fusions: the ones a pre-built folder is built around, or whatever your own can make.
+      const fusions = folderFusions(chips).filter((f) => r.key === 'mine' || r.pa.includes(f.pa.key));
+      for (let i = 0; i < fusions.length; i++) {
+        if (y > 120) {
+          line(`+${fusions.length - i} more fusion${fusions.length - i > 1 ? 's' : ''}`, UI.gold);
+          break;
+        }
+        drawText(ctx, `FUSION ${fusions[i].pa.name}`, 113, y, UI.gold);
         y += 8;
-        line(paRecipeText(pa, chips));
+        line(fusions[i].text);
         y += 1;
       }
+      if (r.key === 'mine' && !fusions.length) line('No fusion yet: HOW TO PLAY lists their chips.', UI.dim);
       if (r.key !== 'mine') {
         y = Math.max(y, 130);
         drawText(ctx, 'Loaned: can\'t be edited', 113, y, UI.dim);

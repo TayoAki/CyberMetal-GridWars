@@ -3,8 +3,13 @@ import { drawText, wrapText } from '../../render/font.js';
 import { drawBackground } from '../../render/background.js';
 import { drawElementIcon } from '../../render/chipart.js';
 import { drawWindow, drawHints, UI } from '../ui.js';
+import { fusionSources } from '../data/fusions.js';
 
 // How to play: a few short pages on the rules a newcomer needs.
+
+// The fusion list: each fusion's chips, and the Gauntlet area where the last of them first drops.
+const FUSIONS = fusionSources();
+const fusionRows = (type) => FUSIONS.filter((f) => f.pa.recipe.type === type).map((f) => [f.pa.name, f.text, f.area >= 0 ? `AREA ${f.area + 1}` : '']);
 
 const PAGES = [
   {
@@ -24,11 +29,28 @@ const PAGES = [
     ],
   },
   {
-    title: 'FUSIONS & BOOSTS',
+    title: 'FUSIONS',
     lines: [
-      'Some combos fuse into a stronger attack when picked in a row: three of a chip with codes in order (Cannon A, B, C), or sets like Sword + WideSwrd + LongSwrd with one code.',
+      'Fusions (BN\'s Program Advances) turn 3 or 4 chips into one big attack. Pick their chips back to back, in order, then OK.',
+      'In a row: three of one chip with codes in order, like Cannon A, B, C. A set: the listed chips, all with one code (a * chip fits any code).',
+      'The Custom Screen lights up chips that fuse. Chips you don\'t pick stay in your hand, so hold the pieces until the last one is dealt.',
+    ],
+  },
+  {
+    title: 'FUSION LIST: IN A ROW',
+    lines: ['Any three codes in a row work. AREA: where the Gauntlet first drops them all (the shop sells them after).'],
+    rows: fusionRows('consecutive'),
+  },
+  {
+    title: 'FUSION LIST: SETS',
+    sets: fusionRows('set'),
+    foot: 'In this order, all one code. * fits any.',
+  },
+  {
+    title: 'BOOSTS & COUNTERS',
+    lines: [
       'Boost chips (Atk+10, Fire+30, Navi+20...) add their power to the chip picked right before them.',
-      'FOLDER has pre-built folders to equip instead of your own: each is built on a few codes and a Program Advance. More unlock as the Gauntlet goes on.',
+      'FOLDER has pre-built folders to equip instead of your own: each is built on a few codes and a fusion. More unlock as the Gauntlet goes on.',
       'Hit an enemy with a chip while it winds up an attack for a COUNTER.',
     ],
   },
@@ -103,13 +125,28 @@ export class HelpScene {
       drawText(ctx, '>', 222, y + 1, UI.gold);
       y += 16;
     }
-    for (const para of p.lines) {
+    for (const para of p.lines ?? []) {
       for (const l of wrapText(para, 208)) {
         drawText(ctx, l, 16, y, UI.text);
         y += 9;
       }
       y += 5;
     }
+    // Fusion list rows: name, recipe, area.
+    for (const [name, recipe, area] of p.rows ?? []) {
+      drawText(ctx, name, 16, y, UI.gold);
+      drawText(ctx, recipe, 80, y, UI.text);
+      drawText(ctx, area, 224, y, UI.dim, { align: 'right' });
+      y += 9;
+    }
+    // Sets are too long for one line: the name and area, then the chips.
+    for (const [name, recipe, area] of p.sets ?? []) {
+      drawText(ctx, name, 16, y, UI.gold);
+      drawText(ctx, area, 224, y, UI.dim, { align: 'right' });
+      drawText(ctx, recipe, 20, y + 8, UI.text);
+      y += 18;
+    }
+    if (p.foot) drawText(ctx, p.foot, 16, y, UI.sub);
     drawHints(ctx, '</>: page   A: next   B: back');
   }
 }

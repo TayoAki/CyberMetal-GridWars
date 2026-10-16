@@ -9,7 +9,7 @@ import { STARTER_FOLDER, PRESET_BY_KEY, expandFolder } from './data/folders.js';
 const KEY = 'cybermetal-gridwars-save-v1';
 
 export { STARTER_FOLDER };
-const STARTER_EXTRA = [['cannon', 'C', 1], ['recov30', '*', 1], ['guard', '*', 1], ['shockwave', 'D', 1]];
+const STARTER_EXTRA = [['sidegun', 'S', 1], ['recov30', '*', 1], ['guard', '*', 1], ['shockwave', 'D', 1]];
 
 export const PROGRAMS = {
   underShirt: { name: 'UnderShirt', cost: 1, desc: 'Survive a lethal hit with 1 HP (if HP > 1).' },
@@ -84,6 +84,19 @@ export class SaveData {
     for (const id of Object.keys(d.library)) if (!CHIPS[id.split(':')[0]]) delete d.library[id];
     if (d.folder.length !== FOLDER_RULES.size) d.folder = expand(STARTER_FOLDER);
     if (d.activeFolder !== 'mine' && !this.folderUnlocked(d.activeFolder)) d.activeFolder = 'mine';
+    this.upgradeStarter();
+  }
+
+  // Saves made before the starter folder held a Cannon C began with a SideGun S in its place, and so could
+  // make no fusion. A folder still exactly that one (never edited) gets the current starter; both chips
+  // are in its pack.
+  upgradeStarter() {
+    const d = this.data;
+    const i = d.folder.findIndex((c) => c.key === 'sidegun' && c.code === 'S');
+    if (i < 0 || this.ownedCount('cannon', 'C') < 1) return;
+    const swapped = d.folder.map((c, k) => (k === i ? { key: 'cannon', code: 'C' } : c));
+    const sig = (folder) => folder.map(chipId).sort().join();
+    if (sig(swapped) === sig(expand(STARTER_FOLDER))) d.folder = swapped;
   }
 
   // Pre-built folders unlock on reaching their area of the Gauntlet (all of them once it's finished).

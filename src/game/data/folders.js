@@ -8,9 +8,10 @@
 //
 // Lists are [chip key, code, copies]; every list obeys the folder rules (tests/folders.test.js).
 
-// Mirrors the shape of BN3's own starter folder (decoded from the ROM's preset-folder table).
+// BN3's own starter folder (decoded from the ROM's preset-folder table) with one change: a Cannon C in
+// place of its SideGun S, so Cannon A, B, C can fuse from the first battle. BN3's own can make no fusion.
 export const STARTER_FOLDER = [
-  ['cannon', 'A', 2], ['cannon', 'B', 2], ['shotgun', 'J', 3], ['vgun', 'D', 3], ['sidegun', 'S', 1],
+  ['cannon', 'A', 2], ['cannon', 'B', 2], ['cannon', 'C', 1], ['shotgun', 'J', 3], ['vgun', 'D', 3],
   ['airshot1', '*', 3], ['minibomb', 'B', 2], ['minibomb', 'S', 1], ['sword', 'L', 3], ['widesword', 'L', 1],
   ['panlout1', 'B', 2], ['areagrab', 'L', 1], ['recov10', 'A', 2], ['recov10', 'L', 2], ['atk10', '*', 2],
 ];
@@ -20,7 +21,7 @@ export const PRESET_FOLDERS = [
     key: 'starter',
     name: 'STARTER',
     area: 0,
-    pa: [],
+    pa: ['cannonade1'],
     desc: 'The folder you began with: a little of everything.',
     chips: STARTER_FOLDER,
   },

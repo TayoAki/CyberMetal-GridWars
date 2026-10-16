@@ -86,7 +86,7 @@ test('every encounter can start and run a few seconds', () => {
   }
 });
 
-test('the starter folder mirrors BN3 and obeys the folder rules', () => {
+test('the starter folder (BN3\'s, with a Cannon C) obeys the folder rules', () => {
   const n = STARTER_FOLDER.reduce((s, [, , c]) => s + c, 0);
   assert.equal(n, FOLDER_RULES.size);
   for (const [key, code] of STARTER_FOLDER) assert.equal(validChipId(`${key}:${code}`), null);

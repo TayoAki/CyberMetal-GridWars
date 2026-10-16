@@ -3,7 +3,7 @@ import { drawText, wrapText } from './font.js';
 import { SCREEN_W, SCREEN_H } from './layout.js';
 import { drawChipIcon, drawChipArt, drawElementIcon } from './chipart.js';
 import { chipDef } from '../engine/chips/library.js';
-import { compatible, resolveQueue, SLOTS_PER_ROW } from '../engine/custom.js';
+import { compatible, resolveQueue, fusionHint, SLOTS_PER_ROW } from '../engine/custom.js';
 import { LIMITS } from '../engine/constants.js';
 
 // The Custom Screen panel: slides in from the left over the dimmed field. Reads the engine's CustomScreen
@@ -101,12 +101,18 @@ export function drawCustomScreen(ctx, b, anim, t) {
     drawText(ctx, 'turn (max 10).', 66, 36, '#a8b8e8');
   }
 
+  // Fusion hint: light the hand chips that fuse (the next one to pick blinks) or are worth holding.
+  const blink = t % 24 < 16;
+  const hint = b.phase === 'custom' ? fusionHint(cs.hand, cs.selected, cs.deck) : null;
+  const lit = new Set(hint?.picks ?? hint?.keep ?? []);
+  const next = hint?.picks && !hint.undo ? hint.picks[hint.done] : -1;
+
   // Hand slots.
   for (let i = 0; i < LIMITS.HAND_MAX; i++) {
     const { x, y } = slotXY(i);
     const chip = cs.hand[i];
     rect(ctx, x, y, 18, 24, '#05081a');
-    frame(ctx, x, y, 18, 24, '#2a3c7a');
+    frame(ctx, x, y, 18, 24, !lit.has(i) ? '#2a3c7a' : i === next && blink ? '#ffffff' : hint.keep ? '#4ab8a8' : '#7affe0');
     if (!chip) continue;
     const isSel = cs.selected.includes(i);
     const def = chipDef(chip.key);
@@ -116,6 +122,12 @@ export function drawCustomScreen(ctx, b, anim, t) {
       continue;
     }
     drawChipIcon(ctx, def, x + 2, y + 2);
+    // A fusion's chips carry their place in the pick order.
+    const order = hint?.picks ? hint.picks.indexOf(i) : -1;
+    if (order >= 0) {
+      rect(ctx, x + 1, y + 1, 5, 7, '#05081a');
+      drawText(ctx, String(order + 1), x + 2, y + 2, '#7affe0', { mini: true });
+    }
     const ok = cs.selected.length < LIMITS.SELECT_MAX && compatible([...selected, chip]);
     drawText(ctx, chip.code, x + 9, y + 16, chip.code === '*' ? '#ffe04a' : '#ffffff', { align: 'center' });
     if (!ok) {
@@ -144,7 +156,6 @@ export function drawCustomScreen(ctx, b, anim, t) {
   }
 
   // Cursor.
-  const blink = t % 24 < 16;
   let cx;
   let cy;
   let cw;
@@ -165,8 +176,18 @@ export function drawCustomScreen(ctx, b, anim, t) {
   frame(ctx, cx - 1, cy - 1, cw + 2, ch + 2, blink ? '#ffe04a' : '#7a5a00');
 
   // Hints.
-  drawText(ctx, 'A:pick  B:undo', 4, 122, '#6a80c0');
-  drawText(ctx, 'START:to OK', 4, 131, '#6a80c0');
-  drawText(ctx, 'Same chip, or same code', 4, 146, '#4a5a90');
+  drawText(ctx, 'A:pick  B:undo  START:OK', 4, 122, '#6a80c0');
+  if (hint) {
+    const [line1, line2] = hint.ready
+      ? ['Ready! Press OK', '']
+      : hint.undo
+        ? ['Undo (B) and pick', 'the lit chips in order']
+        : hint.keep
+          ? [`Needs ${chipDef(hint.missing.key).name} ${hint.missing.code}:`, 'hold the lit chips']
+          : ['Pick the lit chips', 'in order, then OK'];
+    drawText(ctx, `FUSION: ${hint.pa.name}`, 4, 132, hint.ready ? '#ffe04a' : '#7affe0');
+    drawText(ctx, line1, 4, 141, '#a8f0e0');
+    if (line2) drawText(ctx, line2, 4, 150, '#a8f0e0');
+  } else drawText(ctx, 'Same chip, or same code', 4, 140, '#4a5a90');
   ctx.restore();
 }

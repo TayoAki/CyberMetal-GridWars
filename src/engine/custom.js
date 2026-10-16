@@ -1,6 +1,6 @@
 import { LIMITS } from './constants.js';
 import { chipDef } from './chips/library.js';
-import { findProgramAdvance } from './chips/pa.js';
+import { findProgramAdvance, PROGRAM_ADVANCES } from './chips/pa.js';
 
 // The Custom Screen: draws a hand from the shuffled folder each turn and enforces BN's selection rule —
 // every selected chip must be the same chip, or share one code, with `*` matching any code. Unchosen
@@ -203,4 +203,100 @@ function boostApplies(boost, chip) {
   if (kind === 'atk') return chip.kind === 'attack';
   if (kind === 'navi') return chip.kind === 'navi';
   return chip.kind === 'attack' && chip.element === kind;
+}
+
+// ---- fusion hints
+
+// What the Custom Screen tells the player about fusions (Program Advances) in a hand, best first:
+//   { pa, ready: true }                 the chips picked so far make one
+//   { pa, picks, done }                 the hand can make one: hand indices in pick order, of which the
+//                                       first `done` are already picked (as the latest picks)
+//   { pa, picks, done: 0, undo: true }  the hand could make one, but not after the chips picked so far
+//   { pa, keep, missing }               all but one piece is in the hand and the last ({ key, code }) is
+//                                       still in the folder: the hand indices worth holding for it
+// or null. `deck` is what is left of the folder.
+export function fusionHint(hand, selected, deck = []) {
+  const made = findProgramAdvance(selected.map((i) => hand[i]));
+  if (made) return { pa: made.pa, ready: true };
+  const run = nextFusion(hand, selected);
+  if (run) return run;
+  const fresh = selected.length ? nextFusion(hand, []) : null;
+  if (fresh) return { ...fresh, undo: true };
+  return keepForFusion(hand, deck);
+}
+
+const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+// The ways a hand might make a fusion, as pieces in pick order: for an "in a row" fusion each run of codes
+// that touches a code in the hand, for a set each code in the hand (and all `*`).
+function fusionShapes(pa, hand) {
+  const r = pa.recipe;
+  const shapes = [];
+  if (r.type === 'consecutive') {
+    const starts = new Set();
+    for (const c of hand) {
+      const at = LETTERS.indexOf(c.code);
+      if (c.key !== r.chip || at < 0) continue;
+      for (let s = Math.max(0, at - r.count + 1); s <= Math.min(at, LETTERS.length - r.count); s++) starts.add(s);
+    }
+    for (const s of starts) shapes.push([...Array(r.count).keys()].map((i) => ({ key: r.chip, code: LETTERS[s + i] })));
+  } else {
+    const codes = new Set(['*']);
+    for (const c of hand) if (r.chips.includes(c.key)) codes.add(c.code);
+    for (const code of codes) shapes.push(r.chips.map((key) => ({ key, code, star: true })));
+  }
+  return shapes;
+}
+
+// A set piece also takes a `*` copy of its chip.
+const fits = (chip, piece) => chip.key === piece.key && (chip.code === piece.code || (piece.star && chip.code === '*'));
+
+// The fusion the hand can still finish after the chips picked so far, preferring one already started.
+function nextFusion(hand, selected) {
+  const chosen = selected.map((i) => hand[i]);
+  let best = null;
+  for (const pa of PROGRAM_ADVANCES) {
+    for (const shape of fusionShapes(pa, hand)) {
+      for (let done = Math.min(shape.length - 1, selected.length); done >= 0; done--) {
+        const tail = selected.slice(selected.length - done);
+        if (!tail.every((i, j) => fits(hand[i], shape[j]))) continue;
+        const used = new Set(selected);
+        const rest = [];
+        for (const piece of shape.slice(done)) {
+          const i = hand.findIndex((c, k) => !used.has(k) && fits(c, piece));
+          if (i < 0) break;
+          used.add(i);
+          rest.push(i);
+        }
+        if (rest.length < shape.length - done) continue;
+        const all = [...chosen, ...rest.map((i) => hand[i])];
+        if (all.length > LIMITS.SELECT_MAX || !compatible(all) || findProgramAdvance(all)?.pa !== pa) continue;
+        const score = done * 100 + shape.length * 10 + pa.damage / 1000;
+        if (!best || score > best.score) best = { pa, picks: [...tail, ...rest], done, score };
+        break;
+      }
+    }
+  }
+  return best && { pa: best.pa, picks: best.picks, done: best.done };
+}
+
+// All but one piece of a fusion in the hand, with the last still to be dealt.
+function keepForFusion(hand, deck) {
+  let best = null;
+  for (const pa of PROGRAM_ADVANCES) {
+    for (const shape of fusionShapes(pa, hand)) {
+      const used = new Set();
+      const missing = [];
+      for (const piece of shape) {
+        const i = hand.findIndex((c, k) => !used.has(k) && fits(c, piece));
+        if (i < 0) missing.push(piece);
+        else used.add(i);
+      }
+      const last = missing.length === 1 ? deck.find((c) => fits(c, missing[0])) : null;
+      if (!last) continue;
+      const score = shape.length * 10 + pa.damage / 1000;
+      if (!best || score > best.score) best = { pa, keep: [...used], missing: { key: last.key, code: last.code }, score };
+    }
+  }
+  return best && { pa: best.pa, keep: best.keep, missing: best.missing };
 }

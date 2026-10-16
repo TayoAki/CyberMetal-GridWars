@@ -162,7 +162,8 @@ the server stores nothing.
   - Types: Guts (double buster, no flinch), Custom (+1 chip on the Custom Screen), Shield (Back+B
     reflects) and Team (+2 Mega chips).
   - Elements: Heat, Aqua, Elec and Wood. Each changes your body's element and your charge shot.
-- **How to Play:** six short pages in the title menu covering the rules.
+- **How to Play:** nine short pages in the title menu covering the rules, including a list of every
+  fusion's chips and the Gauntlet area where they all drop.
 
 **The battle system**, recreated:
 - **Field:** a 6x3 grid. Red area vs blue area, with ownership that moves: AreaGrab/PanlGrab steal panels,
@@ -182,8 +183,13 @@ the server stores nothing.
   - unpicked chips stay in your hand;
   - ADD skips a turn for +5 chips (10 max).
 - **Fusions (Program Advance–style):** consecutive codes (Cannon A-B-C → Cannonade) or chip sets (Sword +
-  WideSwrd + LongSwrd → LifeSaber). Atk+10, Fire+30 and the other boost chips fold into the chip before
-  them.
+  WideSwrd + LongSwrd → LifeSaber), picked back to back in recipe order. Atk+10, Fire+30 and the other
+  boost chips fold into the chip before them.
+  - The Custom Screen lights up the chips in your hand that fuse and numbers them in pick order; the
+    next one to pick blinks. If you picked out of order it says to undo, and if two pieces are in your
+    hand and the third is still in the folder it says to hold them.
+  - The starter folder can make Cannonade, and every fusion's chips drop in the Gauntlet with codes that
+    fuse (the shop sells them once you reach the area). The FOLDER menu lists what each folder can make.
 - **Hits:**
   - the element wheel (Fire > Wood > Elec > Aqua > Fire) doubles damage;
   - flinch, followed by player invincibility frames;
@@ -237,7 +243,7 @@ loop. The whole journal is in [`MODLOG.md`](MODLOG.md).
 |---|---|
 | Chip damage, codes, MB, element, rarity (all standard and Navi chips) | BN3 ROM chip table |
 | Virus/boss HP and element per level | BN3 ROM enemy stat table |
-| Starter folder composition | BN3 ROM preset folder 0 |
+| Starter folder composition | BN3 ROM preset folder 0, with a Cannon C in place of its SideGun S |
 | Fusion (PA) damage | BN3 ROM chip table rows 320+ |
 | Fusion recipes | community-documented BN3 combos (recipe table not located) |
 | Gauge time, charge time, buster rate, i-frames, enemy attack damage and timings | tuned |

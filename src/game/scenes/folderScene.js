@@ -5,7 +5,7 @@ import { drawChipArt, drawElementIcon } from '../../render/chipart.js';
 import { CHIPS } from '../../engine/chips/library.js';
 import { expandFolder, folderCodes } from '../data/folders.js';
 import { drawHints, drawWindow, UI } from '../ui.js';
-import { paRecipeText } from './folderSelectScene.js';
+import { folderFusions } from '../data/fusions.js';
 
 // Folder editor. Two lists — the 30-chip FOLDER and the PACK (owned chips not in the folder). Pick a
 // chip in one list with A, then a chip in the other list to swap them. The folder always stays at 30.
@@ -191,7 +191,7 @@ export class FolderScene {
     drawHints(ctx, this.pick ? 'Pick the chip to swap with   B: cancel' : 'A: pick   </>: switch list   L/R: page   B: done');
   }
 
-  // Beside a pre-built folder's chips: its codes and Program Advances.
+  // Beside a pre-built folder's chips: its codes and fusions.
   drawViewInfo(ctx) {
     const v = this.view;
     drawWindow(ctx, 122, 60, 116, 86, { title: 'PRE-BUILT' });
@@ -204,7 +204,7 @@ export class FolderScene {
       }
     };
     put(`Codes ${folderCodes(this.folder).slice(0, 6).join(' ')}`, '#9ae8ff');
-    for (const pa of v.pa ?? []) put(`PA ${CHIPS[pa].name}: ${paRecipeText(pa, this.folder)}`, UI.gold);
+    for (const f of folderFusions(this.folder).filter((f) => v.pa?.includes(f.pa.key))) put(`FUSION ${f.pa.name}: ${f.text}`, UI.gold);
     y += 2;
     put('Loaned chips: equip it from the FOLDER menu. It can\'t be edited.');
   }

@@ -187,7 +187,7 @@ edited. Seven folders live in `src/game/data/folders.js`:
 
 | Folder | Unlocks at | Codes | Fusion |
 |---|---|---|---|
-| Starter (the folder every save begins with) | start | mixed | none |
+| Starter (the folder every save begins with) | start | mixed | Cannonade |
 | Cannon Crew | start | A B C | Cannonade |
 | Swordplay | start | E L | none |
 | Elemental | area 4 | E J | TidlSprd, InfrnSprd (one copy of each part) |
@@ -195,8 +195,7 @@ edited. Seven folders live in `src/game/data/folders.js`:
 | Demolition | area 6 | F | MegaRat |
 | Prism Edge | area 7 | P | PrismSabr (Megas: HeroSwrd, Pyreclaw) |
 
-They also put six chips in play that no area drops and no shop sells: Plasma1, Wind, Ratton3, Mine,
-StepCros and Spreader.
+They also put four chips in play that no area drops and no shop sells: Plasma1, Wind, Mine and StepCros.
 The equipped folder is saved (`activeFolder`). Saves without the field, or naming a folder that's locked or
 doesn't exist, fall back to your own.
 
@@ -216,6 +215,66 @@ doesn't exist, fall back to your own.
 - **Autopilot sweep** (areas 4-5 and 7-8, 5 seeds per battle): every folder wins at least 87% of fights.
 - **Browser run** on the built file with real keys: open FOLDER, equip, try a locked folder, view a folder's
   chips, open the editor, go back. No page errors.
+
+### Fusions you can actually make
+The owner: "i haven't been able to do a program advance, why". The engine was right (Cannon A, B, C fused in
+its tests). The game around it made fusions close to impossible:
+1. **The starter folder could make none.** It was BN3's own: Cannon A and B but no Cannon C, and Sword and
+   WideSwrd but no LongSwrd. A Cannon C sat in the pack, and nothing said so.
+2. **The drops could build 2 of the 15.** Pieces dropped with codes that don't fuse (Bubbler A, Bub-V D,
+   BublSide B; HeatShot B, Heat-V F, HeatSide C), and TimeBomb, Spreader, GutStrgt, Yo-Yo1 and Ratton3
+   never dropped. Only Cannonade (with the pack's Cannon C) and Aegis500 (from area 7) could be built.
+3. **Nothing pointed at them.** The Custom Screen named a fusion only with the cursor on OK, after the
+   chips were picked in the right order, and the help gave two examples.
+4. **A fusion folder deals one rarely.** Over 20,000 dealt battles, Cannon Crew has Cannon A, B and C in
+   one hand in 3.6% of 4-turn battles if you use every chip each turn. Holding the pieces (unpicked chips
+   stay in the hand) raises that to about 16-33%.
+
+**Fixes:**
+- **Starter folder:** a Cannon C in place of the SideGun S, which goes to the pack instead. A save still
+  on the old starter, never edited, moves to the new one on load (`SaveData.upgradeStarter`).
+- **Drops:** every fusion's chips now drop with codes that fuse, most within one area, and the shop sells
+  them after. That added 23 chips to drop lists (now 4-5 per battle) and changed 10 codes.
+- **Custom Screen hints** (`fusionHint` in `src/engine/custom.js`, drawn by `src/render/customView.js`):
+  - the chips that fuse are lit and numbered in pick order, and the next one blinks;
+  - "Ready! Press OK" once the picks make one;
+  - "Undo (B) and pick the lit chips in order" when the picks so far block it;
+  - "Needs Cannon C: hold the lit chips" when two pieces are in the hand and the third is still in the
+    folder.
+- **Help:** a FUSIONS page (the rules, BN's name for them, hold the pieces) and two FUSION LIST pages
+  built from the data (`src/game/data/fusions.js`): every recipe and the area where its chips all drop.
+- **FOLDER menu:** each folder's fusions, your own included ("No fusion yet" when it has none).
+
+| Area | Fusions whose chips have all dropped by then |
+|---|---|
+| 1 Boot Sector | Cannonade (Cannon A B C, already in the starter folder) |
+| 3 Coolant Bay | TidlSprd (code E), YoYoStorm (Yo-Yo1 C D E) |
+| 4 Thermal Core | InfrnSprd (J), Supernova (Spreader M N O) |
+| 5 Foundry | Cannonade2 (HiCannon I J K), RushPunch (GutPunch B C D) |
+| 6 Overgrowth | DoomBomb (TimeBomb J K L), MegaRat (A) |
+| 7 Rival Gate | LifeSaber (L), StepCombo (StepSwrd L M N), PrismSabr (N), Aegis500 (E) |
+| 8 Null Zone | Cannonade3 (M-Cannon P Q R), RushStrgt (GutStrgt O P Q) |
+
+#### Gotchas
+1. **Symptom:** a lit set (Sword, WideSwrd, LongSwrd) didn't show which chip comes first. **Fix:** lit
+   chips carry their place in the pick order.
+2. **Symptom:** set recipes are too wide for one help line with an area tag. **Fix:** the sets page uses
+   two-line rows (name and area, then the chips).
+3. **Symptom:** the random-hand check of the hint found 1 hand in 1,500 that could fuse. **Cause:** hands
+   were drawn uniformly from ~100 chips. **Fix:** each hand is seeded with a fusion's pieces, now and then
+   with a wrong code, so the check covers both hits and near-misses.
+
+#### Oracles
+- `tests/fusions.test.js` (8 tests):
+  - the hint's states;
+  - a brute-force check over 1,500 hands: the hint finds a fusion exactly when some legal ordered pick
+    makes one, and following it pick by pick makes that fusion;
+  - every fusion can be built from the drops;
+  - the old-starter migration;
+  - the folder menu's fusion list.
+- **Browser run** on the built file with real keys: a hand with Cannon A, B and C picked in order (lit
+  chips, blinking next pick, Ready), the "Cannonade" banner and `cannonade1` queued; then the hold, undo
+  and set states, the help pages and the folder menu. No page errors.
 
 ## 6. Open-world prototype
 
