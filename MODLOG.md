@@ -179,6 +179,44 @@ were at 0%. The bot reads every telegraph perfectly but never heals or plans chi
 measures fairness ("can it be dodged at all?") more than difficulty. The Gauntlet bosses (V1) win
 83-100%; the boss packs report that their V3 and Ω versions beat the bot, as intended.
 
+### Pre-built folders
+The owner asked for "pre-organized folders". Following BN3's XtraFolder, these are loaned folders: equip one
+instead of your own from the FOLDER menu (which now opens on a folder list: equip, edit your own, or view a
+pre-built one's chips). The chips don't have to be owned and never enter the pack, and the folder can't be
+edited. Seven folders live in `src/game/data/folders.js`:
+
+| Folder | Unlocks at | Codes | Fusion |
+|---|---|---|---|
+| Starter (the folder every save begins with) | start | mixed | none |
+| Cannon Crew | start | A B C | Cannonade |
+| Swordplay | start | E L | none |
+| Elemental | area 4 | E J | TidlSprd, InfrnSprd (one copy of each part) |
+| Blade Master | area 5 | L | LifeSaber |
+| Demolition | area 6 | F | MegaRat |
+| Prism Edge | area 7 | P | PrismSabr (Megas: HeroSwrd, Pyreclaw) |
+
+They also put six chips in play that no area drops and no shop sells: Plasma1, Wind, Ratton3, Mine,
+StepCros and Spreader.
+The equipped folder is saved (`activeFolder`). Saves without the field, or naming a folder that's locked or
+doesn't exist, fall back to your own.
+
+#### Gotchas
+1. **Balance:** an all-`*` "Rainbow Star" folder let any five chips go together. In the autopilot sweep it
+   cleared areas 4-5 in 19 s against 35-59 s for the other folders, faster even than the late-game Prism
+   Edge. **Fix:** it became Elemental, on codes E and J, with one copy of each fusion part. It is still the
+   bot's fastest folder (25 s), because its element-matched spread shots suit how the bot plays. The bot
+   ignores fusions and is poor with swords, so Blade Master reads slow (59 s) while LifeSaber is likely the
+   strongest in human hands. Watch these two in real play.
+
+#### Oracles
+- `tests/folders.test.js` (6 tests): every folder is a legal 30-chip folder; non-starter folders use at
+  most three codes; each listed fusion is made by the engine's own PA finder from the folder's chips;
+  unlocks, equip refusals and loaning (pack and own folder untouched); the saved choice and fallbacks; and a
+  battle deals from the equipped folder, with every folder.
+- **Autopilot sweep** (areas 4-5 and 7-8, 5 seeds per battle): every folder wins at least 87% of fights.
+- **Browser run** on the built file with real keys: open FOLDER, equip, try a locked folder, view a folder's
+  chips, open the editor, go back. No page errors.
+
 ## 6. Open-world prototype
 
 The owner moved the direction off the grid: "a fighting game that's open world like Palworld", using a

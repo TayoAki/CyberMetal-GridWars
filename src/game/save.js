@@ -1,17 +1,14 @@
 import { CHIPS } from '../engine/chips/library.js';
 import { PLAYER_BASE_HP } from '../engine/constants.js';
+import { STARTER_FOLDER, PRESET_BY_KEY, expandFolder } from './data/folders.js';
 
 // Player progress, persisted to localStorage (wrapped: storage can be missing or throw, and the game
-// still runs from memory). The folder is 30 chips drawn from the owned library.
+// still runs from memory). The player's own folder is 30 chips drawn from the owned library; a
+// pre-built folder (data/folders.js) can be equipped in its place.
 
 const KEY = 'cybermetal-gridwars-save-v1';
 
-// Mirrors the shape of BN3's own starter folder (decoded from the ROM's preset-folder table).
-export const STARTER_FOLDER = [
-  ['cannon', 'A', 2], ['cannon', 'B', 2], ['shotgun', 'J', 3], ['vgun', 'D', 3], ['sidegun', 'S', 1],
-  ['airshot1', '*', 3], ['minibomb', 'B', 2], ['minibomb', 'S', 1], ['sword', 'L', 3], ['widesword', 'L', 1],
-  ['panlout1', 'B', 2], ['areagrab', 'L', 1], ['recov10', 'A', 2], ['recov10', 'L', 2], ['atk10', '*', 2],
-];
+export { STARTER_FOLDER };
 const STARTER_EXTRA = [['cannon', 'C', 1], ['recov30', '*', 1], ['guard', '*', 1], ['shockwave', 'D', 1]];
 
 export const PROGRAMS = {
@@ -39,11 +36,7 @@ export const STYLE_ELEMENTS = {
   wood: { name: 'Wood', boss: 'briarix', desc: 'Wood body. Charge shot is a tornado; heal on grass.' },
 };
 
-function expand(list) {
-  const out = [];
-  for (const [key, code, n] of list) for (let i = 0; i < n; i++) out.push({ key, code });
-  return out;
-}
+const expand = expandFolder;
 
 export function chipId(c) {
   return `${c.key}:${c.code}`;
@@ -56,6 +49,7 @@ function freshData() {
   return {
     v: 1,
     folder,
+    activeFolder: 'mine', // 'mine', or the key of an unlocked pre-built folder
     library,
     stats: { hpMem: 0, attack: 1, rapid: 1, charge: 1 },
     programs: { owned: ['underShirt'], equipped: [] },
@@ -89,6 +83,28 @@ export class SaveData {
     d.folder = d.folder.filter((c) => CHIPS[c.key]);
     for (const id of Object.keys(d.library)) if (!CHIPS[id.split(':')[0]]) delete d.library[id];
     if (d.folder.length !== FOLDER_RULES.size) d.folder = expand(STARTER_FOLDER);
+    if (d.activeFolder !== 'mine' && !this.folderUnlocked(d.activeFolder)) d.activeFolder = 'mine';
+  }
+
+  // Pre-built folders unlock on reaching their area of the Gauntlet (all of them once it's finished).
+  folderUnlocked(key) {
+    const f = PRESET_BY_KEY[key];
+    const p = this.data.progress;
+    return !!f && (p.finished || p.area >= f.area);
+  }
+
+  // The chips of a folder: 'mine' (the player's own) or a pre-built folder.
+  folderChips(key = this.data.activeFolder) {
+    const f = PRESET_BY_KEY[key];
+    return f ? expand(f.chips) : this.data.folder.map((c) => ({ ...c }));
+  }
+
+  // Equip the player's own folder or an unlocked pre-built one. Returns whether it took.
+  equipFolder(key) {
+    if (key !== 'mine' && !this.folderUnlocked(key)) return false;
+    this.data.activeFolder = key;
+    this.persist();
+    return true;
   }
 
   persist() {
@@ -143,7 +159,7 @@ export class SaveData {
       charge: d.stats.charge,
       programs,
       style: { ...(d.style ?? { type: null, element: 'null' }) },
-      folder: d.folder.map((c) => ({ ...c })),
+      folder: this.folderChips(),
     };
   }
 

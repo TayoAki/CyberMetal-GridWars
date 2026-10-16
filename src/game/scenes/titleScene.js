@@ -7,7 +7,7 @@ import { autopilot } from '../autopilot.js';
 import { AREAS } from '../data/areas.js';
 import { GauntletScene } from './gauntletScene.js';
 import { FreeBattleScene } from './freeBattleScene.js';
-import { FolderScene } from './folderScene.js';
+import { FolderSelectScene } from './folderSelectScene.js';
 import { ProgramsScene } from './programsScene.js';
 import { OptionsScene } from './optionsScene.js';
 import { CreditsScene } from './creditsScene.js';
@@ -52,7 +52,7 @@ export class TitleScene {
     return [
       { label: started ? 'CONTINUE GAUNTLET' : 'START GAUNTLET', go: () => new GauntletScene(this.game) },
       { label: 'FREE BATTLE', go: () => new FreeBattleScene(this.game) },
-      { label: 'FOLDER', go: () => new FolderScene(this.game) },
+      { label: 'FOLDER', go: () => new FolderSelectScene(this.game) },
       { label: 'PROGRAMS', go: () => new ProgramsScene(this.game) },
       { label: 'CHIP SHOP', go: () => new ShopScene(this.game) },
       { label: 'HOW TO PLAY', go: () => new HelpScene(this.game) },

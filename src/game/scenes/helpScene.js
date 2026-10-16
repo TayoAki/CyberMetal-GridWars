@@ -28,6 +28,7 @@ const PAGES = [
     lines: [
       'Some combos fuse into a stronger attack when picked in a row: three of a chip with codes in order (Cannon A, B, C), or sets like Sword + WideSwrd + LongSwrd with one code.',
       'Boost chips (Atk+10, Fire+30, Navi+20...) add their power to the chip picked right before them.',
+      'FOLDER has pre-built folders to equip instead of your own: each is built on a few codes and a Program Advance. More unlock as the Gauntlet goes on.',
       'Hit an enemy with a chip while it winds up an attack for a COUNTER.',
     ],
   },

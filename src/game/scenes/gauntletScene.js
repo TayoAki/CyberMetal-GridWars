@@ -60,7 +60,7 @@ export class GauntletScene {
     this.game.audio.play('confirm');
     const act = items[this.cursor].action;
     if (act === 'fight') this.startBattle();
-    else if (act === 'folder') import('./folderScene.js').then(({ FolderScene }) => this.game.setScene(new FolderScene(this.game, () => new GauntletScene(this.game))));
+    else if (act === 'folder') import('./folderSelectScene.js').then(({ FolderSelectScene }) => this.game.setScene(new FolderSelectScene(this.game, () => new GauntletScene(this.game))));
     else if (act === 'programs') import('./programsScene.js').then(({ ProgramsScene }) => this.game.setScene(new ProgramsScene(this.game, () => new GauntletScene(this.game))));
     else import('./titleScene.js').then(({ TitleScene }) => this.game.setScene(new TitleScene(this.game, { menu: true })));
   }

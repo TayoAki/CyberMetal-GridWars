@@ -150,6 +150,11 @@ the server stores nothing.
 - **Free Battle:** replay any battle you've reached, rematch bosses at V2, V3 and Ω, or roll a random
   mixed battle.
 - **Folder:** edit your 30-chip folder from everything you've won. BN-style limits apply.
+- **Pre-built folders** (like BN3's XtraFolder): seven ready-made folders to equip instead of your own:
+  Starter, Cannon Crew, Swordplay, Elemental, Blade Master, Demolition and Prism Edge. Each is built
+  on one to three codes plus `*` chips, so you can take several chips a turn, and most carry a fusion
+  (Cannonade, LifeSaber, MegaRat, PrismSabr...). They're loaned: you don't need the chips, and they can't be
+  edited. Three are open from the start; the rest unlock as you reach later Gauntlet areas.
 - **Chip Shop:** spend the Bits that battles drop on chips from the areas you've reached, or on HP Memory.
 - **Programs:** equip passive parts (SuperArmor, UnderShirt, FloatShoes, AirShoes, Custom+1/+2) within a
   memory budget, a light take on BN3's Navi Customizer.

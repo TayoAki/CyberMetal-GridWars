@@ -3,11 +3,14 @@ import { drawText, wrapText } from '../../render/font.js';
 import { drawBackground } from '../../render/background.js';
 import { drawChipArt, drawElementIcon } from '../../render/chipart.js';
 import { CHIPS } from '../../engine/chips/library.js';
-import { drawHints, UI } from '../ui.js';
+import { expandFolder, folderCodes } from '../data/folders.js';
+import { drawHints, drawWindow, UI } from '../ui.js';
+import { paRecipeText } from './folderSelectScene.js';
 
 // Folder editor. Two lists — the 30-chip FOLDER and the PACK (owned chips not in the folder). Pick a
 // chip in one list with A, then a chip in the other list to swap them. The folder always stays at 30.
 // Limits: 5 copies of a standard chip, 1 of each Mega (5 Megas max), 1 Giga.
+// With `view` (a pre-built folder), it only shows that folder's chips: they're loaned, so nothing changes.
 
 const ROWS_VISIBLE = 8;
 
@@ -21,9 +24,10 @@ function sortChips(list) {
 }
 
 export class FolderScene {
-  constructor(game, back = null) {
+  constructor(game, back = null, { view = null } = {}) {
     this.game = game;
     this.back = back;
+    this.view = view;
     this.pane = 0; // 0 folder, 1 pack
     this.cur = [0, 0];
     this.scroll = [0, 0];
@@ -39,6 +43,12 @@ export class FolderScene {
 
   refresh() {
     const save = this.game.save;
+    if (this.view) {
+      this.folder = sortChips(expandFolder(this.view.chips));
+      this.pack = [];
+      this.cur[0] = Math.max(0, Math.min(this.cur[0], this.folder.length - 1));
+      return;
+    }
     this.folder = sortChips(save.data.folder.map((c) => ({ ...c })));
     save.data.folder = this.folder.map((c) => ({ ...c }));
     const counts = new Map();
@@ -78,7 +88,7 @@ export class FolderScene {
       this.cur[this.pane]++;
       moved = true;
     }
-    if (edges.pressed.left || edges.pressed.right) {
+    if ((edges.pressed.left || edges.pressed.right) && !this.view) {
       this.pane = this.pane ? 0 : 1;
       moved = true;
     }
@@ -96,6 +106,13 @@ export class FolderScene {
       if (this.cur[p] >= this.scroll[p] + ROWS_VISIBLE) this.scroll[p] = this.cur[p] - ROWS_VISIBLE + 1;
     }
 
+    if (this.view) {
+      if (edges.pressed.b || edges.pressed.a) {
+        this.game.audio.play('deselect');
+        this.game.setScene(this.back());
+      }
+      return;
+    }
     if (edges.pressed.b) {
       if (this.pick) {
         this.pick = null;
@@ -162,10 +179,34 @@ export class FolderScene {
       wrapText(def.desc, 168).slice(0, 3).forEach((l, i) => drawText(ctx, l, 66, 30 + i * 8, UI.sub));
     }
     // Lists.
+    if (this.view) {
+      this.drawList(ctx, 0, 2, this.view.name, this.folder, () => '');
+      this.drawViewInfo(ctx);
+      drawHints(ctx, 'Up/down: look   L/R: page   B: back');
+      return;
+    }
     this.drawList(ctx, 0, 2, 'FOLDER', this.folder, (x) => '');
     this.drawList(ctx, 1, 122, 'PACK', this.pack, (x) => (x.n > 1 ? `x${x.n}` : ''));
     if (this.msg) drawText(ctx, this.msg.text, 120, 140, UI.bad, { align: 'center', outline: '#05070f' });
     drawHints(ctx, this.pick ? 'Pick the chip to swap with   B: cancel' : 'A: pick   </>: switch list   L/R: page   B: done');
+  }
+
+  // Beside a pre-built folder's chips: its codes and Program Advances.
+  drawViewInfo(ctx) {
+    const v = this.view;
+    drawWindow(ctx, 122, 60, 116, 86, { title: 'PRE-BUILT' });
+    let y = 76;
+    const put = (text, color = UI.sub) => {
+      for (const l of wrapText(text, 106)) {
+        if (y > 138) return;
+        drawText(ctx, l, 127, y, color);
+        y += 8;
+      }
+    };
+    put(`Codes ${folderCodes(this.folder).slice(0, 6).join(' ')}`, '#9ae8ff');
+    for (const pa of v.pa ?? []) put(`PA ${CHIPS[pa].name}: ${paRecipeText(pa, this.folder)}`, UI.gold);
+    y += 2;
+    put('Loaned chips: equip it from the FOLDER menu. It can\'t be edited.');
   }
 
   drawList(ctx, p, x, title, list, extra) {
