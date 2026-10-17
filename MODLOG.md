@@ -464,6 +464,38 @@ under the now see-through 2D canvas.
   - phone portrait with touch; G mid-battle both ways; Reduce Flash keeps the camera still.
   - No page errors.
 
+### Your character in the open world too
+The owner asked "what about the 3D character we use in the open world?". The open world's mech was already
+the grid's MECH option (the same `assets/mecha.glb`), but the open world itself could only be the mech.
+**Route:** one character for both games.
+
+- **Shared reading** (`src/render3d/glb.js`): the loader, rig check/repair/static fallback, texture cut,
+  material clamps and the IndexedDB store moved out of the grid's `models.js`. Both games read and write
+  the same record, so on one site (Railway's /grid and /world) a model loaded in either is in both.
+- **The open world's body** (`src/world/avatar.js`): `loadAvatar` takes any .glb.
+  - Bones are found by Mixamo short name whatever their prefix, and only used when the limbs' rest frames
+    line up with the model (mended rigs always do). Poses are applied on top of each bone's rest, so a hips
+    bone that undoes its armature's rotation still works.
+  - A body without such a rig moves as one piece: it leans into runs, dashes and swings, recoils from shots
+    and hits, and rocks as it steps. Parts hang on stand-in joints (hands out wide for a T-pose model).
+- **Garage BODY tab:** Mech / yours / LOAD .GLB / TURN, with keyboard, gamepad and touch like the other
+  tabs. A gamepad can't open a file picker, so it says to click or drop instead. Dropping a .glb anywhere
+  on the page works too.
+  - The choice and turn are kept in localStorage; the view swaps bodies at runtime (`view.setAvatar`) and
+    re-hangs the parts.
+  - If a saved model stops loading, the game starts in the mech and says why.
+- The world page's PCFSoftShadowMap (removed in three r186, it only warned) is now PCFShadowMap.
+
+#### Oracles
+- `tests/world_body.test.js` (3 tests):
+  - the mech and a broken Tripo-style rig both load rigged, 1.78 m tall, and pose finitely (stand, run,
+    dash, jump, hurt) with weapon and gun on the hands;
+  - an unrigged model leans into a run, carries its parts on stand-ins, and TURN faces it round;
+  - a non-model is refused with a reason.
+- **Browser run:** the world page with the owner's raw Tripo .glb dropped on it (rig rebuilt, runs, swings,
+  BODY tab), then an unrigged copy (moves as one piece, gun and saber on stand-ins). The choice survives a
+  reload. No page errors.
+
 ## 6. Open-world prototype
 
 The owner moved the direction off the grid: "a fighting game that's open world like Palworld", using a

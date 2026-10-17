@@ -1,5 +1,7 @@
 import { World, DT } from './sim.js';
 import { createView } from './view.js';
+import { loadAvatar } from './avatar.js';
+import { readCustom, saveCustom, modelName, MAX_FILE } from '../render3d/glb.js';
 import { WorldInput } from './input.js';
 import { Hud } from './hud.js';
 import { makeBot } from './bot.js';
@@ -40,12 +42,46 @@ const writeSave = () => {
 };
 if (!auto) world.loadSave(readSave());
 
-const view = await createView(canvas, world, await loadMechaBuffer(), { low });
+// The body: the built-in mech, or the player's own .glb (the garage's BODY tab, or a file dropped on the page).
+// The file lives in IndexedDB beside the grid battler's (src/render3d/glb.js), so one character serves both
+// games on the same site; which body is in use, and its turn, are kept here.
+const BODY_KEY = 'cybermetal-open-world-body';
+function readBody() {
+  try {
+    const b = JSON.parse(localStorage.getItem(BODY_KEY) ?? 'null');
+    return { current: b?.current === 'custom' ? 'custom' : 'mech', turn: [0, 1, 2, 3].includes(b?.turn) ? b.turn : 0 };
+  } catch {
+    return { current: 'mech', turn: 0 };
+  }
+}
+function writeBody() {
+  try {
+    localStorage.setItem(BODY_KEY, JSON.stringify(body));
+  } catch {
+    // No storage: the choice lasts this visit only.
+  }
+}
+const body = auto ? { current: 'mech', turn: 0 } : readBody();
+let custom = auto ? null : await readCustom(); // { name, bytes }, or null
+let mechBuffer = null;
+const bodyBytes = async (which) => (which === 'custom' && custom ? custom.bytes : (mechBuffer ??= await loadMechaBuffer()));
+if (body.current === 'custom' && !custom) body.current = 'mech';
+let bodyProblem = null;
+let view;
+try {
+  view = await createView(canvas, world, await bodyBytes(body.current), { low, turn: body.current === 'custom' ? body.turn : 0 });
+} catch (e) {
+  // The player's model won't load any more: start in the mech, and say why once the HUD is up.
+  bodyProblem = String(e?.message ?? e);
+  body.current = 'mech';
+  view = await createView(canvas, world, await bodyBytes('mech'), { low });
+}
 const input = new WorldInput(canvas, document.getElementById('touch'));
 input.isLocked = () => world.player.lock != null;
 const hud = new Hud(world, view, { input });
 const bot = auto ? makeBot(world) : null;
 input.onLockFailed = () => hud.toast('MOUSE LOCK UNAVAILABLE · RIGHT-DRAG OR Q/E TO TURN · K TO SHOOT', '#ffd84a', 4);
+if (bodyProblem) hud.toast(`YOUR MODEL WOULDN'T LOAD (${bodyProblem.toUpperCase()}) · USING THE MECH`, '#ff6a6a', 5);
 
 // The garage: commands go to the simulation through its input, one per step, so they replay like any input.
 const garageCommands = [];
@@ -66,6 +102,94 @@ const garage = new Garage(document.getElementById('garage'), world, {
   onPreview: (design) => {
     view.preview = design;
   },
+  // BODY: the mech, your model, load one (a file picker opens only from a click, tap or key), turn it.
+  onBody: (choice, { pad }) => {
+    if (choice === 'load') {
+      if (pad) hud.toast('CLICK LOAD .GLB, OR DROP A .GLB ON THE GAME', '#ffd84a', 3);
+      else picker.click();
+    } else if (choice === 'turn') useBody('custom', (body.turn + 1) % 4);
+    else useBody(choice, body.turn);
+  },
+});
+
+// Swapping bodies. Only one load at a time; the garage shows LOADING meanwhile.
+let swapping = false;
+function syncBody(busy = false) {
+  garage.body = { current: body.current, turn: body.turn, custom: custom?.name ?? null, busy };
+  garage.render();
+}
+syncBody();
+async function useBody(which, turn) {
+  if (swapping || (which === body.current && turn === body.turn)) return;
+  swapping = true;
+  syncBody(true);
+  try {
+    view.setAvatar(await loadAvatar(await bodyBytes(which), { turn: which === 'custom' ? turn : 0 }));
+    body.current = which;
+    body.turn = turn;
+    writeBody();
+    audio.play('select');
+  } catch (e) {
+    hud.toast(`CAN'T USE THAT BODY: ${String(e?.message ?? e).toUpperCase()}`, '#ff6a6a', 4);
+    audio.play('buzz');
+  }
+  swapping = false;
+  syncBody();
+}
+// A .glb picked in BODY or dropped on the page becomes your body (and your navi in the grid battler).
+async function importBody(file) {
+  if (!/\.glb$/i.test(file?.name ?? '')) {
+    hud.toast('3D MODELS LOAD FROM .GLB FILES (TRIPO: EXPORT > GLB)', '#ffd84a', 3);
+    return;
+  }
+  if (file.size > MAX_FILE) {
+    hud.toast(`THAT FILE IS TOO BIG (${Math.round(file.size / 1048576)} MB; ${MAX_FILE / 1048576} MB AT MOST)`, '#ff6a6a', 4);
+    return;
+  }
+  if (swapping) return;
+  swapping = true;
+  syncBody(true);
+  hud.toast(`LOADING ${file.name.toUpperCase()}…`, '#7ae8ff', 3);
+  try {
+    const bytes = await file.arrayBuffer();
+    const next = await loadAvatar(bytes);
+    const name = modelName(file.name);
+    const stored = await saveCustom({ name, bytes, size: bytes.byteLength, added: Date.now() });
+    custom = { name, bytes };
+    view.setAvatar(next);
+    body.current = 'custom';
+    body.turn = 0;
+    writeBody();
+    const rig = next.rig === 'repaired' ? ' · RIG REBUILT' : next.rigged ? '' : ' · NO USABLE RIG: IT MOVES AS ONE PIECE';
+    hud.toast(`BODY: ${name.toUpperCase()}${rig}${stored ? '' : ' · KEPT FOR THIS VISIT ONLY'}`, '#7ae8ff', 4.5);
+    audio.play('confirm');
+  } catch (e) {
+    hud.toast(`CAN'T USE ${file.name.toUpperCase()}: ${String(e?.message ?? e).toUpperCase()}`, '#ff6a6a', 5);
+    audio.play('buzz');
+  }
+  swapping = false;
+  syncBody();
+}
+const picker = document.createElement('input');
+picker.type = 'file';
+picker.accept = '.glb,model/gltf-binary';
+picker.hidden = true;
+picker.addEventListener('change', () => {
+  const file = picker.files?.[0];
+  picker.value = '';
+  if (file) importBody(file);
+});
+document.body.append(picker);
+addEventListener('dragover', (e) => {
+  if (!e.dataTransfer?.types?.includes('Files')) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+});
+addEventListener('drop', (e) => {
+  const files = [...(e.dataTransfer?.files ?? [])];
+  if (!files.length) return;
+  e.preventDefault();
+  if (!auto) importBody(files.find((f) => /\.glb$/i.test(f.name)) ?? files[0]);
 });
 // The garage menu sits beside the mech (to the right on wide screens, below on tall ones), and the camera
 // frames the mech in the space left over.

@@ -1,10 +1,13 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { Gear } from './gear.js';
+import { readGlb, modelBox } from '../render3d/glb.js';
 
-// The player's mech: the rigged GLB (Mixamo bone names, rest pose = T-pose with identity bone rotations, facing
-// +z, the character's left arm along +x), animated procedurally from the simulation state. Every pose is a set
-// of bone rotations layered on the T-pose; bones ease toward their targets each frame.
+// The player's body: the built-in mech, or the player's own .glb (the garage's BODY tab; read and mended by
+// src/render3d/glb.js, so a broken Tripo auto-rig comes back working). A rigged body (Mixamo bone names, rest
+// pose = T-pose with identity bone rotations, facing +z, the character's left arm along +x) is animated
+// procedurally from the simulation state: every pose is a set of bone rotations layered on the T-pose, and
+// bones ease toward their targets each frame. A body without such a rig moves as one piece (leaning, bobbing,
+// spinning and flipping), with stand-in joints for its parts to hang on.
 //
 // Parts (gear.js) hang on the bones: the arm part's weapon in the right hand, drawn while attacking; the gun
 // part on the left arm. A weapon-arm direction is written as [around, up]: `around` sweeps it horizontally
@@ -60,39 +63,61 @@ const smooth = (k) => (k <= 0 ? 0 : k >= 1 ? 1 : k * k * (3 - 2 * k));
 const mix = (a, b, k) => a + (b - a) * k;
 const BONES = ['Hips', 'Spine', 'Spine1', 'Spine2', 'Neck', 'Head', 'LeftArm', 'LeftForeArm', 'LeftHand', 'RightArm', 'RightForeArm', 'RightHand', 'LeftUpLeg', 'LeftLeg', 'LeftFoot', 'RightUpLeg', 'RightLeg', 'RightFoot'];
 
-export async function loadAvatar(buffer) {
-  const gltf = await new GLTFLoader().parseAsync(buffer, '');
-  return new Avatar(gltf.scene);
+// Read a body (.glb bytes) and make it the player. `turn`: quarter turns, for a model made facing another way.
+// Throws, with a message a player can act on, when the file can't be used.
+export async function loadAvatar(buffer, { turn = 0 } = {}) {
+  const { scene, rig } = await readGlb(buffer);
+  scene.rotation.y += (turn * Math.PI) / 2;
+  return new Avatar(scene, rig);
+}
+
+// The rig's Mixamo bones by short name ('LeftArm'), whatever their prefix ('mixamorig:', 'mixamorig'): only
+// when the limbs' rest frames line up with the model, as the poses below assume (mended rigs always do; the
+// hips may turn to undo their armature's rotation, and poses are applied on top of each bone's rest).
+function findBones(model) {
+  const found = {};
+  model.traverse((o) => {
+    if (!o.isBone) return;
+    const short = o.name.replace(/^.*[:_]/, '').replace(/^mixamorig/, '');
+    if (BONES.includes(short) && !found[short]) found[short] = o;
+  });
+  const usable = found.Hips && found.LeftArm && found.RightArm && Object.entries(found).every(([n, b]) => n === 'Hips' || Math.abs(b.quaternion.w) > 0.995);
+  return usable ? found : {};
 }
 
 class Avatar {
-  constructor(model) {
+  constructor(model, rig = 'ok') {
     this.group = new THREE.Group();
     this.model = model;
+    this.rig = rig;
     model.traverse((o) => {
       if (o.isMesh) {
         o.castShadow = true;
         o.frustumCulled = false; // skinned bounds don't follow the pose
-        if (o.material) {
-          o.material.roughness = 0.5;
-          o.material.metalness = 0.25;
+        for (const m of [o.material].flat()) {
+          if (!m) continue;
+          m.roughness = 0.5;
+          m.metalness = 0.25;
         }
       }
     });
     // Feet on the origin, centred, scaled to height. The model hangs from a pivot at the hips so spins and
     // flips turn around the body's centre.
-    const box = new THREE.Box3().setFromObject(model);
+    const box = modelBox(model);
     const size = box.getSize(new THREE.Vector3());
     const scale = AVATAR_HEIGHT / size.y;
-    model.scale.setScalar(scale);
+    model.scale.multiplyScalar(scale);
     model.position.set(-((box.min.x + box.max.x) / 2) * scale, -box.min.y * scale - PIVOT_Y, -((box.min.z + box.max.z) / 2) * scale);
     this.pivot = new THREE.Group();
     this.pivot.position.y = PIVOT_Y;
     this.pivot.add(model);
     this.group.add(this.pivot);
-    this.bones = {};
-    for (const name of BONES) this.bones[name] = model.getObjectByName('mixamorig' + name) ?? model.getObjectByName('mixamorig:' + name);
-    for (const b of Object.values(this.bones)) if (b) b.userData.target = new THREE.Quaternion();
+    this.bones = findBones(model);
+    this.rigged = !!this.bones.Hips;
+    for (const b of Object.values(this.bones)) {
+      b.userData.target = new THREE.Quaternion();
+      b.userData.rest = b.quaternion.clone();
+    }
     this.meshes = [];
     model.traverse((o) => o.isMesh && this.meshes.push(o));
     this.phase = 0;
@@ -105,7 +130,46 @@ class Avatar {
     this.weaponK = 0; // the arm part's weapon: 0 put away .. 1 fully drawn
     this.showcase = false; // the garage's pose
     this.ahead = 0;
-    this.gear = new Gear(this.bones, this.group);
+    this.lean = 0; // unrigged bodies: a lean into the run, eased
+    this.gear = new Gear(this.rigged ? this.bones : this.standIns(size.multiplyScalar(scale)), this.group);
+  }
+
+  // Joints for the parts of a body without a usable rig, on the pivot (which turns, leans and hops with the
+  // body): hands at the sides (at the shoulders' height and out wide for a model in a T-pose), the chest, and
+  // the calves and feet. `size`: the scaled model's extent.
+  standIns(size) {
+    const tpose = size.x > size.y * 0.75;
+    const handX = tpose ? size.x * 0.45 : Math.min(0.45, size.x * 0.42);
+    const handY = (tpose ? 0.78 : 0.5) * AVATAR_HEIGHT;
+    const at = (x, y, z) => {
+      const o = new THREE.Object3D();
+      o.position.set(x, y - PIVOT_Y, z);
+      this.pivot.add(o);
+      return o;
+    };
+    const front = Math.min(0.15, size.z * 0.3);
+    return {
+      RightHand: at(-handX, handY, front * 0.5),
+      LeftHand: at(handX, handY, front * 0.5),
+      Spine2: at(0, 0.74 * AVATAR_HEIGHT, 0),
+      RightLeg: at(-0.12, 0.25 * AVATAR_HEIGHT, 0),
+      LeftLeg: at(0.12, 0.25 * AVATAR_HEIGHT, 0),
+      RightFoot: at(-0.12, 0.05 * AVATAR_HEIGHT, 0.02),
+      LeftFoot: at(0.12, 0.05 * AVATAR_HEIGHT, 0.02),
+    };
+  }
+
+  // Free the body's GPU resources (it's being replaced).
+  dispose() {
+    this.group.removeFromParent();
+    this.group.traverse((o) => {
+      o.geometry?.dispose();
+      for (const m of [o.material].flat()) {
+        if (!m) continue;
+        for (const v of Object.values(m)) if (v?.isTexture) v.dispose();
+        m.dispose();
+      }
+    });
   }
 
   // Show the equipped parts, with forged designs ({ arm, gun }) drawn in place of their stock parts.
@@ -339,7 +403,7 @@ class Avatar {
       const b = this.bones[n];
       if (!b) continue;
       const e = t[n];
-      b.userData.target.setFromEuler(this.tmpE.set(e.x, e.y, e.z, 'XYZ'));
+      b.userData.target.setFromEuler(this.tmpE.set(e.x, e.y, e.z, 'XYZ')).premultiply(b.userData.rest);
       b.quaternion.slerp(b.userData.target, ease);
     }
     // A little bounce in the step.
@@ -347,9 +411,16 @@ class Avatar {
       const bob = p.onGround && !dash ? Math.abs(s) * 0.012 * run : 0;
       this.bones.Hips.position.y = this.hipsBase.y + bob;
     }
+    // An unrigged body can't move its limbs: it leans into runs and dashes, rocks in its step and recoils.
+    let bob = 0;
+    if (!this.rigged) {
+      const want = (dash ? 0.38 : 0.14 * run) + (aiming ? -0.04 : 0) + (act?.kind === 'melee' ? 0.18 : 0) - (this.hurt > 0 ? 0.45 * (this.hurt / 0.45) : 0) - this.shootKick * 0.12;
+      this.lean += (want - this.lean) * (1 - Math.exp(-dt * 12));
+      bob = p.onGround && !dash ? Math.abs(s) * 0.05 * run : 0;
+    }
     // Spins, flips and hops turn the whole body around the hips.
-    this.pivot.rotation.set(extra.flip, extra.spin, 0);
-    this.pivot.position.y = PIVOT_Y + extra.hop;
+    this.pivot.rotation.set(extra.flip + (this.rigged ? 0 : this.lean), extra.spin, this.rigged ? 0 : s * 0.05 * run);
+    this.pivot.position.y = PIVOT_Y + extra.hop + bob;
     // The arm part's weapon: drawn for strikes, lingering a moment after.
     this.weaponLinger = extra.blade ? 0.3 : Math.max(0, (this.weaponLinger ?? 0) - dt);
     const want = extra.blade || this.weaponLinger > 0 ? 1 : 0;

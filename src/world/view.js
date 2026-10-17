@@ -39,10 +39,10 @@ const ELEMENT_FX = {
 const designKey = (d) => (d ? `${d.base}/${d.form.shape}/${d.form.size}/${d.form.color}/${d.form.glow}/${d.element}` : '-');
 const reduceMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+// opts: { low } (cheaper rendering), { turn } (quarter turns for the body, see avatar.js).
 export async function createView(canvas, world, avatarBuffer, opts = {}) {
   const view = new WorldView(canvas, world, opts);
-  view.avatar = await loadAvatar(avatarBuffer);
-  view.scene.add(view.avatar.group);
+  view.setAvatar(await loadAvatar(avatarBuffer, { turn: opts.turn ?? 0 }));
   return view;
 }
 
@@ -54,7 +54,7 @@ class WorldView {
     const r = (this.renderer = new THREE.WebGLRenderer({ canvas, antialias: !low, powerPreference: 'high-performance' }));
     r.setPixelRatio(Math.min(devicePixelRatio || 1, low ? 1 : 1.75));
     r.shadowMap.enabled = true;
-    r.shadowMap.type = THREE.PCFSoftShadowMap;
+    r.shadowMap.type = THREE.PCFShadowMap; // (PCFSoftShadowMap is gone from three r186)
     r.toneMapping = THREE.ACESFilmicToneMapping;
     r.toneMappingExposure = 1.05;
     r.outputColorSpace = THREE.SRGBColorSpace;
@@ -877,6 +877,16 @@ class WorldView {
     const p = this.world.player;
     const d = Math.hypot(ev.x - p.x, ev.z - p.z);
     if (d < 25) this.cam.shake = Math.max(this.cam.shake, amount * (1 - d / 25));
+  }
+
+  // Put the player in a body (at start, and when the garage's BODY tab changes it). The old body is freed and
+  // the parts are hung on the new one at the next frame.
+  setAvatar(avatar) {
+    const old = this.avatar;
+    this.avatar = avatar;
+    this.scene.add(avatar.group);
+    this.loadoutKey = '';
+    old?.dispose();
   }
 
   // ------------------------------------------------------------------ per frame

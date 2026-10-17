@@ -57,7 +57,8 @@
   .ghead h2 { margin: 0; font: 900 20px/1 system-ui, sans-serif; letter-spacing: 0.14em; }
   .gdata { margin-left: auto; font: 800 13px/1 ui-monospace, Menlo, monospace; color: var(--good); }
   .gclose { width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--edge); background: rgba(255, 255, 255, 0.05); color: var(--ink); font-size: 16px; cursor: pointer; }
-  .gtabs { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin: 12px 0; }
+  .gtabs { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin: 12px 0; }
+  @media (max-width: 520px) { .gtabs { grid-template-columns: repeat(3, 1fr); } }
   .gtabs button { min-width: 0; overflow: hidden; text-overflow: ellipsis; padding: 8px 4px; border-radius: 9px; border: 1px solid var(--edge); background: rgba(255, 255, 255, 0.04); color: var(--muted); font: 800 12px/1.2 system-ui, sans-serif; letter-spacing: 0.1em; cursor: pointer; }
   .gtabs button small { display: block; margin-top: 3px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font: 600 11px/1.2 system-ui, sans-serif; letter-spacing: 0; color: var(--ink); opacity: 0.8; }
   .gtabs button.on { color: var(--ink); background: rgba(106, 232, 255, 0.15); border-color: var(--cyan); }
@@ -312,7 +313,8 @@
         <dt>F</dt><dd>Reaction command when a gold prompt appears</dd>
         <dt>1 2 3</dt><dd>Chips learned from viruses you deleted</dd>
         <dt>Space · Shift</dt><dd>Jump · Dodge (you can't be hit mid-dodge)</dd>
-        <dt>G</dt><dd>Garage: swap your arm, gun, legs and core, and forge your own weapons (out of combat)</dd>
+        <dt>G</dt><dd>Garage: swap your arm, gun, legs and core, forge your own weapons, and pick your BODY (out of combat)</dd>
+        <dt>.glb</dt><dd>Play as your own 3D character (made in Tripo, say): drop the file on the game, or GARAGE &gt; BODY</dd>
         <dt>Gamepad</dt><dd>X attack · RT shoot · RB lock · Y reaction · hold LB + a face button for chips · A jump · B dodge · Back garage</dd>
       </dl>
       <div class="go">CLICK TO PLAY</div>

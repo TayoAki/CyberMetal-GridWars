@@ -4,8 +4,8 @@ import {
   normalizeDesign, encodeDesign, decodeDesign, designSummary, cleanName, weakViruses, applyDesign, weaponStats, modFits, NAME_MAX,
 } from './forge.js';
 
-// The garage: a menu over the world where you buy parts with DATA and equip them, and the forge, where you
-// design your own weapons. It only opens out of combat (the World checks too). It sends commands to the game
+// The garage: a menu over the world where you buy parts with DATA and equip them, the forge, where you
+// design your own weapons, and BODY, where you pick the mech or your own 3D character (a .glb). It only opens out of combat (the World checks too). It sends commands to the game
 // ({ op, part } for parts; forge, equip-design, delete-design, unlock and dummy for the forge), which passes
 // them to the simulation through its input, so a garage visit replays like any other input.
 //
@@ -14,8 +14,10 @@ import {
 // moves, A chooses, B or Back closes. Touch and mouse: tap.
 
 const css = (hex) => `#${hex.toString(16).padStart(6, '0')}`;
-const TABS = [...SLOTS, 'forge'];
-const TAB_NAMES = { ...SLOT_NAMES, forge: 'FORGE' };
+const TABS = [...SLOTS, 'forge', 'body'];
+const TAB_NAMES = { ...SLOT_NAMES, forge: 'FORGE', body: 'BODY' };
+// The BODY tab's cards. The body itself is the view's business (main.js), not the simulation's.
+const BODY_KEYS = ['mech', 'custom', 'load', 'turn'];
 const COLOR_NAMES = ['Cyan', 'Blue', 'Violet', 'Pink', 'Red', 'Orange', 'Gold', 'Lime', 'Green', 'Teal', 'White', 'Steel'];
 const VIRUS = { rivet: ['Rivet', 'Rivets'], plinker: ['Plinker', 'Plinkers'], dartfin: ['Dartfin', 'Dartfins'] };
 // Words for random names: one for the element, one for the base.
@@ -36,13 +38,16 @@ function setHTML(el, html) {
 }
 
 export class Garage {
-  constructor(root, world, { onCommand, onClose, onDenied, onPreview } = {}) {
+  constructor(root, world, { onCommand, onClose, onDenied, onPreview, onBody } = {}) {
     this.root = root;
     this.world = world;
     this.onCommand = onCommand ?? (() => {});
     this.onClose = onClose ?? (() => {});
     this.onDenied = onDenied ?? (() => {});
     this.onPreview = onPreview ?? (() => {});
+    this.onBody = onBody ?? (() => {}); // (choice: 'mech' | 'custom' | 'load' | 'turn', { pad })
+    // What BODY shows, kept up to date by main.js: the body in use, its turn, the player's model, busy loading.
+    this.body = { current: 'mech', turn: 0, custom: null, busy: false };
     this.open = false;
     this.slot = 'arm'; // the current tab: a part slot, or 'forge'
     this.index = 0;
@@ -91,6 +96,8 @@ export class Garage {
     this.$('parts').addEventListener('click', (e) => {
       const card = e.target.closest('[data-part]');
       if (card) this.choose(card.dataset.part);
+      const body = e.target.closest('[data-body]');
+      if (body) this.chooseBody(body.dataset.body);
     });
     this.$('forge').addEventListener('click', (e) => {
       const b = e.target.closest('[data-act]');
@@ -115,10 +122,22 @@ export class Garage {
     if (this.open) return;
     this.open = true;
     this.root.hidden = false;
-    if (this.slot !== 'forge') this.index = Math.max(0, partsIn(this.slot).indexOf(this.world.loadout[this.slot]));
+    this.index = this.startIndex(this.slot);
     this.render();
     this.focusFirst();
     this.preview();
+  }
+
+  // Where a tab's cursor starts: on the equipped part, or the body in use.
+  startIndex(slot) {
+    if (slot === 'forge') return this.index;
+    if (slot === 'body') return Math.max(0, BODY_KEYS.indexOf(this.body.current));
+    return Math.max(0, partsIn(slot).indexOf(this.world.loadout[slot]));
+  }
+
+  // The cards of the current tab (parts, or the BODY choices).
+  cardKeys() {
+    return this.slot === 'body' ? BODY_KEYS : partsIn(this.slot);
   }
 
   close() {
@@ -132,7 +151,7 @@ export class Garage {
 
   setSlot(slot) {
     this.slot = slot;
-    if (slot !== 'forge') this.index = Math.max(0, partsIn(slot).indexOf(this.world.loadout[slot]));
+    if (slot !== 'forge') this.index = this.startIndex(slot);
     else if (!this.draft) this.startDraft();
     this.render();
     this.focusFirst();
@@ -177,7 +196,25 @@ export class Garage {
   }
 
   focusCard() {
-    this.root.querySelectorAll('[data-part]')[this.index]?.focus({ preventScroll: true });
+    this.root.querySelectorAll('[data-part], [data-body]')[this.index]?.focus({ preventScroll: true });
+  }
+
+  // ---------------------------------------------------------------- the body
+
+  // A BODY card was chosen. `pad`: from a gamepad, which can't open a file picker (only a click, tap or key can).
+  chooseBody(key, { pad = false } = {}) {
+    if (this.body.busy) return;
+    if (key === 'custom' && !this.body.custom) {
+      this.onDenied('LOAD A .GLB FIRST');
+      this.shake(this.root.querySelector('[data-body="custom"]'));
+      return;
+    }
+    if (key === 'turn' && this.body.current !== 'custom') {
+      this.onDenied('TURN IS FOR YOUR OWN MODEL');
+      this.shake(this.root.querySelector('[data-body="turn"]'));
+      return;
+    }
+    this.onBody(key, { pad });
   }
 
   // ---------------------------------------------------------------- the forge
@@ -433,7 +470,7 @@ export class Garage {
       } else if (k === 'Tab') this.trapTab(e);
       else used = false;
     } else {
-      const keys = partsIn(this.slot);
+      const keys = this.cardKeys();
       if (k === 'ArrowLeft' || k === 'KeyA') this.cycleTab(-1);
       else if (k === 'ArrowRight' || k === 'KeyD') this.cycleTab(1);
       else if (k === 'ArrowUp' || k === 'KeyW') {
@@ -443,9 +480,11 @@ export class Garage {
         this.index = (this.index + 1) % keys.length;
         this.focusCard();
       } else if (k === 'Enter' || k === 'Space' || k === 'KeyJ') {
-        const card = document.activeElement?.closest?.('[data-part]');
-        if (card || !this.root.contains(document.activeElement) || document.activeElement === document.body) this.choose(card?.dataset.part ?? keys[this.index]);
-        else used = false; // a focused tab or the close button: let the browser click it
+        const card = document.activeElement?.closest?.('[data-part], [data-body]');
+        if (card || !this.root.contains(document.activeElement) || document.activeElement === document.body) {
+          if (this.slot === 'body') this.chooseBody(card?.dataset.body ?? keys[this.index]);
+          else this.choose(card?.dataset.part ?? keys[this.index]);
+        } else used = false; // a focused tab or the close button: let the browser click it
       } else if (k === 'Tab') this.trapTab(e);
       else used = false;
     }
@@ -511,7 +550,7 @@ export class Garage {
         else el?.closest?.('[data-act]')?.click();
       }
     } else {
-      const keys = partsIn(this.slot);
+      const keys = this.cardKeys();
       if (hit(14)) this.cycleTab(-1);
       else if (hit(15)) this.cycleTab(1);
       else if (hit(12)) {
@@ -520,7 +559,10 @@ export class Garage {
       } else if (hit(13)) {
         this.index = (this.index + 1) % keys.length;
         this.focusCard();
-      } else if (hit(0)) this.choose(keys[this.index]);
+      } else if (hit(0)) {
+        if (this.slot === 'body') this.chooseBody(keys[this.index], { pad: true });
+        else this.choose(keys[this.index]);
+      }
     }
   }
 
@@ -537,7 +579,7 @@ export class Garage {
       tab.classList.toggle('on', on);
       tab.setAttribute('aria-selected', String(on));
       const d = s === 'arm' || s === 'gun' ? w.designs.find((x) => x.id === w.equipped[s]) : null;
-      tab.querySelector('small').textContent = s === 'forge' ? `${w.designs.length}/${MAX_DESIGNS}` : d ? d.name : PARTS[w.loadout[s]].name;
+      tab.querySelector('small').textContent = s === 'forge' ? `${w.designs.length}/${MAX_DESIGNS}` : s === 'body' ? this.bodyName() : d ? d.name : PARTS[w.loadout[s]].name;
     }
     const forge = this.slot === 'forge';
     this.$('parts').hidden = forge;
@@ -546,6 +588,10 @@ export class Garage {
     if (forge) {
       this.refresh();
       this.$('hint').textContent = 'Design your own weapon: a base you own sets the moves; pick its look, an element (double damage to the virus it beats, plus an effect) and mods that fit its memory. Forge it, equip it, and test it on training dummies.';
+      return;
+    }
+    if (this.slot === 'body') {
+      this.renderBody();
       return;
     }
     const cards = partsIn(this.slot).map((k) => {
@@ -565,6 +611,32 @@ export class Garage {
     this.$('parts').innerHTML = cards.join('');
     if (focused && PARTS[focused]?.slot === this.slot) this.root.querySelector(`[data-part="${focused}"]`)?.focus({ preventScroll: true });
     this.$('hint').textContent = 'Parts decide your moves: ARM is the attack combo, GUN is what you shoot, LEGS how you move, CORE your health. Seal rifts to find parts; collect DATA to buy them. Make your own weapons in the FORGE.';
+  }
+
+  bodyName() {
+    return this.body.current === 'custom' && this.body.custom ? this.body.custom : 'Mech';
+  }
+
+  // The BODY tab: the mech, your own model, loading one, and turning it.
+  renderBody() {
+    const b = this.body;
+    const card = (key, name, state, desc, cls) =>
+      `<button class="gpart ${cls}" data-body="${key}" style="--part:#7ae8ff" aria-label="${esc(`${name}: ${state}. ${desc}`)}">
+        <span class="gname">${esc(name)}</span><span class="gstate">${esc(state)}</span><span class="gdesc">${esc(desc)}</span></button>`;
+    const busy = b.busy ? 'LOADING…' : null;
+    const inUse = (k) => b.current === k;
+    const cards = [
+      card('mech', 'Mech', busy && !inUse('mech') ? busy : inUse('mech') ? 'IN USE' : 'USE', 'The standard body: a rigged mech that runs, swings and aims.', inUse('mech') ? 'equipped' : 'owned'),
+      b.custom
+        ? card('custom', b.custom, busy && !inUse('custom') ? busy : inUse('custom') ? 'IN USE' : 'USE', 'Your own 3D character. Load another with LOAD .GLB.', inUse('custom') ? 'equipped' : 'owned')
+        : card('custom', 'Your character', 'NONE YET', 'Load a .glb to see it here. It is also your navi in the grid battler (same browser).', 'locked'),
+      card('load', 'Load .glb', busy ?? 'CHOOSE A FILE', 'Bring a character made in Tripo or any 3D app (Export > GLB), or drop the file on the game. Rig it first (Tripo: Animate > Rig) so it runs and swings; an unrigged model moves as one piece.', 'buy'),
+      card('turn', `Turn: ${b.turn * 90}°`, b.current === 'custom' ? 'TURN ↻' : 'YOUR MODEL ONLY', 'If your model runs backwards or sideways, give it a quarter turn.', b.current === 'custom' ? 'owned' : 'locked'),
+    ];
+    const focused = document.activeElement?.closest?.('[data-body]')?.dataset.body;
+    this.$('parts').innerHTML = cards.join('');
+    if (focused) this.root.querySelector(`[data-body="${focused}"]`)?.focus({ preventScroll: true });
+    this.$('hint').textContent = 'Your body is only a look: parts, weapons and stats stay the same. Your file stays in this browser and is never uploaded.';
   }
 
   // Redraw the forge from the draft, keeping focus on the same control.
