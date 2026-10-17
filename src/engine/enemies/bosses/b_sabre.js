@@ -118,6 +118,16 @@ function* recoverAndHop(b, e, s, extra = 0) {
   yield* hop(b, e, s);
 }
 
+// A Wide Slash (or the Step Slash's thrust), then the recovery and a blink away. A riposte winds up faster.
+function* cut(b, e, s, long, riposte = false) {
+  const r = yield* slash(b, e, s, long ? 'long' : 'wide', long ? s.aimWind : riposte ? Math.max(10, s.windup - 6) : s.windup, long ? s.stepSlash : s.slash);
+  if (r !== 'skip') yield* recoverAndHop(b, e, s);
+}
+
+function tripleOk(b, e, s) {
+  return s.triple > 0 && b.fightFrames - (e.data.lastTriple ?? -1e9) >= s.tripleCd;
+}
+
 function* crescent(b, e, s) {
   // Line up from the back of the area.
   const row = b.player.row;
@@ -152,6 +162,14 @@ function* tripleEdge(b, e, s) {
   yield* recoverAndHop(b, e, s, 20);
 }
 
+// After a flinch: shield up at once, or slip away.
+function* shake(b, e, s) {
+  if (!e.data.flinched) return;
+  e.data.flinched = false;
+  if (canGuard(b, e) && b.rng.chance(s.guardChance)) yield* guard(b, e, s);
+  else yield* hop(b, e, s);
+}
+
 export const SABRE = {
   type: 'sabre',
   kind: 'navi',
@@ -179,31 +197,21 @@ export const SABRE = {
     if (!e.data.started) {
       e.data.started = true;
       yield* wait(b.rng.range(24, 40));
-    } else if (e.data.flinched) {
-      // Stung: shield up at once, or slip away.
-      e.data.flinched = false;
-      if (canGuard(b, e) && b.rng.chance(s.guardChance)) yield* guard(b, e, s);
-      else yield* hop(b, e, s);
-    }
+    } else yield* shake(b, e, s);
     for (;;) {
       const riposte = (yield* watch(b, e, s, b.rng.range(s.idle[0], s.idle[1]))) === 'riposte';
-      const tripleOk = s.triple > 0 && b.fightFrames - (e.data.lastTriple ?? -1e9) >= s.tripleCd;
       const move = riposte
         ? 'wide'
         : pickMove(b, e, [
             ['wide', 5],
             ['crescent', 3],
             ['step', s.stepSlash ? 4 : 0],
-            ['triple', tripleOk ? 3 : 0],
+            ['triple', tripleOk(b, e, s) ? 3 : 0],
           ]);
       noteMove(e, move);
       if (move === 'crescent') yield* crescent(b, e, s);
       else if (move === 'triple') yield* tripleEdge(b, e, s);
-      else {
-        const long = move === 'step';
-        const r = yield* slash(b, e, s, long ? 'long' : 'wide', long ? s.aimWind : riposte ? Math.max(10, s.windup - 6) : s.windup, long ? s.stepSlash : s.slash);
-        if (r !== 'skip') yield* recoverAndHop(b, e, s);
-      }
+      else yield* cut(b, e, s, move === 'step', riposte);
     }
   },
   onHit(b, e, hit, res) {
@@ -212,5 +220,43 @@ export const SABRE = {
   },
   onFlinch(b, e) {
     e.data.flinched = true;
+  },
+};
+
+// What GridWars Daily's mixed bosses borrow (composite.js; see a_voltframe.js's KIT for the fields). His
+// watch is the guard: a boss that moves like Sabre shields itself when the player fires, and ripostes with
+// a Wide Slash when it has one (the mover's result names the move to answer with).
+export const KIT = {
+  family: SABRE,
+  damage: ['attack', 'slash', 'wave', 'stepSlash', 'triple', 'reflect'], // the stats that are damage numbers
+  *start(b, e, s) {
+    threat(b, e);
+    yield* shake(b, e, s);
+  },
+  *mover(b, e, s) {
+    return (yield* watch(b, e, s, b.rng.range(s.idle[0], s.idle[1]))) === 'riposte' ? 'wide' : null;
+  },
+  moves: {
+    wide: {
+      name: 'Wide Slash',
+      element: 'null',
+      *fn(b, e, s, o = {}) {
+        yield* cut(b, e, s, false, !!o.riposte);
+      },
+      weight: 5,
+      desc: 'blinks up and cuts your front column',
+    },
+    crescent: { name: 'Crescent', element: 'null', fn: crescent, weight: 3, desc: 'a blade wave down its row' },
+    step: {
+      name: 'Step Slash',
+      element: 'null',
+      *fn(b, e, s) {
+        yield* cut(b, e, s, true);
+      },
+      weight: 4,
+      has: (s) => s.stepSlash > 0,
+      desc: 'a lunging thrust two panels deep',
+    },
+    triple: { name: 'Triple Edge', element: 'null', fn: tripleEdge, weight: 3, has: (s) => s.triple > 0, ok: tripleOk, desc: 'three quick slashes, then spent' },
   },
 };

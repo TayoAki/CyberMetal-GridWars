@@ -137,6 +137,13 @@ function* tideRise(b, e, s) {
   yield* wait(s.tideDelay + 12);
 }
 
+// Between attacks (for GridWars Daily's mixed bosses): back off to the rear of the area, then drift.
+function* keepBack(b, e, s) {
+  const back = rowEdge(b, e.team, e.row, 'back');
+  if (back >= 0 && back !== e.col && b.tryStep(e, Math.sign(back - e.col), 0)) yield* pose(e, 'move', s.step);
+  yield* drift(b, e, s);
+}
+
 export const TIDECALLER = {
   type: 'tidecaller',
   kind: 'navi',
@@ -188,5 +195,19 @@ export const TIDECALLER = {
   },
   onDelete(b, e) {
     clearPets(b, e);
+  },
+};
+
+// What GridWars Daily's mixed bosses borrow (composite.js; see a_voltframe.js's KIT for the fields).
+export const KIT = {
+  family: TIDECALLER,
+  damage: ['bubble', 'fish', 'tide'], // the stats that are damage numbers
+  mover: keepBack,
+  rest: (s) => s.rest,
+  moves: {
+    bubble: { name: 'Bubble Volley', element: 'aqua', fn: bubbleVolley, weight: 4, desc: 'a stream of bubbles down your row' },
+    torpedo: { name: 'Fish Torpedo', element: 'aqua', fn: fishTorpedo, weight: 3, again: 1, desc: 'a torpedo fish shoots across your row' },
+    tide: { name: 'Tide Rise', element: 'aqua', fn: tideRise, weight: 2, has: (s) => s.tidePanels > 0, desc: 'geysers freeze panels to ice' },
+    coral: { name: 'Coral Call', element: 'null', fn: coralCall, weight: 6, ok: wantsRocks, support: true, desc: 'coral rocks that block your shots' },
   },
 };

@@ -93,6 +93,20 @@ function* flash(b, e, s) {
   } else yield* wait(16);
 }
 
+function lampOk(b, e, s) {
+  return s.lamps > livePets(e, 'neonlamp').length && b.fightFrames >= e.data.lampReady && petSpots(b, e).length > 0;
+}
+
+// Between attacks: a few blinks, each after a pause.
+function* blinks(b, e, s) {
+  const hops = b.rng.range(1, s.hops);
+  for (let i = 0; i < hops; i++) {
+    yield* pose(e, 'idle', s.idle);
+    yield* blink(b, e, s);
+  }
+  yield* wait(8);
+}
+
 function* neonField(b, e, s) {
   noteMove(e, 'neon');
   b.emit('sfx', { name: 'charge' });
@@ -136,20 +150,15 @@ export const VOLTFRAME = {
     e.setAnim('idle');
     yield* wait(b.rng.range(14, 28));
     for (;;) {
-      const hops = b.rng.range(1, s.hops);
-      for (let i = 0; i < hops; i++) {
-        yield* pose(e, 'idle', s.idle);
-        yield* blink(b, e, s);
-      }
-      yield* wait(8);
-      const lampOk = s.lamps > livePets(e, 'neonlamp').length && b.fightFrames >= e.data.lampReady && petSpots(b, e).length > 0;
+      yield* blinks(b, e, s);
+      const lamp = lampOk(b, e, s);
       const move = pickMove(b, e, [
         ['arcbolt', 5],
         ['flash', e.data.lastMove === 'flash' ? 0 : 3],
-        ['neon', lampOk ? 4 : 0],
+        ['neon', lamp ? 4 : 0],
       ]);
       if (move === 'flash') yield* flash(b, e, s);
-      else if (move === 'neon' && lampOk) yield* neonField(b, e, s);
+      else if (move === 'neon' && lamp) yield* neonField(b, e, s);
       else yield* arcBolt(b, e, s);
       e.setAnim('idle');
       yield* wait(s.rest);
@@ -157,5 +166,20 @@ export const VOLTFRAME = {
   },
   onDelete(b, e) {
     clearPets(b, e);
+  },
+};
+
+// What GridWars Daily's mixed bosses borrow (composite.js): the blinks between attacks, and each attack with
+// its pick weight (`again`: the weight right after it was used), `has(s)`: whether this level has it, and
+// `ok(b, e, s)`: whether it can be used now. `s` is this family's level stats.
+export const KIT = {
+  family: VOLTFRAME,
+  damage: ['attack', 'flash', 'zap'], // the stats that are damage numbers
+  mover: blinks,
+  rest: (s) => s.rest,
+  moves: {
+    arcbolt: { name: 'Arc Bolt', element: 'elec', fn: arcBolt, weight: 5, desc: 'lightning strikes where you stand' },
+    flash: { name: 'Flash', element: 'elec', fn: flash, weight: 3, again: 0, desc: 'a blinding flash that paralyzes' },
+    neon: { name: 'Neon Field', element: 'elec', fn: neonField, weight: 4, has: (s) => s.lamps > 0, ok: lampOk, desc: 'a lamp that zaps your row' },
   },
 };

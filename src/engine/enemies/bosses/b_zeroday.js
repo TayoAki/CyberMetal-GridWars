@@ -67,7 +67,7 @@ function* nullBarrage(b, e, s) {
   yield* pose(e, 'idle', s.shotDelay + s.recover);
 }
 
-function splitWave(b, e, hit, row, speed) {
+function splitWave(b, e, hit, row, speed, crack) {
   // Each wave starts under ZeroDay and crosses its own area first: a beat to read which rows it took.
   const sw = shockwave(b, e, hit, {
     row,
@@ -78,7 +78,7 @@ function splitWave(b, e, hit, row, speed) {
     // alone: the dodge is a step into a row the first pulse has crossed, so a wave that dug holes there
     // would make the second pulse unavoidable.
     onPanel: (sp, c, r) => {
-      if (!e.stats.crack || b.field.ownerAt(c, r) === e.team) return;
+      if (!crack || b.field.ownerAt(c, r) === e.team) return;
       if (b.field.typeAt(c, r) !== PANEL.CRACKED) b.field.crack(c, r, !!b.entityAt(c, r));
     },
   });
@@ -123,10 +123,10 @@ function* earthSplitter(b, e, s) {
   yield* wait(s.waveTell);
   tell.kill();
   e.data.warn = null;
-  for (const r of first) splitWave(b, e, hit, r, s.waveSpeed);
+  for (const r of first) splitWave(b, e, hit, r, s.waveSpeed, s.crack);
   yield* wait(s.pulseGap);
   b.emit('sfx', { name: 'shockwave' });
-  for (const r of second) splitWave(b, e, hit, r, s.waveSpeed);
+  for (const r of second) splitWave(b, e, hit, r, s.waveSpeed, s.crack);
   yield* wait(12);
   yield* pose(e, 'idle', s.recover);
 }
@@ -144,6 +144,10 @@ function* darkAura(b, e, s) {
 
 function auraDue(b, e, s) {
   return s.aura > 0 && e.auraPower <= 0 && b.fightFrames - (e.data.auraLost ?? -1e9) >= s.auraCd;
+}
+
+function beamOk(b, e, s) {
+  return s.beam > 0 && b.fightFrames - (e.data.lastBeam ?? -1e9) >= s.beamCd;
 }
 
 function* voidCollapse(b, e, s) {
@@ -240,13 +244,12 @@ export const ZERODAY = {
     for (;;) {
       yield* drift(b, e, s, b.rng.range(s.idle[0], s.idle[1]));
       watchAura(b, e);
-      const beamOk = s.beam > 0 && b.fightFrames - (e.data.lastBeam ?? -1e9) >= s.beamCd;
       const move = auraDue(b, e, s)
         ? 'aura'
         : pickMove(b, e, [
             ['barrage', 4],
             ['split', 3],
-            ['collapse', beamOk ? 3 : 0],
+            ['collapse', beamOk(b, e, s) ? 3 : 0],
           ]);
       noteMove(e, move);
       if (move === 'aura') yield* darkAura(b, e, s);
@@ -261,5 +264,23 @@ export const ZERODAY = {
   onFlinch(b, e) {
     e.data.warn?.kill();
     e.data.warn = null;
+  },
+};
+
+// What GridWars Daily's mixed bosses borrow (composite.js; see a_voltframe.js's KIT for the fields). Dark
+// Aura is raised as the fight opens (`opener`) and again whenever it is due (`due`), whatever else is
+// picked; `tick` runs every frame of a boss that has it, to notice the aura breaking.
+export const KIT = {
+  family: ZERODAY,
+  damage: ['attack', 'shot', 'wave', 'beam'], // the stats that are damage numbers
+  *mover(b, e, s) {
+    yield* drift(b, e, s, b.rng.range(s.idle[0], s.idle[1]));
+  },
+  tick: watchAura,
+  moves: {
+    barrage: { name: 'Null Barrage', element: 'null', fn: nullBarrage, weight: 4, desc: 'void bolts rain on your area' },
+    split: { name: 'Earth Splitter', element: 'null', fn: earthSplitter, weight: 3, desc: 'shockwaves down every row, in two pulses' },
+    collapse: { name: 'Void Collapse', element: 'null', fn: voidCollapse, weight: 3, has: (s) => s.beam > 0, ok: beamOk, desc: 'a giant beam scours your row' },
+    aura: { name: 'Dark Aura', element: 'null', fn: darkAura, weight: 0, has: (s) => s.aura > 0, opener: true, due: auraDue, support: true, desc: 'shrugs off hits under 100 until broken' },
   },
 };

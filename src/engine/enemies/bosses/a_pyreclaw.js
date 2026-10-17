@@ -149,6 +149,10 @@ function* lightBraziers(b, e, s) {
   yield* pose(e, 'roar', 18);
 }
 
+function brazierOk(b, e, s) {
+  return s.braziers > livePets(e, 'brazier').length && b.fightFrames >= e.data.brazierReady && petSpots(b, e).length > 0;
+}
+
 // One or two heavy steps to neighbouring panels.
 function* lumber(b, e, s) {
   const steps = b.rng.range(1, 2);
@@ -192,14 +196,14 @@ export const PYRECLAW = {
     yield* wait(b.rng.range(16, 30));
     for (;;) {
       yield* lumber(b, e, s);
-      const brazierOk = s.braziers > livePets(e, 'brazier').length && b.fightFrames >= e.data.brazierReady && petSpots(b, e).length > 0;
+      const lit = brazierOk(b, e, s);
       const move = pickMove(b, e, [
         ['tower', 4],
         ['flame', e.data.lastMove === 'flame' ? 1 : 3],
-        ['brazier', brazierOk ? 5 : 0],
+        ['brazier', lit ? 5 : 0],
       ]);
       if (move === 'flame') yield* flamethrower(b, e, s);
-      else if (move === 'brazier' && brazierOk) yield* lightBraziers(b, e, s);
+      else if (move === 'brazier' && lit) yield* lightBraziers(b, e, s);
       else yield* towers(b, e, s);
       e.setAnim('idle');
       yield* wait(s.rest);
@@ -216,5 +220,18 @@ export const PYRECLAW = {
   onDelete(b, e) {
     if (e.data.jet) e.data.jet.kill();
     clearPets(b, e);
+  },
+};
+
+// What GridWars Daily's mixed bosses borrow (composite.js; see a_voltframe.js's KIT for the fields).
+export const KIT = {
+  family: PYRECLAW,
+  damage: ['tower', 'flame'], // the stats that are damage numbers
+  mover: lumber,
+  rest: (s) => s.rest,
+  moves: {
+    tower: { name: 'Fire Tower', element: 'fire', fn: towers, weight: 4, desc: 'a pillar of fire marches at you' },
+    flame: { name: 'Flamethrower', element: 'fire', fn: flamethrower, weight: 3, again: 1, desc: 'a jet of flame from the front line' },
+    brazier: { name: 'Braziers', element: 'fire', fn: lightBraziers, weight: 5, has: (s) => s.braziers > 0, ok: brazierOk, support: true, desc: 'braziers that heal it until broken' },
   },
 };

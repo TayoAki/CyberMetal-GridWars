@@ -190,3 +190,17 @@ export const IRONCLAD = {
     markCounter(b, e, hit);
   },
 };
+
+// What GridWars Daily's mixed bosses borrow (composite.js; see a_voltframe.js's KIT for the fields).
+export const KIT = {
+  family: IRONCLAD,
+  damage: ['attack', 'slam', 'saw', 'quake'], // the stats that are damage numbers
+  *mover(b, e, s) {
+    yield* roam(b, e, s, b.rng.range(s.idle[0], s.idle[1]));
+  },
+  moves: {
+    slam: { name: 'Piston Slam', element: 'null', fn: pistonSlam, weight: 5, desc: 'a rocket fist slams down on you' },
+    saw: { name: 'Saw Blade', element: 'null', fn: sawBlade, weight: 4, desc: 'a saw grinds down your row and back' },
+    quake: { name: 'Quake Stomp', element: 'null', fn: quakeStomp, weight: 3, has: (s) => s.quake > 0, ok: canQuake, desc: 'cracks every panel of your area' },
+  },
+};

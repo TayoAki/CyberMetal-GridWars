@@ -182,6 +182,15 @@ function* thornBud(b, e, s) {
   yield* pose(e, 'idle', s.recover);
 }
 
+// Between attacks: a stroll, then a taunt while the player is still held by a snare.
+function* wander(b, e, s) {
+  yield* stroll(b, e, s, b.rng.range(s.idle[0], s.idle[1]));
+  if (b.player.stunTimer > 0) {
+    yield* pose(e, 'taunt', Math.min(40, b.player.stunTimer));
+    e.setAnim('idle');
+  }
+}
+
 export const BRIARIX = {
   type: 'briarix',
   kind: 'navi',
@@ -212,12 +221,8 @@ export const BRIARIX = {
     yield* wait(e.data.started ? 12 : b.rng.range(24, 44));
     e.data.started = true;
     for (;;) {
-      yield* stroll(b, e, s, b.rng.range(s.idle[0], s.idle[1]));
       // Don't follow a snare that landed with more pain while the player is still held: taunt instead.
-      if (b.player.stunTimer > 0) {
-        yield* pose(e, 'taunt', Math.min(40, b.player.stunTimer));
-        e.setAnim('idle');
-      }
+      yield* wander(b, e, s);
       const move = pickMove(b, e, [
         ['snare', 5],
         ['petals', 4],
@@ -240,5 +245,18 @@ export const BRIARIX = {
   },
   onDelete(b, e) {
     clearPets(b, e);
+  },
+};
+
+// What GridWars Daily's mixed bosses borrow (composite.js; see a_voltframe.js's KIT for the fields).
+export const KIT = {
+  family: BRIARIX,
+  damage: ['attack', 'root', 'petal', 'thorn'], // the stats that are damage numbers
+  mover: wander,
+  moves: {
+    snare: { name: 'Root Snare', element: 'wood', fn: rootSnare, weight: 5, desc: 'roots burst up and hold you fast' },
+    petals: { name: 'Petal Storm', element: 'wood', fn: petalStorm, weight: 4, desc: 'a whirling storm scours your row' },
+    overgrow: { name: 'Overgrowth', element: 'wood', fn: overgrowth, weight: 4, has: (s) => s.overgrow, ok: overgrowthDue, support: true, desc: 'grass swallows the field' },
+    bud: { name: 'Thorn Bud', element: 'wood', fn: thornBud, weight: 3, has: (s) => s.bud, ok: budOk, desc: 'a bud that spits thorns down its row' },
   },
 };

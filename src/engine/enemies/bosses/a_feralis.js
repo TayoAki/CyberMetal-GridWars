@@ -116,6 +116,21 @@ function* pounce(b, e, s) {
   }
 }
 
+// Erratic prowling: a burst of quick leaps with uneven pauses.
+function* prowl(b, e, s) {
+  const hops = b.rng.range(s.hops[0], s.hops[1]);
+  for (let i = 0; i < hops; i++) {
+    const spots = otherSpots(b, e);
+    if (spots.length) {
+      const [c, r] = b.rng.pick(spots);
+      e.setAnim('move');
+      yield* leap(b, e, c, r, s.hopT, 10);
+    }
+    e.setAnim('idle');
+    yield* wait(b.rng.range(s.hopRest[0], s.hopRest[1]));
+  }
+}
+
 export const FERALIS = {
   type: 'feralis',
   kind: 'navi',
@@ -141,18 +156,7 @@ export const FERALIS = {
     e.setAnim('idle');
     yield* wait(b.rng.range(10, 22));
     for (;;) {
-      // Erratic prowling: a burst of quick leaps with uneven pauses.
-      const hops = b.rng.range(s.hops[0], s.hops[1]);
-      for (let i = 0; i < hops; i++) {
-        const spots = otherSpots(b, e);
-        if (spots.length) {
-          const [c, r] = b.rng.pick(spots);
-          e.setAnim('move');
-          yield* leap(b, e, c, r, s.hopT, 10);
-        }
-        e.setAnim('idle');
-        yield* wait(b.rng.range(s.hopRest[0], s.hopRest[1]));
-      }
+      yield* prowl(b, e, s);
       const move = pickMove(b, e, [
         ['rake', 4],
         ['pounce', e.data.lastMove === 'pounce' ? 1 : 3],
@@ -168,5 +172,18 @@ export const FERALIS = {
   onFlinch(b, e) {
     settle(e);
     e.hidden = false;
+  },
+};
+
+// What GridWars Daily's mixed bosses borrow (composite.js; see a_voltframe.js's KIT for the fields).
+export const KIT = {
+  family: FERALIS,
+  damage: ['rake', 'pounce'], // the stats that are damage numbers
+  mover: prowl,
+  rest: (s) => s.rest,
+  moves: {
+    rake: { name: 'Rake', element: 'null', fn: rake, weight: 4, desc: 'claws tear down your column' },
+    pounce: { name: 'Pounce Dash', element: 'null', fn: pounce, weight: 3, again: 1, desc: 'tears straight across your row' },
+    howl: { name: 'Howl', element: 'null', fn: howl, weight: 3, has: (s) => s.howl, desc: 'a howl, then two quick rakes' },
   },
 };
