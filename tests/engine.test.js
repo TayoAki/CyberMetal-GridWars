@@ -179,6 +179,46 @@ test('AreaGrab steals the enemy front column; an occupied panel is hit instead',
   assert.equal(b.field.ownerAt(3, 0), TEAM.BLUE);
 });
 
+test('stolen panels never strand the player deep in the enemy area: their way back stays until they have used it', () => {
+  const b = makeBattle({ enemies: [{ type: 'dummy', level: 1, col: 5, row: 0 }] });
+  toFight(b);
+  // Two AreaGrabs, 300 frames apart, and the player walks two columns deep.
+  for (let r = 0; r < 3; r++) b.field.steal(3, r, TEAM.RED);
+  run(b, 300);
+  for (let r = 0; r < 3; r++) b.field.steal(4, r, TEAM.RED);
+  b.moveEntity(b.player, 4, 1);
+  run(b, TIMING.AREA_RETURN - 300);
+  // The first column's time is up: its other rows go back, but the player's row stays theirs.
+  assert.deepEqual([0, 1, 2].map((r) => b.field.ownerAt(3, r)), [TEAM.BLUE, TEAM.RED, TEAM.BLUE]);
+  run(b, 300);
+  assert.deepEqual([0, 1, 2].map((r) => b.field.ownerAt(4, r)), [TEAM.BLUE, TEAM.RED, TEAM.BLUE]);
+  // They can always walk home, and everything goes back once they have.
+  press(b, 'left');
+  run(b, 12);
+  press(b, 'left');
+  run(b, 4);
+  assert.deepEqual([b.player.col, b.player.row], [2, 1]);
+  for (const c of [3, 4]) assert.deepEqual([0, 1, 2].map((r) => b.field.ownerAt(c, r)), [TEAM.BLUE, TEAM.BLUE, TEAM.BLUE], `column ${c}`);
+
+  // Around an enemy: the first AreaGrab couldn't take the panel it stood on, so the player went in by the
+  // top row. That way back is what stays.
+  const b2 = makeBattle({ enemies: [{ type: 'dummy', level: 1, col: 3, row: 1 }] });
+  toFight(b2);
+  for (const r of [0, 2]) b2.field.steal(3, r, TEAM.RED);
+  run(b2, 300);
+  for (let r = 0; r < 3; r++) b2.field.steal(4, r, TEAM.RED);
+  b2.moveEntity(b2.player, 4, 1);
+  run(b2, TIMING.AREA_RETURN);
+  const owners = (bb) => [3, 4].map((c) => [0, 1, 2].map((r) => (bb.field.ownerAt(c, r) === TEAM.RED ? 'R' : 'B')).join('')).join(' ');
+  assert.equal(owners(b2), 'RBB RRB');
+  for (const dir of ['up', 'left', 'left']) {
+    press(b2, dir);
+    run(b2, 12);
+  }
+  assert.deepEqual([b2.player.col, b2.player.row], [2, 0]);
+  assert.equal(owners(b2), 'BBB BBB');
+});
+
 test('cracked panels break when stepped off and block movement', () => {
   const b = makeBattle({ enemies: [{ type: 'dummy', level: 1, col: 4, row: 1 }], field: ['......', '.c....', '......'] });
   toFight(b);

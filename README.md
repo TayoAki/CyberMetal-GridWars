@@ -210,7 +210,7 @@ the server stores nothing.
 
 **The battle system**, recreated:
 - **Field:** a 6x3 grid. Red area vs blue area, with ownership that moves: AreaGrab/PanlGrab steal panels,
-  which return after a while.
+  which return after a while (never while you need them to get back to your side).
 - **Panels:** normal, cracked (breaks when you step off), broken (recovers later), grass (Fire ×2 and
   burns away; Wood bodies regenerate on it), ice (you slide; Elec ×2), lava (50 Fire damage to non-Fire
   bodies), poison (drains HP), holy (halves damage), sand and metal.

@@ -172,6 +172,16 @@ The next agent could measure all of these with mGBA's Lua scripting and a save s
 7. **Symptom:** Scurrier bombs hit the bot about every 5 seconds. **Cause:** the bomb runs along its row
    and turns once, toward anyone in the column it is crossing; the bot watched only the row ahead.
    **Fix:** the bomb's current column counts as unsafe until it has passed. The dodge is a sidestep.
+8. **Symptom (player report):** stuck after AreaGrab: unable to move, and the fight never ended.
+   **Cause:** a stolen panel went back as soon as its timer ran out and nobody stood on it. Grab a
+   column, step in, grab the next and step in again: the first column's time runs out first, so it went
+   back and left the player on one red panel inside the enemy area. They couldn't step off it, and shots
+   only fly forward, so an enemy that moved behind them could never be hit. **Fix:** before a stolen
+   panel goes back, the field keeps one shortest way home from every body standing in the other side's
+   area. Those panels go back once the body has walked home. The way home may run through another row,
+   for example round an enemy whose panel the grab couldn't take (`Field.lifelines`, two cases in
+   `tests/engine.test.js`). A stress run on every Gauntlet battle (AreaGrab and PanlGrab spam, 6 seeds)
+   found no other stuck states.
 
 ### Balance sweep (autopilot, 6 seeds per encounter)
 Every Gauntlet encounter now wins 83-100%; before these fixes Dead Signal (void2) and Hunt Pack (riv3)

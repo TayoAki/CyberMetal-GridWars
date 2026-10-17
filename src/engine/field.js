@@ -132,6 +132,7 @@ export class Field {
 
   // Advance timers one frame. `occupantTeamAt(c, r)` reports the team standing on a panel (or null).
   update(occupantTeamAt) {
+    let due = null;
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
         const p = this.panels[r][c];
@@ -145,17 +146,53 @@ export class Field {
         }
         if (p.owner !== p.home && p.stolenTimer !== Infinity && p.stolenTimer > 0) {
           p.stolenTimer--;
-          if (p.stolenTimer <= 0) {
-            // Only hand the panel back once the thief has stepped off it.
-            if (occupantTeamAt(c, r) === p.owner) p.stolenTimer = 1;
-            else {
-              p.owner = p.home;
-              p.flash = 12;
-            }
-          }
+          if (p.stolenTimer <= 0) (due ??= []).push(p);
         }
       }
     }
+    if (!due) return;
+    // A panel only goes back once the thief has stepped off it and doesn't need it to get home: a body two
+    // columns deep would otherwise be cut off, unable to step back or turn round.
+    const keep = this.lifelines(occupantTeamAt);
+    for (const p of due) {
+      if (keep.has(p)) p.stolenTimer = 1;
+      else {
+        p.owner = p.home;
+        p.flash = 12;
+      }
+    }
+  }
+
+  // The stolen panels bodies need: each panel a body stands on in the other side's area, and one shortest
+  // way from it back to its own area through panels its side holds.
+  lifelines(occupantTeamAt) {
+    const keep = new Set();
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const team = occupantTeamAt(c, r);
+        const p = this.panels[r][c];
+        if (team === null || p.owner !== team || p.home === team) continue;
+        const from = new Map([[p, null]]);
+        const queue = [[c, r]];
+        let end = p;
+        for (let i = 0; i < queue.length; i++) {
+          const [qc, qr] = queue[i];
+          const q = this.panels[qr][qc];
+          if (q.home === team) {
+            end = q;
+            break;
+          }
+          for (const [dc, dr] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+            const n = this.get(qc + dc, qr + dr);
+            if (!n || n.owner !== team || from.has(n)) continue;
+            from.set(n, q);
+            queue.push([qc + dc, qr + dr]);
+          }
+        }
+        for (let k = end; k; k = from.get(k)) keep.add(k);
+      }
+    }
+    return keep;
   }
 
   snapshot() {
