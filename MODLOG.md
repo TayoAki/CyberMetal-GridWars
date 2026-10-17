@@ -384,6 +384,86 @@ parts became swappable.
 - **Browser run** on the built file with real keys: change every row, the save persists, DONE returns to
   the title (whose demo shows the look), and a Free Battle draws it on the field. No page errors.
 
+### 3D graphics, and your own 3D models
+The owner asked "can we make everything 3D?", then "I want users to be able to bring in their own 3D
+generated characters ... say I make a character in Tripo". That reverses the Customize entry's "no Tripo
+here": the models now live in a 3D mode, not in the pixel art. **Route:** a 3D renderer under the 2D view,
+not a rewrite. The sim and the 2D BattleView still run everything; battles are drawn by three.js on a canvas
+under the now see-through 2D canvas.
+
+- **Space** (`src/render3d/space.js`): an orthographic camera tilted 30 degrees, with world x = screen x and
+  screen y = 80 - y cos + z sin. The floor projects exactly onto the 2D panel rows and feet, so everything
+  still drawn in 2D (effects, numbers, HUD, Custom Screen) lines up with no changes.
+- **Sprites become voxel models** (`voxels.js`):
+  - `sprite()` in pixel.js gained a sink. While the stage captures a body, its multi-colour sprites go to
+    3D. One-colour silhouettes are glows and flashes: drawn behind the body they become an emissive glow,
+    drawn over it they stay 2D tints.
+  - Each frame of art is built once (LRU of 360 models). Fronts bulge up to 4 units toward the camera,
+    wide rows run deeper than thin ones, only fronts, tops and sides are built, and faces are merged.
+- **Stage** (`battle3d.js`): one shared scene for every battle view.
+  - Panel blocks wear the 2D panel art (an atlas redrawn by `drawField`), and the area background is the
+    backdrop.
+  - Lighting: a hemisphere fill, a key light with a 2048 shadow map, and a cyan rim. Effects add point
+    lights by name or element, and the buster's charge glows.
+  - Bodies get blob contact shadows, plus hit-flash, see-through and glow materials. The intro
+    materialise is a clip plane with a scan ring.
+- **The camera moves only while the overlays are put away.** It swoops in from low at the side over the
+  first 96 frames (perspective blending into the exact 2D framing, with 1/distance interpolated) and pushes
+  in on the winner. Meanwhile anchored 2D art is drawn to a scratch canvas. Reduce Flash/Shake keeps it
+  still.
+- **Graphics option** (`src/render/graphics.js`): OPTIONS > GRAPHICS 3D/CLASSIC, the G key, or
+  `?gfx=2d|3d`. The default is 3D, falling back to classic without WebGL. The 3D code loads on first use
+  (dev) or is inlined (build).
+- **Your own model** (`models.js`): CUSTOMIZE > 3D MODEL (OFF / MECH / yours), TURN and LOAD .GLB, or drop
+  a .glb on the page.
+  - Prepared in the browser. Tripo's broken auto-rig (bones at the origin, garbage inverse binds) is rebuilt
+    from the skin weights (tools/repair_glb.py's method, ported). A rig that still fails is shown static.
+    Textures are cut to 1024 px, metal is toned down, and the model is scaled to 55 units.
+  - Kept in IndexedDB (in memory where blocked); looks gain `model` and `turn`.
+  - Animated from the battle state: whole-body recoil, lunges, hurt and delete; with Mixamo bones, arms
+    lowered from the T-pose and aimed for buster, sword, throw and guard. Sword and Cannon chips show a
+    glowing arm blade or arm cannon.
+- **Builds:** /grid now bundles three.js (407 KiB gzipped). The MECH is fetched from `/assets/mecha.glb` (a
+  serve-dist route); the Artifact inlines it (2.9 MB).
+
+#### Gotchas
+1. **Symptom:** shadows came out as dashed streaks. **Cause:** with `shadowSide` unset, three casts shadows
+   from the back faces of FrontSide materials, and the voxel shells have none. **Fix:** `shadowSide:
+   DoubleSide`.
+2. **Symptom:** a warning, then no soft shadows. **Cause:** `PCFSoftShadowMap` is removed in r186. **Fix:**
+   PCFShadowMap with `shadow.radius`.
+3. **Symptom:** the built page said "Failed to construct 'URL'" and stayed 2D. **Cause:** DRACOLoader
+   resolves its default decoder paths with `import.meta.url` at load, and a classic (iife) script has none.
+   **Fix:** esbuild `define: { 'import.meta.url': 'document.baseURI' }` for the grid build (the game sets
+   its own decoder path).
+4. **Symptom:** in the exact 2D framing the scene read as "the 2D game, lit": you mostly see fronts.
+   **Fix:** the opening swoop and the closing push-in, in perspective, while the overlays are away.
+5. **Symptom:** scan rings floated above short enemies. **Cause:** the 2D reveal climbs 64 px whatever the
+   body's height. **Fix:** rings stop at the top of the body.
+6. **Symptom:** the sawblade built a new voxel model (and a new 2D bitmap) every frame. **Cause:**
+   `flipRows` made new rows each call. **Fix:** cached per rows.
+7. **Rule:** Lambert shading divides by pi. The fill and key are set so a front face shows its sprite
+   colour, and panels are tinted back to their 2D colours.
+8. **Not a bug:** the mech's long straight tail is in the model; the raw Tripo file has it too.
+
+#### Oracles
+- `tests/render3d.test.js` (5 tests):
+  - panels and feet project to the 2D pixels;
+  - voxel faces, depth, colour, mirroring and caching;
+  - the sink's box under a translate and a mirror;
+  - the mech prepared: rig ok, 55 tall, feet on the floor, centred;
+  - a broken rig (bones at the origin, inverse binds of 1e37) rebuilt within 0.5 units of the offline
+    repair.
+- **Pixel check:** classic 2D is pixel-identical to the previous build (Tidewalker battle, frames 30, 150 and
+  400: zero differing pixels).
+- **Browser runs (SwiftShader), frame-exact:**
+  - boot and boss battles, and the title demo, in 3D; the swoop frame by frame;
+  - the MECH fetched (/grid) and inline (Artifact from file://);
+  - the owner's raw Tripo .glb through the picker and by drop: rig rebuilt, survives a reload;
+  - bad files (a .txt, random bytes) refused with a message;
+  - phone portrait with touch; G mid-battle both ways; Reduce Flash keeps the camera still.
+  - No page errors.
+
 ## 6. Open-world prototype
 
 The owner moved the direction off the grid: "a fighting game that's open world like Palworld", using a

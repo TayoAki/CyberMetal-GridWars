@@ -229,17 +229,43 @@ export function spriteBitmap(rows, palette, flip = false, outline = null) {
   return bmp;
 }
 
+// A sprite sink takes sprites over instead of drawing them (the 3D view turns body sprites into models).
+// sink(rows, palette, box) returns true when it took the sprite; box is where it would have been drawn on
+// screen, after the canvas transform and without the outline: { x, y, w, h, flip, alpha, outline }.
+let sink = null;
+export function setSpriteSink(fn) {
+  const prev = sink;
+  sink = fn;
+  return prev;
+}
+
 export function sprite(ctx, rows, palette, x, y, opts = {}) {
-  const bmp = spriteBitmap(rows, palette, !!opts.flip, opts.outline ?? null);
-  let dx = Math.round(x) - bmp.pad;
-  let dy = Math.round(y) - bmp.pad;
+  let dx = Math.round(x);
+  let dy = Math.round(y);
   if (opts.anchor === 'feet') {
-    dx = Math.round(x - rows[0].length / 2) - bmp.pad;
-    dy = Math.round(y - rows.length) - bmp.pad;
+    dx = Math.round(x - rows[0].length / 2);
+    dy = Math.round(y - rows.length);
   } else if (opts.anchor === 'center') {
-    dx = Math.round(x - rows[0].length / 2) - bmp.pad;
-    dy = Math.round(y - rows.length / 2) - bmp.pad;
+    dx = Math.round(x - rows[0].length / 2);
+    dy = Math.round(y - rows.length / 2);
   }
+  if (sink) {
+    const m = ctx.getTransform();
+    const w = rows[0].length;
+    const box = {
+      x: m.e + m.a * (m.a < 0 ? dx + w : dx),
+      y: m.f + m.d * dy,
+      w: Math.abs(m.a) * w,
+      h: m.d * rows.length,
+      flip: !!opts.flip !== m.a < 0,
+      alpha: ctx.globalAlpha * (opts.alpha ?? 1),
+      outline: opts.outline ?? null,
+    };
+    if (sink(rows, palette, box)) return;
+  }
+  const bmp = spriteBitmap(rows, palette, !!opts.flip, opts.outline ?? null);
+  dx -= bmp.pad;
+  dy -= bmp.pad;
   if (opts.alpha !== undefined && opts.alpha < 1) {
     const a = ctx.globalAlpha;
     ctx.globalAlpha = a * opts.alpha;

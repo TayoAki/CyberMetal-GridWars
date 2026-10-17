@@ -10,6 +10,26 @@ Every character, sprite, sound and tune is original. The *rules* are rebuilt fro
 damage, codes, MB, elements and rarity, virus/boss HP and elements, and the starter-folder shape were read
 from the owner's own BN3 ROM. None of the ROM's bytes ship in this repo.
 
+## New: 3D graphics, and your own 3D characters
+
+![3D battles: voxel AXIOM as a battle opens, a Tripo model swinging a Sword chip, CUSTOMIZE with a .glb, the built-in MECH](docs/screenshot-3d.png)
+
+Battles now render in 3D. Switch back to classic 2D in OPTIONS > GRAPHICS, or press **G** at any time.
+
+- **Everything on the field is 3D.** Every character and projectile is built from its own pixel art as a
+  voxel model. They stand on lit panel blocks, cast real shadows, and effects light up the field.
+- **The camera** swoops in as a battle opens and closes in on the winner. During play it holds the classic
+  framing, so the HUD, damage numbers and effects line up exactly. *Reduce flash/shake* keeps it still.
+- **Bring your own navi.** Make a character in Tripo (or any tool that exports **.glb**), then pick it in
+  CUSTOMIZE > LOAD .GLB, or just drop the file onto the game. It takes AXIOM's place in 3D battles:
+  - it's sized to fit, and a broken auto-rig (Tripo's comes out with every bone at the origin) is rebuilt
+    from its skin weights; a model with no usable rig moves as one piece;
+  - with Mixamo-style bones its arms come down from the T-pose and aim the buster, swing and guard;
+  - Sword and Cannon chips give it a glowing arm blade or an arm cannon;
+  - TURN fixes a model made facing another way, and there's a built-in MECH to try.
+- **Privacy:** the file stays in your browser (IndexedDB); nothing is uploaded. Looks never change a battle.
+- Classic 2D is pixel-for-pixel the old game, and browsers without WebGL stay in 2D.
+
 ## New: open-world prototype
 
 The next direction for the project: the same kind of fights, taken off the grid into a 3D world (think
@@ -119,7 +139,7 @@ your own.
 `cybermetal-gridwars`, service `games`, deployed from this branch: every push redeploys it.
 
 `npm run build`, then `npm start`, serves a menu at `/`, the grid battler at `/grid` and the open world at
-`/world` (plus `/health`), on `$PORT` (default 8080). `tools/serve-dist.mjs` reads and gzips the built pages
+`/world` (plus `/health`, and `/assets/mecha.glb` for the grid's built-in MECH), on `$PORT` (default 8080). `tools/serve-dist.mjs` reads and gzips the built pages
 once at startup. Any Node 20+ host works; on Railway the default Node build (`npm install`, `npm run build`,
 `npm start`) needs no extra settings. The games keep progress in each player's browser (`localStorage`), so
 the server stores nothing.
@@ -127,7 +147,8 @@ the server stores nothing.
 ## Play (grid battler)
 
 - **No install:** run `npm run build`, then open `dist/cybermetal-gridwars.html` in any modern browser.
-  It's one self-contained file and works offline from `file://`.
+  It's one self-contained file and works offline from `file://`. (The built-in MECH model is fetched from
+  `assets/` and so needs the dev server or the hosted page; your own .glb works anywhere.)
 - **Dev server:** `npm run serve`, then open http://127.0.0.1:8123/. It serves plain ES modules, so there
   is no build step.
 
@@ -140,6 +161,7 @@ the server stores nothing.
 | Open Custom Screen (gauge full) | Q / E / Shift | LB / RB / triggers | L / R |
 | Pause (SELECT in pause = retreat) | Enter | Start | START |
 | Shield (Shield style) | Back + Z | Back + B | Back + B |
+| 3D / classic graphics | G | | OPTIONS |
 
 ## What's in it
 
@@ -163,6 +185,8 @@ the server stores nothing.
   - Parts: a head, body, arms, legs and back piece, 25 options in all (heads Axiom, Vanguard, Oni, Nova,
     Ronin and Specter; back pieces include wings, a thruster and a scarf).
   - Colours: armour, suit and lights, 27 presets, each shaded into a full pixel-art ramp.
+  - 3D model (3D graphics): the built-in MECH or your own .glb in AXIOM's place, with TURN to face it
+    the right way (see *3D graphics* above).
   - Cosmetic only. The look shows in every battle and in the title demo.
 - **Programs:** equip passive parts (SuperArmor, UnderShirt, FloatShoes, AirShoes, Custom+1/+2) within a
   memory budget, a light take on BN3's Navi Customizer. AirShoes let you stand on holes; FloatShoes stop
@@ -262,6 +286,7 @@ loop. The whole journal is in [`MODLOG.md`](MODLOG.md).
 ```
 src/engine/   deterministic battle sim (no DOM): battle, field, player, custom screen, chips, enemies
 src/render/   240x160 canvas renderer, pixel API, fonts, sprites, chip art, Custom Screen UI
+src/render3d/ 3D battles (three.js): camera space, voxel models, the battle stage, players' .glb models
 src/audio/    WebAudio synth: sound effects and original music, all generated at runtime
 src/game/     scenes (title, Gauntlet, Free Battle, folder, programs, options), save, rewards, data
 src/world/    open-world prototype: simulation, terrain, enemies, three.js view, avatar, HUD, input

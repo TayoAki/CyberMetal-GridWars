@@ -204,8 +204,12 @@ function art(s) {
   return lines.map((l) => l.padEnd(w, '.'));
 }
 
+// Mirrored rows, made once per frame of art (sprite and model caches key on the rows object).
+const flipped = new WeakMap();
 function flipRows(rows) {
-  return rows.map((r) => r.split('').reverse().join(''));
+  let out = flipped.get(rows);
+  if (!out) flipped.set(rows, (out = rows.map((r) => r.split('').reverse().join(''))));
+  return out;
 }
 
 // A table of poses built on first use (sculpting every pose at load would cost ~100 ms of startup).

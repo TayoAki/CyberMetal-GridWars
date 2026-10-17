@@ -6,9 +6,13 @@ import { drawBackground } from './background.js';
 import { drawEntitySprite, drawSpellSprite, drawFxSprite, fxDuration, ENTITY_SPRITES } from './sprites/index.js';
 import { drawChipIcon, drawElementIcon } from './chipart.js';
 import { drawCustomScreen, CustomAnim } from './customView.js';
+import { stage3d } from './graphics.js';
 
 // Draws a Battle onto the 240x160 buffer and keeps the purely visual state (effects, damage numbers,
 // hit flashes, screen shake). Feed it the battle's events every frame with consume().
+//
+// In 3D mode (graphics.js) the canvas is see-through over the 3D stage: the field and the bodies' and
+// projectiles' sprites go to the stage, which builds them in 3D, and everything else is drawn here on top.
 
 const TEAM_PAL = {
   [TEAM.RED]: { top: '#e05454', inner: '#ee7070', face: '#9a2626', edge: '#4a0c10', hi: '#ffaaa4' },
@@ -113,20 +117,28 @@ export class BattleView {
 
   draw(ctx) {
     const b = this.b;
-    const sx = this.shake > 0 && !this.calm ? ((this.t * 7) % 3) - 1 : 0;
-    const sy = this.shake > 0 && !this.calm ? ((this.t * 5) % 3) - 1 : 0;
-    drawBackground(ctx, this.theme, this.t);
-    ctx.save();
-    ctx.translate(sx, sy);
-    this.drawField(ctx);
-    this.drawBodiesAndSpells(ctx);
+    let sx = this.shake > 0 && !this.calm ? ((this.t * 7) % 3) - 1 : 0;
+    let sy = this.shake > 0 && !this.calm ? ((this.t * 5) % 3) - 1 : 0;
+    const st = (this.st = stage3d());
+    if (st) {
+      st.begin(this, sx, sy);
+      if (!st.settled) sx = sy = 0;
+      ctx.clearRect(0, 0, SCREEN_W, SCREEN_H);
+    } else drawBackground(ctx, this.theme, this.t);
+    // Art anchored to the field. While the 3D camera moves it can't line up, so it goes to a scratch canvas.
+    const g = (this.g = st && !st.settled ? st.scratch : ctx);
+    g.save();
+    g.translate(sx, sy);
+    if (!st) this.drawField(g);
+    this.drawBodiesAndSpells(g);
     for (const f of this.fx) {
       if (f.age < 0) continue;
       const p = floorPoint(f.ev.col ?? 2.5, f.ev.row ?? 1);
-      drawFxSprite(ctx, f.ev, p.x + (f.ev.ox ?? 0), p.y + (f.ev.oy ?? 0), f.age);
+      drawFxSprite(g, f.ev, p.x + (f.ev.ox ?? 0), p.y + (f.ev.oy ?? 0), f.age);
     }
-    this.drawNumbers(ctx);
-    ctx.restore();
+    this.drawNumbers(g);
+    g.restore();
+    st?.render();
     if (this.screenFlash > 0) {
       ctx.globalAlpha = (this.screenFlash / 24) * (this.calm ? 0.25 : 1);
       rect(ctx, 0, 0, SCREEN_W, SCREEN_H, '#ffffff');
@@ -261,8 +273,7 @@ export class BattleView {
       // Ground spells under bodies.
       for (const s of spells) {
         if (Math.round(s.y) !== r || s.z > 0) continue;
-        const p = floorPoint(s.x, s.y);
-        drawSpellSprite(ctx, s, p.x, p.y, t);
+        this.spellSprite(ctx, s, t);
       }
       const row = bodies.filter((e) => e.row === r).sort((a, z) => a.col + (a.offsetX ?? 0) - (z.col + (z.offsetX ?? 0)));
       for (const e of row) this.drawBody(ctx, e);
@@ -270,9 +281,20 @@ export class BattleView {
     // Airborne spells on top.
     for (const s of spells) {
       if (s.z <= 0) continue;
-      const p = floorPoint(s.x, s.y);
-      drawSpellSprite(ctx, s, p.x, p.y, t);
+      this.spellSprite(ctx, s, t);
     }
+  }
+
+  spellSprite(ctx, s, t) {
+    const p = floorPoint(s.x, s.y);
+    if (this.st) this.st.capture(ctx, s, { x: p.x, floor: p.y, shadow: s.z > 4 ? 'small' : false }, () => drawSpellSprite(ctx, s, p.x, p.y, t));
+    else drawSpellSprite(ctx, s, p.x, p.y, t);
+  }
+
+  // An entity's sprite: drawn here, or handed to the 3D stage. info: { floor, ... } (see Stage.capture).
+  entitySprite(ctx, e, x, y, info) {
+    if (this.st) this.st.capture(ctx, e, { x, y, ...info }, () => drawEntitySprite(ctx, e, x, y, this.t));
+    else drawEntitySprite(ctx, e, x, y, this.t);
   }
 
   drawBody(ctx, e) {
@@ -282,8 +304,8 @@ export class BattleView {
     // Summon: the player's slot shows the called navi.
     if (e === this.b.player && e.data.summon) {
       const fake = { ...e, type: e.data.summon, anim: 'summon', animT: e.animT, facing: 1, level: e.data.summonLevel ?? 1, data: {}, hidden: false };
-      ellipse(ctx, x, floor, 10, 3, 'rgba(0,0,0,0.35)');
-      drawEntitySprite(ctx, fake, x, y, t);
+      if (!this.st) ellipse(ctx, x, floor, 10, 3, 'rgba(0,0,0,0.35)');
+      this.entitySprite(ctx, fake, x, y, { floor, body: e, summon: true });
       return;
     }
     if (e.hidden) return;
@@ -293,8 +315,8 @@ export class BattleView {
       if (elapsed > 16 || elapsed % 4 >= 2) return;
     }
     if (e.iframes > 0 && e.alive && t % 4 < 2) return;
-    if (!e.flying) ellipse(ctx, x, floor, 10, 3, 'rgba(0,0,0,0.35)');
-    else ellipse(ctx, x, floor, 7, 2, 'rgba(0,0,0,0.25)');
+    // Shadows (the 3D stage casts real ones).
+    if (!this.st) ellipse(ctx, x, floor, e.flying ? 7 : 10, e.flying ? 2 : 3, e.flying ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.35)');
     const flash = this.flash.get(e.id);
     const invis = e.invisTimer > 0;
     // Materialise at battle start: reveal bottom-up behind a bright scanline.
@@ -303,6 +325,11 @@ export class BattleView {
     if (reveal <= 0) return;
     if (reveal < 1) {
       const top = Math.round(floor - 64 * reveal);
+      if (this.st) {
+        // 3D: the stage clips the model and sweeps a ring up it.
+        this.entitySprite(ctx, e, x, y, { floor, reveal: floor - top });
+        return;
+      }
       ctx.save();
       ctx.beginPath();
       ctx.rect(x - 40, top, 80, floor - top + 4);
@@ -314,7 +341,8 @@ export class BattleView {
       return;
     }
     if (invis) ctx.globalAlpha = 0.35;
-    if (flash) tinted(ctx, '#ffffff', 0.85, (g) => drawEntitySprite(g, e, x, y, t));
+    if (this.st) this.entitySprite(ctx, e, x, y, { floor, flash: !!flash });
+    else if (flash) tinted(ctx, '#ffffff', 0.85, (g) => drawEntitySprite(g, e, x, y, t));
     else drawEntitySprite(ctx, e, x, y, t);
     ctx.globalAlpha = 1;
 
@@ -408,11 +436,12 @@ export class BattleView {
     if (b.phase === 'fight' || b.phase === 'banner') {
       const pp = this.bodyPos(p);
       const n = Math.min(5, chips.length);
+      const g = this.g ?? ctx; // they float over the player
       for (let i = n - 1; i >= 0; i--) {
         const ix = pp.x - 7 + i * 2;
         const iy = pp.floor - 56 - i * 2;
-        frame(ctx, ix - 1, iy - 1, 16, 16, '#0c0f1c');
-        drawChipIcon(ctx, chips[i].def, ix, iy);
+        frame(g, ix - 1, iy - 1, 16, 16, '#0c0f1c');
+        drawChipIcon(g, chips[i].def, ix, iy);
       }
       if (chips.length > 0) {
         const c = chips[0];

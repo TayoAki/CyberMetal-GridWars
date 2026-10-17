@@ -64,7 +64,7 @@ function freshData() {
     look: DEFAULT_LOOK, // AXIOM's parts and colours (CUSTOMIZE); replaced whole, never edited in place
     progress: { area: 0, step: 0, hp: null, cleared: {}, bosses: {}, encounters: {}, finished: false },
     bits: 0,
-    options: { sfx: 0.8, music: 0.55, numbers: true, reduceFlash: false },
+    options: { sfx: 0.8, music: 0.55, numbers: true, reduceFlash: false, graphics: '3d' }, // graphics: '3d' | '2d' (classic)
     records: { battles: 0, wins: 0, best: {} },
   };
 }
@@ -93,6 +93,7 @@ export class SaveData {
     if (d.folder.length !== FOLDER_RULES.size) d.folder = expand(STARTER_FOLDER);
     if (d.activeFolder !== 'mine' && !this.folderUnlocked(d.activeFolder)) d.activeFolder = 'mine';
     d.look = Object.freeze(normalizeLook(d.look));
+    if (d.options.graphics !== '2d') d.options.graphics = '3d';
     this.upgradeStarter();
     // Programs from bosses already beaten, so a reward added later (Ironclad's AirShoes) reaches old saves.
     for (const a of AREAS) {

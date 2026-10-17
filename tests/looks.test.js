@@ -30,6 +30,10 @@ test('every option in the catalog has its art, and the default look is AXIOM as 
 test('looks are checked: unknown parts and colours fall back to AXIOM\'s, and the parts key ignores colour', () => {
   assert.deepEqual(normalizeLook(null), { ...DEFAULT_LOOK });
   assert.deepEqual(normalizeLook({ head: 'oni', body: 'nope', armor: 'crimson', lights: 42 }), { ...DEFAULT_LOOK, head: 'oni', armor: 'crimson' });
+  // A 3D model and its turn: only the known models, only quarter turns.
+  assert.deepEqual(normalizeLook({ model: 'mech', turn: 3 }), { ...DEFAULT_LOOK, model: 'mech', turn: 3 });
+  assert.deepEqual(normalizeLook({ model: 'http://x/y.glb', turn: 1.5 }), { ...DEFAULT_LOOK });
+  assert.equal(partsKey({ ...DEFAULT_LOOK, model: 'mech', turn: 1 }), partsKey(DEFAULT_LOOK), 'a model leaves the sprite alone');
   assert.equal(partsKey({ ...DEFAULT_LOOK, armor: 'gold' }), partsKey(DEFAULT_LOOK));
   assert.notEqual(partsKey({ ...DEFAULT_LOOK, back: 'wings' }), partsKey(DEFAULT_LOOK));
 });
@@ -94,7 +98,7 @@ test('the look is saved and reloaded, a bad one is repaired, and it rides into b
   const storage = memoryStorage();
   const a = new SaveData(storage);
   assert.deepEqual(a.data.look, DEFAULT_LOOK);
-  const mine = { head: 'nova', body: 'aegis', arms: 'stinger', legs: 'stealth', back: 'scarf', armor: 'gold', suit: 'black', lights: 'magenta' };
+  const mine = { head: 'nova', body: 'aegis', arms: 'stinger', legs: 'stealth', back: 'scarf', armor: 'gold', suit: 'black', lights: 'magenta', model: 'custom', turn: 2 };
   a.data.look = Object.freeze({ ...mine });
   a.persist();
   assert.deepEqual(new SaveData(storage).data.look, mine);

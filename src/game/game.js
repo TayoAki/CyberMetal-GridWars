@@ -1,4 +1,5 @@
 import { rect } from '../render/pixel.js';
+import { drawText, wrapText } from '../render/font.js';
 import { SCREEN_W, SCREEN_H } from '../render/layout.js';
 import { SaveData } from './save.js';
 import { BattleScene } from './scenes/battleScene.js';
@@ -21,6 +22,7 @@ export class Game {
     this.fade = 0; // 0 = clear, 1 = black
     this.fadeDir = 0;
     this.t = 0;
+    this.notice = null; // a message over every scene for a few seconds: { text, t }
 
     const quick = this.params.get('battle');
     if (quick) {
@@ -57,8 +59,14 @@ export class Game {
     this.fadeDir = 1;
   }
 
+  // Show a message at the top of the screen for a few seconds (whatever the scene).
+  notify(text, frames = 240) {
+    this.notice = { text: String(text), t: frames };
+  }
+
   step(held, edges) {
     this.t++;
+    if (this.notice && --this.notice.t <= 0) this.notice = null;
     if (this.fadeDir > 0) {
       this.fade = Math.min(1, this.fade + 0.12);
       if (this.fade >= 1) {
@@ -83,6 +91,13 @@ export class Game {
       ctx.globalAlpha = this.fade;
       rect(ctx, 0, 0, SCREEN_W, SCREEN_H, '#000000');
       ctx.globalAlpha = 1;
+    }
+    if (this.notice) {
+      const lines = wrapText(this.notice.text, SCREEN_W - 12).slice(0, 3);
+      const h = lines.length * 9 + 5;
+      rect(ctx, 0, 0, SCREEN_W, h, 'rgba(6,10,28,0.92)');
+      rect(ctx, 0, h, SCREEN_W, 1, '#8ab0ff');
+      lines.forEach((l, i) => drawText(ctx, l, SCREEN_W / 2, 3 + i * 9, '#ffffff', { align: 'center' }));
     }
   }
 

@@ -117,7 +117,11 @@ export const COLOR_CHANNELS = [
   { key: 'lights', name: 'LIGHTS' },
 ];
 
-export const DEFAULT_LOOK = Object.freeze({ head: 'axiom', body: 'axiom', arms: 'axiom', legs: 'axiom', back: 'none', armor: 'chrome', suit: 'navy', lights: 'cyan' });
+export const DEFAULT_LOOK = Object.freeze({ head: 'axiom', body: 'axiom', arms: 'axiom', legs: 'axiom', back: 'none', armor: 'chrome', suit: 'navy', lights: 'cyan', model: 'none', turn: 0 });
+
+// A 3D model in place of the sprite (3D graphics only): none, the built-in mech, or the player's own .glb;
+// turn spins it in quarter turns, for models made facing another way.
+export const LOOK_MODELS = ['none', 'mech', 'custom'];
 
 // A look with every field valid (unknown or missing ones fall back to AXIOM's).
 export function normalizeLook(look) {
@@ -125,6 +129,8 @@ export function normalizeLook(look) {
   if (!look || typeof look !== 'object') return out;
   for (const s of LOOK_SLOTS) if (s.options.some((o) => o.id === look[s.key])) out[s.key] = look[s.key];
   for (const c of COLOR_CHANNELS) if (LOOK_COLORS[c.key].some((o) => o.id === look[c.key])) out[c.key] = look[c.key];
+  if (LOOK_MODELS.includes(look.model)) out.model = look.model;
+  if ([0, 1, 2, 3].includes(look.turn)) out.turn = look.turn;
   return out;
 }
 

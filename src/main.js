@@ -1,13 +1,15 @@
-import { Input, PadEdges } from './input/input.js';
+import { Input, PadEdges, DEFAULT_KEYS } from './input/input.js';
 import { SCREEN_W, SCREEN_H } from './render/layout.js';
 import { audio } from './audio/index.js';
 import { Game } from './game/game.js';
 import { autopilot } from './game/autopilot.js';
+import { setGraphics, graphicsMode, beginFrame, endFrame, load3d } from './render/graphics.js';
+import { importGlb } from './game/modelImport.js';
 
 // Boot: canvas scaling, the fixed 60 Hz loop, input/audio wiring and the touch controls.
 
 const canvas = document.getElementById('screen');
-const ctx = canvas.getContext('2d', { alpha: false });
+const ctx = canvas.getContext('2d'); // see-through where a 3D battle shows below
 ctx.imageSmoothingEnabled = false;
 
 function fit() {
@@ -25,6 +27,38 @@ const input = new Input(window);
 const params = new URLSearchParams(location.search);
 const game = new Game({ input, audio, params, storage: safeStorage() });
 
+// Graphics: 3D battles or classic 2D (OPTIONS, the G key, or ?gfx=2d / ?gfx=3d for this visit).
+const gfx = params.get('gfx');
+setGraphics(gfx === '2d' || gfx === '3d' ? gfx : game.save.data.options.graphics);
+window.addEventListener('keydown', (e) => {
+  if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || (e.key !== 'g' && e.key !== 'G')) return;
+  if (e.target instanceof HTMLInputElement) return;
+  const o = game.save.data.options;
+  o.graphics = setGraphics(graphicsMode() === '3d' ? '2d' : '3d');
+  game.save.persist();
+});
+// A 3D model in the look: start loading it now rather than at the first battle.
+if (graphicsMode() === '3d' && game.save.data.look.model !== 'none') load3d().then((m) => m?.modelStatus(game.save.data.look.model));
+
+// Some actions may only follow a key press or tap (opening the file picker): scenes see those at once.
+window.addEventListener('keydown', (e) => {
+  const btn = DEFAULT_KEYS[e.code];
+  if (btn && !e.repeat) game.scene?.onGesture?.(btn);
+});
+
+// Drop a .glb (say, a character made in Tripo) anywhere on the page to make it the navi's 3D model.
+window.addEventListener('dragover', (e) => {
+  if (!e.dataTransfer?.types?.includes('Files')) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+});
+window.addEventListener('drop', (e) => {
+  const files = [...(e.dataTransfer?.files ?? [])];
+  if (!files.length) return;
+  e.preventDefault();
+  importGlb(game, files.find((f) => /\.glb$/i.test(f.name)) ?? files[0]);
+});
+
 // Touch controls: show them on touch devices (or with ?touch=1).
 const isTouch = params.get('touch') === '1' || (params.get('touch') !== '0' && ('ontouchstart' in window || navigator.maxTouchPoints > 0) && matchMedia('(pointer: coarse)').matches);
 if (isTouch) document.body.classList.add('touch');
@@ -39,6 +73,7 @@ for (const btn of document.querySelectorAll('#touch [data-btn]')) {
       // No live pointer to capture (a synthetic event): the press still counts.
     }
     input.touchDown(name);
+    if (e.pointerType === 'mouse') game.scene?.onGesture?.(name);
   };
   const off = (e) => {
     e.preventDefault();
@@ -47,6 +82,10 @@ for (const btn of document.querySelectorAll('#touch [data-btn]')) {
   };
   btn.addEventListener('pointerdown', on);
   btn.addEventListener('pointerup', off);
+  // Browsers let a tap open a file picker on its release (a mouse click on its press).
+  btn.addEventListener('pointerup', (e) => {
+    if (e.pointerType !== 'mouse') game.scene?.onGesture?.(name);
+  });
   btn.addEventListener('pointercancel', off);
   btn.addEventListener('pointerleave', off);
 }
@@ -84,7 +123,9 @@ function frame(now) {
     steps++;
   }
   if (steps === 5) acc = 0;
+  beginFrame();
   game.draw(ctx);
+  endFrame();
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

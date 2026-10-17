@@ -32,6 +32,7 @@ export const KEY_HELP = [
   ['Use chip / confirm', 'X or K'],
   ['Custom Screen', 'Q / E (or Shift)'],
   ['Pause', 'Enter'],
+  ['3D / classic graphics', 'G'],
 ];
 
 export class Input {

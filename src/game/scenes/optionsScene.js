@@ -3,8 +3,9 @@ import { drawText } from '../../render/font.js';
 import { drawBackground } from '../../render/background.js';
 import { drawWindow, drawHints, moveCursor, UI } from '../ui.js';
 import { KEY_HELP } from '../../input/input.js';
+import { setGraphics, has3d } from '../../render/graphics.js';
 
-// Options: volumes, controls reference, and a guarded save reset.
+// Options: volumes, graphics, controls reference, and a guarded save reset.
 
 export class OptionsScene {
   constructor(game) {
@@ -24,6 +25,7 @@ export class OptionsScene {
     return [
       { key: 'sfx', label: 'SOUND FX', value: bar(o.sfx) },
       { key: 'music', label: 'MUSIC', value: bar(o.music) },
+      { key: 'graphics', label: 'GRAPHICS', value: o.graphics === '2d' ? 'CLASSIC' : has3d() === false ? '3D (NO WEBGL)' : '3D' },
       { key: 'reduceFlash', label: 'REDUCE FLASH/SHAKE', value: o.reduceFlash ? 'ON' : 'OFF' },
       { key: 'reset', label: this.confirmReset ? 'REALLY RESET? (A)' : 'RESET SAVE', value: '' },
       { key: 'back', label: 'BACK', value: '' },
@@ -65,6 +67,12 @@ export class OptionsScene {
       this.game.audio.play('select');
       return;
     }
+    if (it.key === 'graphics' && (edges.pressed.a || edges.pressed.left || edges.pressed.right)) {
+      o.graphics = setGraphics(o.graphics === '2d' ? '3d' : '2d');
+      this.apply();
+      this.game.audio.play('select');
+      return;
+    }
     if (!edges.pressed.a) return;
     if (it.key === 'reset') {
       if (this.confirmReset) {
@@ -87,18 +95,18 @@ export class OptionsScene {
     ctx.globalAlpha = 0.45;
     rect(ctx, 0, 0, 240, 160, '#03050c');
     ctx.globalAlpha = 1;
-    drawWindow(ctx, 20, 6, 200, 70, { title: 'OPTIONS' });
+    drawWindow(ctx, 20, 4, 200, 76, { title: 'OPTIONS' });
     this.items().forEach((it, i) => {
-      const y = 22 + i * 11;
+      const y = 19 + i * 10;
       const sel = i === this.cursor;
       if (sel) drawText(ctx, '>', 28, y, UI.gold);
       drawText(ctx, it.label, 36, y, it.key === 'reset' && this.confirmReset ? UI.bad : sel ? UI.gold : UI.text);
       if (it.value) drawText(ctx, it.value, 210, y, UI.sub, { align: 'right' });
     });
-    drawWindow(ctx, 20, 80, 200, 66, { title: 'CONTROLS' });
+    drawWindow(ctx, 20, 82, 200, 66, { title: 'CONTROLS' });
     KEY_HELP.forEach(([what, keys], i) => {
-      drawText(ctx, what, 28, 94 + i * 10, UI.sub);
-      drawText(ctx, keys, 212, 94 + i * 10, UI.text, { align: 'right' });
+      drawText(ctx, what, 28, 95 + i * 9, UI.sub);
+      drawText(ctx, keys, 212, 95 + i * 9, UI.text, { align: 'right' });
     });
     drawHints(ctx, '</>: adjust   A: select   B: back');
   }

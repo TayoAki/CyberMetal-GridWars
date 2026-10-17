@@ -21,7 +21,11 @@
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); overflow: hidden; touch-action: none; -webkit-user-select: none; user-select: none; }
   body { display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: system-ui, sans-serif; padding-inline: 16px; box-sizing: border-box; }
   #wrap { display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; min-width: 0; }
-  #screen { image-rendering: pixelated; image-rendering: crisp-edges; display: block; max-width: 100%; background: #000; box-shadow: 0 0 0 2px var(--frame), 0 10px 40px var(--glow); outline: none; }
+  #stage { position: relative; max-width: 100%; line-height: 0; }
+  #screen { position: relative; z-index: 1; image-rendering: pixelated; image-rendering: crisp-edges; display: block; max-width: 100%; background: #000; box-shadow: 0 0 0 2px var(--frame), 0 10px 40px var(--glow); outline: none; }
+  /* 3D battles render on a canvas under the screen, which turns see-through over it. */
+  #screen.over3d { background: transparent; }
+  #screen3d { position: absolute; left: 0; top: 0; z-index: 0; display: block; background: #000; pointer-events: none; }
   #screen:focus-visible { box-shadow: 0 0 0 2px #8ab0ff, 0 10px 40px var(--glow); }
   #touch { display: none; width: 100%; max-width: 520px; padding-bottom: 12px; box-sizing: border-box; }
   body.touch #touch { display: grid; grid-template-columns: 1fr auto 1fr; grid-template-areas: "dpad mid ab"; align-items: center; gap: 8px; }
@@ -51,7 +55,7 @@
 </head>
 <body>
 <div id="wrap">
-  <canvas id="screen" width="240" height="160" tabindex="0" aria-label="CyberMetal GridWars game screen. Click to focus, then use the keyboard."></canvas>
+  <div id="stage"><canvas id="screen" width="240" height="160" tabindex="0" aria-label="CyberMetal GridWars game screen. Click to focus, then use the keyboard."></canvas></div>
   <div id="touch" aria-hidden="true">
     <div class="dpad">
       <button class="up" data-btn="up">▲</button>
@@ -68,8 +72,9 @@
       <button class="b" data-btn="b">B</button>
     </div>
   </div>
-  <div id="hint">Click the screen, then: Arrows move · Z buster (hold to charge) · X chip / confirm · Q/E Custom · Enter start/pause</div>
+  <div id="hint">Click the screen, then: Arrows move · Z buster (hold to charge) · X chip / confirm · Q/E Custom · Enter start/pause · G 3D/classic</div>
 </div>
+<script type="importmap">{"imports":{"three":"./node_modules/three/build/three.module.js","three/addons/":"./node_modules/three/examples/jsm/"}}</script>
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>
