@@ -10,6 +10,39 @@ Every character, sprite, sound and tune is original. The *rules* are rebuilt fro
 damage, codes, MB, elements and rarity, virus/boss HP and elements, and the starter-folder shape were read
 from the owner's own BN3 ROM. None of the ROM's bytes ship in this repo.
 
+## New: GridWars Daily, a new boss every day
+
+![GridWars Daily: today's boss in the lobby, a fight, the results with the share buttons, and the phone lobby](docs/screenshot-daily.png)
+
+**Play it at `/daily`.** There's one boss a day, the same for everyone. Delete it as fast as you can, post your time
+and race your friends' runs. The grid game above is still there as Classic, at `/grid`.
+
+- **A new boss every day, made from the day's number.** Each one has a name, a look and an element, and an arena
+  with its own colours, props and floor (grass, ice, lava, metal...). Its moves come from the eight Gauntlet
+  bosses: an elec trickster that blinks like Voltframe might throw Ironclad's saw and call Tidecaller's fish.
+  Every move plays exactly as its own boss plays it.
+- **The week builds up**: V1 on Monday and Tuesday, V2 midweek, V3 on Friday and Saturday, **Ω on Sunday**.
+  Higher tiers keep their bosses' speed and tells and hit softer than the Gauntlet's versions. Your navi's HP
+  grows with the tier.
+- **Your navi**: the built-in mech, or your own **.glb** (a Tripo model works; LOAD .GLB or drop the file on
+  the page). Everything is cel-shaded with ink outlines and bloom, the bosses, the arena and your model alike,
+  so an uploaded character fits the scene. The navis face each other in profile, as in Battle Network.
+- **A leaderboard that can't be faked by typing in a time.** A won run is sent as what you pressed, frame by
+  frame. The server replays it with the game's own engine and ranks what the replay shows: fight time, then
+  Busting Level, then HP left. Each player holds one place a day (their best).
+- **Made to be shared:**
+  - **SHARE** posts a Wordle-style result: the boss, your time and Busting Level, and eight squares that tell
+    how the fight went (🟩 no damage ... 🟥 a heavy hit) without spoiling it.
+  - **RESULT CARD** is a 1200x630 image of the arena with your time on it.
+  - **CHALLENGE LINK** (`/daily?vs=<run>`) lets a friend race your run. Your pace shows under the boss's HP
+    bar, and the results say who won and by how much.
+  - **REPLAY LINK** (`/daily?r=<run>`) plays your run back exactly as you played it.
+  - Links show today's boss (or the challenger's time) when pasted into chats and social posts.
+- **Streaks and the week**: the lobby counts the days in a row you've cleared and shows this week's tiers.
+  Tap a past day to practise its boss; the board takes today's runs.
+- **Controls**: as in Classic (arrows/WASD to move, Z buster, X chip, Q/E Custom Screen), touch buttons on
+  phones, and the Custom Screen takes taps. Enter or Esc pauses.
+
 ## New: 3D graphics, and your own 3D characters
 
 ![3D battles: voxel AXIOM as a battle opens, a Tripo model swinging a Sword chip, CUSTOMIZE with a .glb, the built-in MECH](docs/screenshot-3d.png)
@@ -143,16 +176,37 @@ your own.
   browser (`src/render3d/glb.js`, shared with the grid game). Tripo's terms decide commercial use: free-plan
   models may not be usable commercially.
 
-## Hosting both games
+## Hosting the games
 
-**Live:** https://games-production-eed4.up.railway.app (menu), `/grid` and `/world`. Railway project
-`cybermetal-gridwars`, service `games`, deployed from this branch: every push redeploys it.
+**Live:** https://games-production-eed4.up.railway.app (menu), `/daily`, `/grid` and `/world`. Railway
+project `cybermetal-gridwars`, service `games`, deployed from this branch: every push redeploys it.
 
-`npm run build`, then `npm start`, serves a menu at `/`, the grid battler at `/grid` and the open world at
-`/world` (plus `/health`, and `/assets/mecha.glb` for the grid's built-in MECH), on `$PORT` (default 8080). `tools/serve-dist.mjs` reads and gzips the built pages
-once at startup. Any Node 20+ host works; on Railway the default Node build (`npm install`, `npm run build`,
-`npm start`) needs no extra settings. The games keep progress in each player's browser (`localStorage`), so
-the server stores nothing.
+`npm run build`, then `npm start`, serves a menu at `/`, GridWars Daily at `/daily`, the grid battler at
+`/grid` and the open world at `/world` on `$PORT` (default 8080). It also serves `/health`,
+`/assets/mecha.glb` (the built-in MECH), `/og/*.png` (the Daily's link-preview images) and the Daily's
+leaderboard API. `tools/serve-dist.mjs` reads and gzips the built pages once at startup. Any Node 20+ host
+works; on Railway the default Node build (`npm install`, `npm run build`, `npm start`) needs no extra
+settings.
+
+The Classic and open-world games keep progress in each player's browser (`localStorage`). The only thing the
+server stores is the Daily's board, under **`$DATA_DIR`** (on Railway, the service's volume, found through
+`RAILWAY_VOLUME_MOUNT_PATH`; locally `.data/`):
+- `daily/<day>.jsonl` holds one line per accepted run;
+- `runs/<id>.json` holds its inputs, for replays and challenges.
+
+The API (`tools/daily-api.mjs`):
+
+| Call | What it does |
+|---|---|
+| `GET /api/daily/today` | the server's day number, and when the next one starts |
+| `GET /api/daily/:day/board?pid=` | the top 25, how many cleared, and your place |
+| `POST /api/daily/:day/runs` | `{ pid, name, folder, run }`; the server replays the run, then ranks it if it won |
+| `GET /api/runs/:id` | a run's result and inputs, for `?r=` and `?vs=` links |
+
+Runs are accepted for the server's day ±1, so every time zone's "today" counts. They carry the engine's
+fingerprint (`tools/engine-hash.mjs`), so a page left open across a deploy is asked to reload instead of
+having its run misjudged. Names are 2-12 characters with a word filter. Each address gets 40 submissions per
+10 minutes. `npm run serve` runs the same API against `.data-dev/` for development.
 
 ## Play (grid battler)
 
@@ -300,9 +354,14 @@ src/render3d/ 3D battles (three.js): camera space, voxel models, the battle stag
 src/audio/    WebAudio synth: sound effects and original music, all generated at runtime
 src/game/     scenes (title, Gauntlet, Free Battle, folder, programs, options), save, rewards, data
 src/world/    open-world prototype: simulation, terrain, enemies, three.js view, avatar, HUD, input
+src/daily/    GridWars Daily: the day's recipe, the duel, run recording and replay, the page (lobby, HUD,
+              Custom Screen, results, sharing) and view/ (cel-shaded stage, arena, boss bodies, navi, effects)
+src/engine/enemies/bosses/composite.js  mixed bosses built from the eight bosses' KIT exports
+daily/        the Daily page; gallery.html and og.html are development pages (all bosses, preview images)
 world/        the open-world page; assets/ holds the player model
 tests/        node:test benches (rules, data, enemy packs)
-tools/        dev server, single-file build, screenshot/smoke scripts, sprite sheet and navi parts pages
+tools/        dev server, single-file build, production server, the Daily's leaderboard API and engine
+              fingerprint, screenshot/smoke scripts, sprite sheet and navi parts pages
 docs/         CONTRACT.md (engine/content contract), field note
 ```
 

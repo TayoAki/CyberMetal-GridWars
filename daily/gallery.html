@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Daily boss gallery</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #070a1a; color: #eaf1ff; font: 14px system-ui, sans-serif; overflow: hidden; }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; }
+  #labels { position: fixed; left: 0; right: 0; bottom: 8px; display: grid; grid-template-columns: repeat(4, 1fr); text-align: center; }
+</style>
+<script type="importmap">{"imports":{"three":"../node_modules/three/build/three.module.js","three/addons/":"../node_modules/three/examples/jsm/"}}</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<!-- Development only: every boss build side by side (?from=day&anim=name). Not served in production. -->
+<script type="module">
+import * as THREE from 'three';
+import { Stage, RIM } from '../src/daily/view/stage.js';
+import { BossBody } from '../src/daily/view/body.js';
+import { dailyRecipe, BUILDS } from '../src/daily/recipe.js';
+const q = new URLSearchParams(location.search);
+const stage = new Stage(document.getElementById('c'), { quality: q.get('quality') ?? 'high' });
+stage.scene.background = new THREE.Color('#141a3a');
+RIM.color.value.set('#7af4ff');
+const want = Object.values(BUILDS).map((b) => b.build);
+const picks = [];
+for (let d = Number(q.get('from') ?? 1); picks.length < 8 && d < 400; d++) {
+  const r = dailyRecipe(d);
+  if (picks.some((p) => p.body.build === r.body.build)) continue;
+  picks.push(r);
+}
+picks.sort((a, b) => want.indexOf(a.body.build) - want.indexOf(b.body.build));
+const bodies = picks.map((r, i) => {
+  const b = new BossBody(r);
+  b.root.position.set((i % 4) * 2.6 - 3.9, 0, i < 4 ? -1.6 : 1.6);
+  b.root.rotation.y = -0.5;
+  stage.scene.add(b.root);
+  const floor = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 0.1, 24), new THREE.MeshToonMaterial({ color: '#2a3256' }));
+  floor.position.copy(b.root.position).setY(-0.05);
+  floor.receiveShadow = true;
+  stage.scene.add(floor);
+  return b;
+});
+stage.view = { elevation: 0.32, azimuth: 0, distance: 13, extra: 0, target: new THREE.Vector3(0, 0.9, 0) };
+const anim = q.get('anim') ?? 'idle';
+let t = 0;
+function loop() {
+  t += 1 / 60;
+  bodies.forEach((b) => b.pose(anim, (t * 60) % 40, t, 1 / 60));
+  stage.render(t);
+  requestAnimationFrame(loop);
+}
+loop();
+window.__ready = true;
+document.title = picks.map((r) => `${r.body.build}:${r.name}`).join(' ');
+</script>
+</body>
+</html>

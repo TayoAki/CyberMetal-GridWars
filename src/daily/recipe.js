@@ -58,11 +58,11 @@ export const ARENAS = {
 
 // Body colours by element: main, trim, glow; jittered a little per boss.
 const PALETTES = {
-  elec: [['#2a2f6a', '#ffd84a', '#7af4ff'], ['#1a1a2a', '#5af0ff', '#ffe95a'], ['#3a1a5c', '#ff5ae0', '#ffe14a']],
-  fire: [['#5a1a10', '#ffb03a', '#ff6a2a'], ['#2a1414', '#ff5a3a', '#ffd25a'], ['#6a2a0a', '#ffd84a', '#ff3a1a']],
-  aqua: [['#0a3a5a', '#ffd25a', '#5ae8ff'], ['#1a2a5a', '#7af4ff', '#c8f4ff'], ['#0a4a4a', '#ff8ab4', '#5affd8']],
-  wood: [['#1a3a14', '#ff7ab8', '#9aff6a'], ['#3a2a10', '#9aff6a', '#ffe14a'], ['#14301e', '#ffd25a', '#c8ff6a']],
-  null: [['#22283a', '#ff4a6a', '#ff8a5a'], ['#14141c', '#c86aff', '#5af0ff'], ['#3a3a44', '#ffd84a', '#ff5a3a'], ['#1a1020', '#ff4a6a', '#ffffff']],
+  elec: [['#3a4ab8', '#ffd84a', '#7af4ff'], ['#4a4a72', '#5af0ff', '#ffe95a'], ['#6a3ab8', '#ff5ae0', '#ffe14a']],
+  fire: [['#c83a1a', '#ffb03a', '#ffd25a'], ['#8a3a2a', '#ff5a3a', '#ffd25a'], ['#d8601a', '#ffe14a', '#ff5a1a']],
+  aqua: [['#1a6ab8', '#ffd25a', '#5ae8ff'], ['#2a4aa8', '#7af4ff', '#c8f4ff'], ['#1a8a8a', '#ff8ab4', '#5affd8']],
+  wood: [['#2a8a3a', '#ff7ab8', '#c8ff6a'], ['#8a6a2a', '#9aff6a', '#ffe14a'], ['#2a7a5a', '#ffd25a', '#c8ff6a']],
+  null: [['#4a5478', '#ff4a6a', '#ff8a5a'], ['#3a3a5a', '#c86aff', '#5af0ff'], ['#7a7a8a', '#ffd84a', '#ff5a3a'], ['#3a2a4a', '#ff4a6a', '#ff7aa0']],
 };
 
 // The way a family moves gives the body its build.
@@ -212,11 +212,13 @@ export function dailyRecipe(day) {
   };
 }
 
-// Softer numbers for the moves that make a fight drag: Dark Aura at 60 (any real chip breaks it, the
-// buster can't) coming back after 25 s, and one brazier that heals slowly.
+// Softer numbers for the moves that make a fight drag: Dark Aura at 40 (any attack chip or a full charge
+// shot breaks it, so a fight can't stall once the folder runs out) coming back after 25 s, and one brazier
+// that heals slowly.
+export const DAILY_AURA = 40;
 function tuning(moves) {
   const t = {};
-  if (moves.includes('zeroday.aura')) t.zeroday = { aura: 60, auraCd: 1500 };
+  if (moves.includes('zeroday.aura')) t.zeroday = { aura: DAILY_AURA, auraCd: 1500 };
   if (moves.includes('pyreclaw.brazier')) t.pyreclaw = { braziers: 1, heal: 10, healEvery: 150, brazierCd: 900 };
   return Object.keys(t).length ? t : undefined;
 }
@@ -225,7 +227,8 @@ function tuning(moves) {
 export function movesOf(recipe) {
   return recipe.moves.map((id) => {
     const m = kitMove(id);
-    return { id, name: m.name, desc: m.desc, element: m.element, support: !!m.support };
+    const aura = id === 'zeroday.aura' ? recipe.tune?.zeroday?.aura : null;
+    return { id, name: m.name, desc: aura ? `shrugs off hits under ${aura} until broken` : m.desc, element: m.element, support: !!m.support };
   });
 }
 

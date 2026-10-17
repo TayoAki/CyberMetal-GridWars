@@ -48,6 +48,12 @@
   .world { background: linear-gradient(180deg, #3b7fd6 0%, #9cc8f4 55%, #5aa04a 56%, #3f7f36 100%); }
   .world::before { content: ""; position: absolute; left: 0; right: 0; bottom: 30%; height: 38%; background: radial-gradient(60% 100% at 30% 100%, #4f8f3f 70%, transparent 71%), radial-gradient(50% 90% at 80% 100%, #477f39 70%, transparent 71%); }
   .world::after { content: ""; position: absolute; left: 62%; top: 0; bottom: 34%; width: 10px; background: linear-gradient(180deg, transparent, var(--pink)); box-shadow: 0 0 18px var(--pink); }
+  /* Daily: the featured card, today's boss against the night. */
+  .game.daily { grid-column: 1 / -1; border-color: var(--gold); box-shadow: 0 10px 50px rgba(255, 216, 74, 0.18); }
+  .dailyart { height: 170px; background: radial-gradient(70% 120% at 70% 110%, rgba(255, 90, 224, 0.5), transparent 60%), radial-gradient(60% 100% at 25% 100%, rgba(106, 232, 255, 0.35), transparent 60%), linear-gradient(180deg, #0c0a2e, #2a0f4a); display: grid; place-items: center; }
+  .dailyart b { font: 900 clamp(26px, 6vw, 40px)/1 system-ui, sans-serif; letter-spacing: 0.12em; color: #fff; text-shadow: 0 0 24px var(--pink); }
+  .dailyart small { display: block; text-align: center; margin-top: 8px; color: var(--gold); font: 800 13px/1 system-ui, sans-serif; letter-spacing: 0.2em; }
+  .new { margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: var(--pink); color: #fff; font: 800 11px/1.6 system-ui, sans-serif; letter-spacing: 0.1em; vertical-align: middle; }
   h2 { margin: 0; font: 900 20px/1.2 system-ui, sans-serif; letter-spacing: 0.1em; }
   .game p { margin: 6px 0 0; color: var(--muted); font-size: 14.5px; }
   .play { justify-self: start; padding: 9px 16px; border-radius: 10px; background: rgba(255, 216, 74, 0.14); border: 1px solid var(--gold); color: var(--gold); font: 800 14px/1 system-ui, sans-serif; letter-spacing: 0.12em; }
@@ -62,6 +68,11 @@
   <h1>CYBERMETAL <span>GRIDWARS</span></h1>
   <p class="tag">Fan-made battle games in the spirit of Mega Man Battle Network. They run in your browser, with no install: keyboard, gamepad or touch.</p>
   <div class="games">
+    <a class="game daily" href="/daily">
+      <div class="art dailyart" aria-hidden="true"><div><b>TODAY'S BOSS</b><small>A NEW ONE EVERY DAY</small></div></div>
+      <div><h2>GRIDWARS DAILY<span class="new">NEW</span></h2><p>One boss a day, the same for everyone. Delete it fast, share your time and race your friends' runs on today's board. Fight as the built-in mech or your own 3D model.</p></div>
+      <span class="play">FIGHT TODAY'S BOSS ▸</span>
+    </a>
     <a class="game" href="/grid">
       <div class="art grid" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
       <div><h2>GRIDWARS</h2><p>The grid battler: real-time fights on a 3×6 field. Build a chip folder, chain Program Advances, beat bosses and earn their styles.</p></div>
@@ -73,7 +84,7 @@
       <span class="play">PLAY ▸</span>
     </a>
   </div>
-  <p class="note"><b>Your progress is saved in this browser, on this device.</b> Nothing is sent to a server, so there are no accounts, and progress doesn't follow you to another device or browser. Clearing this site's data starts you over.</p>
+  <p class="note"><b>Your progress is saved in this browser, on this device.</b> There are no accounts, and progress doesn't follow you to another device or browser; clearing this site's data starts you over. The only thing sent to the server is a Daily run you win: your name, folder and button presses, so the board can replay it and check your time.</p>
 </main>
 <footer>
   A fan-made, non-commercial project, not affiliated with or endorsed by Capcom. Mega Man Battle Network is a trademark of Capcom; it is named only to describe the game rules recreated here. All code, art and music are original. The Open World mech was made with Tripo AI.

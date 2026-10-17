@@ -714,3 +714,101 @@ reference/`, kept local): the closest matches and the design practice.
 - **Browser runs:** the forge driven by mouse, keyboard (typing a name full of game keys, arrow navigation)
   and touch on desktop and phone portrait and landscape; forge + equip, unlock, share then import, a bad
   code, test on dummies; close-ups of all 32 shapes. No page errors.
+
+### GridWars Daily
+The owner: "a game that just navi battles and everyday we generate a new boss each with its own theme... unique
+and fun and high res and let users upload their own characters", then "boss battles, new boss every day with a
+leader board inspired by Mega Man Battle Network 3... the important thing is making viral shareable loops...
+a web browser game". They also asked to keep the grid game as Classic, and to leave out AI generation of
+bosses until this version proves itself.
+
+**What was built (`/daily`):**
+- **A day's boss** comes from its day number (`src/daily/recipe.js`), by the player's own calendar date. It
+  draws an element (it never repeats two days running), an arena and palette, and a name and title. The tier
+  follows the week (V1 Mon-Tue, V2 Wed-Thu, V3 Fri-Sat, Ω Sun). It also draws HP, a mover, 3-5 moves and a body.
+- **Mixed bosses** (`composite.js`): each of the eight Gauntlet bosses now exports a `KIT`:
+  - its mover;
+  - each attack, with its weight, the level that has it and when it can be used;
+  - its damage stats.
+
+  Their own AIs share those pieces, unchanged in behaviour (every earlier test passes as it was). A recipe's
+  moves run with their family's numbers at the tier. `power` scales the damage, and `tune` overrides single
+  numbers.
+- **Runs are data** (`src/daily/replay.js`). A run is the pad on every frame (run-length coded, base64url)
+  plus the Custom Screen taps by frame, stamped with an engine fingerprint. Taps only apply while the Custom
+  Screen is open, so a doctored run can't refill chips mid-fight.
+- **The board** (`tools/daily-api.mjs`): the server replays every run it's sent and keeps only wins. It ranks
+  by fight time, Busting Level, HP left and first arrival, keeping one place per player per day. Storage is
+  JSONL plus a file per run, on a volume. There are also rate limits, a name filter, and link-preview tags
+  injected into `/daily` for the day's boss or a shared run.
+- **The view** (`src/daily/view/`): three.js with toon shading, a shared rim light, OutlineEffect ink lines and
+  bloom. The panels are textures drawn in code; the bosses are procedural rigs in eight builds with
+  pose-blended animations. The player's .glb is re-shaded toon, in profile, through the grid game's
+  ModelActor. Every spell gets an effect from its shape, with signature looks for the bosses' attacks.
+- **The page**: lobby (boss card, name, navi, folder, board, week and streak, countdown), HTML HUD and Custom
+  Screen (the grid game's chip art), touch controls, results with SHARE, RESULT CARD, CHALLENGE LINK and
+  REPLAY LINK.
+
+**Balance** (autopilot, 28 days x 3 seeds; "late" means every input 15 frames behind, a stand-in for a person):
+
+| | V1 | V2 | V3 | Ω |
+|---|---|---|---|---|
+| First draft (Gauntlet numbers, HP 600-2100): win, sharp | 100% | 92% | 29% | 0% |
+| First draft: win, late | 88% | 29% | 0% | 0% |
+| Shipped (HP 600-1200, power 1/0.8/0.7/0.6, navi HP 400-1400): win, sharp | 100% | 100% | 100% | 92% |
+| Shipped: win, late | 88% | 58% | 58% | 17% |
+| Shipped: average fight, sharp | 52 s | 66 s | 66 s | 97 s |
+
+**Gotchas:**
+1. **Symptom:** V3 fights ran past 4 minutes. **Cause:** braziers healed the boss faster than a bot that
+   ignores them could hurt it, and Dark Aura doubled every damage race. **Fix:** a Daily boss lights one
+   brazier that heals 10 every 150 frames, and Dark Aura appears only from V3.
+2. **Symptom:** a fight that could never end. The boss sat at 60 HP behind a Dark Aura of 60 with the
+   folder spent, and the charged buster does 40. **Fix:** Daily auras are 40, and a test checks that every
+   day's charge shot breaks its aura.
+3. **Symptom:** the server said a winning run "does not win". **Cause:** the dev server had loaded the older
+   recipe rules, so it replayed a different fight. **Fix:** runs carry the engine fingerprint, and a
+   mismatch gets "the game was updated: reload" (409) instead of a wrong verdict.
+4. **Symptom:** the bot's runs failed to replay. **Cause:** the autopilot moves the Custom Screen cursor by
+   assignment, which isn't an input. **Fix:** in bot mode its OK is recorded as a tap and its keys never reach
+   the Custom Screen.
+5. **Symptom:** the boss-move banner sat at the left. **Cause:** its class `move` was also the lobby's move
+   rows (a grid). **Fix:** renamed `callout`.
+6. **Symptom:** on phones the FIGHT button couldn't be tapped. **Cause:** a fixed bar inside a card with
+   `backdrop-filter` is fixed to the card, not the screen. **Fix:** the bar is a direct child of the lobby.
+7. **Symptom:** bosses flashed white for seconds in headless runs. **Cause:** hit flashes counted rendered
+   frames. **Fix:** they last 0.1 s of time.
+
+#### Oracles
+- `tests/daily.test.js` (15 tests):
+  - day numbers by calendar;
+  - determinism and variety: 60 distinct days, no element twice running for a year, every element and mover
+    within two months;
+  - the weekly tiers;
+  - every recipe for a year is playable;
+  - each of the first 60 bosses fights a passive player for 3000 frames: it hurts, uses 2+ moves and keeps
+    to its area;
+  - every move of every family plays inside a mixed boss at every tier it exists;
+  - a riposte, and a flinch cancelling a flamethrower;
+  - fights are deterministic;
+  - the autopilot balance band;
+  - pets stay pets;
+  - recorded fights replay exactly;
+  - forged runs are ignored, and another version is refused;
+  - Playback steps;
+  - no fight can stall behind an aura.
+- `tests/daily_api.test.js` (6 tests):
+  - runs are replayed and ranked (times come from the replay, never the client);
+  - one place per player;
+  - losses, other days' runs, closed days, bad names, old versions and junk are refused;
+  - a stale page is asked to reload;
+  - the board survives a restart;
+  - names, including innocent words with short bad ones inside.
+- **Browser runs** (Playwright, software WebGL, on both servers):
+  - lobby, Custom Screen taps, fight, results;
+  - a bot fight submitted, verified and ranked #1;
+  - the `?vs=` challenge lobby and pace bar;
+  - the `?r=` replay, which ends at the same frame and time as the original run;
+  - a phone viewport (lobby, Custom Screen, touch controls);
+  - link-preview tags for the day and for a shared run;
+  - the boss gallery of all eight builds.

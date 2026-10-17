@@ -152,6 +152,7 @@ export class ModelActor {
     this.template = template;
     this.height = template.height;
     this.turn = 0;
+    this.facingYaw = FACING_YAW; // GridWars Daily stands navis nearer profile
     // root (feet) > face (facing and twists) > tilt (leans, about the hips) > turn (the look's turn) > model
     this.root = new THREE.Group();
     this.face = new THREE.Group();
@@ -364,7 +365,7 @@ export class ModelActor {
     if (charge > 0 && !glow) glow = [charge >= 2 ? '#ff6ae0' : '#4ab0ff', 0.18 + 0.12 * Math.sin(t / 2)];
     if (info.flash) glow = ['#ffffff', 0.85];
 
-    this.face.rotation.y = f * FACING_YAW + twist * f;
+    this.face.rotation.y = f * this.facingYaw + twist * f;
     this.face.position.set(dx * f, dy, 0);
     this.tilt.rotation.set(lean, 0, 0);
     this.tilt.scale.set(1, squash, 1);

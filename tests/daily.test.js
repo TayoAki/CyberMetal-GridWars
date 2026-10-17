@@ -7,6 +7,8 @@ import { dailyRecipe, dayNumber, dayDate, playerFor, LAUNCH } from '../src/daily
 import { dailyBattle, suggestedFolder, FOLDERS } from '../src/daily/fight.js';
 import { autopilot } from '../src/game/autopilot.js';
 import { makeBattle, toFight } from './helpers.js';
+import { Playback, replay, padMask, maskPad, applyOp, REPLAY_VERSION } from '../src/daily/replay.js';
+import { recordFight } from './daily_helpers.js';
 
 // GridWars Daily: a new boss every day, drawn from the day's number and put together from the eight
 // bosses' moves (src/daily/recipe.js, src/engine/enemies/bosses/composite.js).
@@ -187,5 +189,53 @@ test('ally checks: blue bodies other than the boss are its pets, on its team', (
     const b = passive(r, 21);
     for (let f = 0; f < 2500; f++) b.step({});
     for (const x of b.entities) if (x.team === TEAM.BLUE && x.type !== r.type) assert.equal(x.kind, 'object', `day ${d}: ${x.type}`);
+  }
+});
+
+// ---------------------------------------------------------------- recording and replay
+
+
+test('a recorded fight replays exactly: same frames, HP, time and Busting Level', () => {
+  for (const d of [3, 5, 9]) {
+    const { r, run, live } = recordFight(d);
+    assert.ok(live.done, `day ${d} finished`);
+    const again = replay(dailyBattle(r, { folder: run.folder ?? undefined }), JSON.parse(JSON.stringify(run)));
+    assert.deepEqual(again, live, `day ${d}`);
+    assert.ok(run.pads.length < 6000, `compact: ${run.pads.length} chars for ${run.frames} frames`);
+  }
+});
+
+test('a replay can\'t cheat: picks outside the Custom Screen do nothing, and another version is refused', () => {
+  const { r, run, live } = recordFight(4);
+  // Confirming mid-fight would refill the chips: it is ignored.
+  const forged = { ...run, ops: [...run.ops, [run.frames - 200, 'c'], [run.frames - 150, 's', 0]] };
+  assert.deepEqual(replay(dailyBattle(r), forged), live);
+  assert.throws(() => replay(dailyBattle(r), { ...run, v: REPLAY_VERSION + 1 }), /another version/);
+  // The same inputs against another day's boss don't win the same way.
+  const other = replay(dailyBattle(dailyRecipe(5)), run);
+  assert.notDeepEqual(other, live);
+  // Pads round-trip.
+  for (const m of [0, 1, 0b1010010, 1023]) assert.equal(padMask(maskPad(m)), m);
+  const b = dailyBattle(r);
+  assert.equal(applyOp(b, 'c'), false, 'nothing to confirm before the Custom Screen opens');
+});
+
+test('Playback steps one frame at a time, for watching a run', () => {
+  const { r, run, live } = recordFight(3);
+  const b = dailyBattle(r);
+  const p = new Playback(b, run);
+  let n = 0;
+  while (!p.over) {
+    p.step();
+    n++;
+  }
+  assert.equal(n, Math.min(run.frames, live.frames));
+});
+
+test('a Daily fight can\'t stall: once the folder is spent, a full charge shot still breaks any Dark Aura', () => {
+  for (let d = 1; d <= 365; d++) {
+    const r = dailyRecipe(d);
+    if (!r.moves.includes('zeroday.aura')) continue;
+    assert.ok(playerFor(r.tier).attack * 10 >= r.tune.zeroday.aura, `day ${d}: charge ${playerFor(r.tier).attack * 10} vs aura ${r.tune.zeroday.aura}`);
   }
 });

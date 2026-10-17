@@ -1,9 +1,11 @@
 // Minimal static file server for development: node tools/serve.mjs [port]
-// Serves the repo root so ES modules load without a build step.
+// Serves the repo root so ES modules load without a build step, and GridWars Daily's leaderboard API
+// (tools/daily-api.mjs, data in .data-dev/).
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { dailyApi } from './daily-api.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const port = Number(process.argv[2] ?? process.env.PORT ?? 8123);
@@ -18,9 +20,12 @@ const TYPES = {
   '.wav': 'audio/wav',
 };
 
+const api = await dailyApi({ dir: process.env.DATA_DIR ?? resolve(root, '.data-dev') });
+
 createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://localhost');
+    if (await api.handle(req, res, url)) return;
     let path = normalize(join(root, decodeURIComponent(url.pathname)));
     if (!path.startsWith(root)) {
       res.writeHead(403).end();

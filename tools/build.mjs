@@ -6,6 +6,8 @@
 //                                  picked (tools/serve-dist.mjs serves it)
 //   dist/world.html                the open-world prototype (world/index.html + src/world/main.js), with
 //                                  three.js bundled and the player model inlined
+//   dist/daily.html                GridWars Daily (daily/index.html + src/daily/main.js), stamped with the
+//                                  engine fingerprint the server checks runs against (tools/engine-hash.mjs)
 // Each also gets an Artifact variant (dist/artifact.html, dist/world-artifact.html): the hosting page
 // supplies <html>/<head>/<body>, so it holds only the title, the style and the body content. The grid's
 // Artifact carries the MECH model inline, as it has no assets/ beside it.
@@ -13,6 +15,7 @@ import { build } from 'esbuild';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { engineHash } from './engine-hash.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dist = resolve(root, 'dist');
@@ -38,6 +41,7 @@ export async function ${name}() {
 });
 const inlineModel = inlineMech(/src[\\/]world[\\/]assets\.js$/, 'loadMechaBuffer');
 const inlineGridMech = inlineMech(/src[\\/]render3d[\\/]mechAsset\.js$/, 'mechBytes');
+const inlineDailyMech = inlineMech(/src[\\/]daily[\\/]assets\.js$/, 'mechBytes');
 
 async function page({ entry, html, scriptTag, out, artifactOut, format = 'iife', target = 'es2020', plugins = [], artifactPlugins = null, define = {} }) {
   const bundle = async (extra) => {
@@ -93,4 +97,14 @@ await page({
   format: 'esm', // top-level await in the boot code
   target: 'es2022',
   plugins: [inlineModel],
+});
+await page({
+  entry: 'src/daily/main.js',
+  html: 'daily/index.html',
+  scriptTag: '<script type="module" src="../src/daily/main.js"></script>',
+  out: 'daily.html',
+  artifactOut: 'daily-artifact.html',
+  target: 'es2022',
+  artifactPlugins: [inlineDailyMech],
+  define: { 'import.meta.url': 'document.baseURI', __ENGINE__: JSON.stringify(await engineHash(root)) },
 });

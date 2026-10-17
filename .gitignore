@@ -17,3 +17,5 @@ dist/
 shots/
 test-results/
 *.log
+.data/
+.data-dev/

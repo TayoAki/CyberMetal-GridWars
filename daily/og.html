@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Daily link preview</title>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600&family=Russo+One&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; background: #070a1a; }
+  canvas { position: fixed; inset: 0; width: 1200px; height: 630px; }
+  .t { position: fixed; left: 56px; top: 150px; font: 400 92px/0.95 'Russo One', sans-serif; color: #fff; letter-spacing: 0.04em; text-shadow: 0 0 30px rgba(106, 232, 255, 0.6), 0 6px 0 rgba(0, 0, 0, 0.5); }
+  .t b { color: #ff3d63; font-weight: 400; } .t span { color: #6ae8ff; }
+  .s { position: fixed; left: 60px; top: 360px; font: 600 34px 'Chakra Petch', sans-serif; color: #dfe8ff; text-shadow: 0 2px 8px #000; }
+  .s em { font-style: normal; color: #ffd84a; }
+  .shade { position: fixed; inset: 0; background: linear-gradient(90deg, rgba(7, 10, 26, 0.9), rgba(7, 10, 26, 0.5) 45%, transparent 70%); }
+</style>
+<script type="importmap">{"imports":{"three":"../node_modules/three/build/three.module.js","three/addons/":"../node_modules/three/examples/jsm/"}}</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="shade"></div>
+<div class="t"><b>GRID</b>WARS<br><span>DAILY</span></div>
+<div class="s">A new boss every day.<br><em>Delete it fast. Top the board.</em></div>
+<!-- Development only: renders the link-preview image for an element (?element=fire) into assets/og/. -->
+<script type="module">
+import * as THREE from 'three';
+import { Stage } from '../src/daily/view/stage.js';
+import { BattleView } from '../src/daily/view/battleView.js';
+import { dailyRecipe } from '../src/daily/recipe.js';
+const el = new URLSearchParams(location.search).get('element') ?? 'elec';
+let day = 1;
+while (dailyRecipe(day).element !== el) day++;
+const r = dailyRecipe(day);
+const stage = new Stage(document.getElementById('c'), { quality: 'high' });
+const view = new BattleView(stage, r);
+const f = view.bossFocus();
+stage.view = { elevation: 0.2, azimuth: -0.55, distance: view.boss.height * 2.6, extra: 0, target: f };
+let t = 0;
+function loop() {
+  t += 1 / 60;
+  view.frame(t, 1 / 60);
+  stage.frameIn(870, 330);
+  stage.render(t);
+  requestAnimationFrame(loop);
+}
+loop();
+document.fonts.ready.then(() => (window.__ready = true));
+</script>
+</body>
+</html>
