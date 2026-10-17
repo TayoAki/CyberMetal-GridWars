@@ -1,5 +1,5 @@
 import { CHIPS } from '../engine/chips/library.js';
-import { PROGRAMS } from './save.js';
+import { PROGRAMS, rewardPrograms } from './save.js';
 import { BOSS_CHIPS } from './data/areas.js';
 
 // Battle rewards, BN-style: the better the rank, the better the drop. Ranks 7+ earn a chip from the
@@ -34,9 +34,11 @@ export function bossReward(save, enc, version, result) {
     // Every first boss clear also raises max HP by 80 (four HP Memories), keeping pace with BN3, where
     // the navi has roughly 500-900 HP by the late game.
     const chip = parse(enc.reward.chip);
-    const extra = enc.reward.stat ? { stat: enc.reward.stat } : enc.reward.program ? { program: enc.reward.program } : {};
-    const label = `${CHIPS[chip.key]?.name ?? chip.key} ${chip.code}, HP +80` + (extra.stat && extra.stat !== 'hp' ? `, ${STAT_LABEL[extra.stat]}` : extra.program ? `, ${PROGRAMS[extra.program]?.name}` : '');
-    return { type: 'chip', ...chip, ...extra, hpUp: extra.stat === 'hp' ? 5 : 4, label: extra.stat === 'hp' ? label.replace('HP +80', 'HP +100') : label };
+    const { stat } = enc.reward;
+    const programs = rewardPrograms(enc.reward);
+    const hpUp = stat === 'hp' ? 5 : 4;
+    const label = [`${CHIPS[chip.key]?.name ?? chip.key} ${chip.code}`, `HP +${20 * hpUp}`, stat && stat !== 'hp' ? STAT_LABEL[stat] : null, ...programs.map((k) => PROGRAMS[k]?.name)].filter(Boolean).join(', ');
+    return { type: 'chip', ...chip, ...(stat ? { stat } : {}), ...(programs.length ? { program: programs } : {}), hpUp, label };
   }
   const id = chips[Math.min(chips.length - 1, Math.max(0, version - 1))];
   if (id && r >= 8) return { type: 'chip', ...parse(id) };
@@ -50,6 +52,6 @@ export function applyReward(save, rw) {
   if (rw.hpUp) d.stats.hpMem += rw.hpUp;
   else if (rw.stat === 'hp') d.stats.hpMem++;
   if (rw.stat && rw.stat !== 'hp' && d.stats[rw.stat] !== undefined) d.stats[rw.stat] = Math.min(5, d.stats[rw.stat] + 1);
-  if (rw.program && !d.programs.owned.includes(rw.program)) d.programs.owned.push(rw.program);
+  for (const k of rewardPrograms(rw)) if (!d.programs.owned.includes(k)) d.programs.owned.push(k);
   save.persist();
 }

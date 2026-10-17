@@ -276,6 +276,68 @@ its tests). The game around it made fusions close to impossible:
   chips, blinking next pick, Ready), the "Cannonade" banner and `cannonade1` queued; then the hold, undo
   and set states, the help pages and the folder menu. No page errors.
 
+### The final boss, and AirShoes
+The owner: "the area 8 boss seems impossible to beat", then "is there an AirShoes program so we can walk on
+empty tiles". Measured with the autopilot as an area-8 player (660 HP, the balance sweep's stats), ZeroDay
+V1 cost a perfect dodger 68% of its HP. Every other boss cost 0-39%. Starting at half HP, the bot won 20%.
+Five causes:
+1. **The Earth Splitter dug its own trap.** Its waves cracked every panel they crossed, and cracking an
+   already-cracked panel breaks it. The dodge is a step into a row the first pulse has crossed, so once
+   the floor was cracked, the first pulse turned those panels into holes and the second pulse could not
+   be dodged.
+2. **The floor wore away.** Each Earth Splitter cracked all 9 of the player's panels, so every later step
+   left a hole. The bot had no legal step 22-28% of the time, and the Null Barrage hit it there.
+3. **No time to react.** When ZeroDay landed at the front of its area, the first wave reached the player
+   8 frames after it appeared.
+4. **HP:** the boss was fought on whatever HP the three virus battles left, and a loss reset the area.
+5. **AirShoes could not be had.** The program existed ("stand on holes"), but no boss or shop gave it;
+   the AirShoes chip was only an S-rank rare in area 7.
+
+**Fixes:**
+- **Earth Splitter** follows Ironclad's Quake Stomp rule: its waves crack normal panels but leave cracked
+  ones alone, so they never dig holes. At V1 the waves don't crack at all; V2 and up crack the floor.
+- **A row tell:** the rows the first pulse takes light up (ZeroDay's warning, drawn bold) for 20 frames at
+  V1, then 16, 14 and 12 at V2, V3 and Ω.
+- **Gauntlet:** each boss is fought at full HP, and losing to a boss (or retreating) sends you back to the
+  boss, not the start of the area. A virus battle lost still resets the area.
+- **AirShoes:** Ironclad now gives SuperArmor and AirShoes. A boss reward can list several programs, and a
+  save that already beat a boss gets any program it gives on load. The results screen fits a three-line
+  reward.
+
+| ZeroDay V1, perfect-dodging bot, 660 max HP | Before | After |
+|---|---|---|
+| Damage taken from full HP | 449 | 239 |
+| Wins from half HP | 20% | 83% |
+| Balance sweep (6 seeds): win, time, damage | 92%, 112 s, 472 | 100%, 81 s, 285 |
+
+#### Gotchas
+1. **Symptom:** after the hole fix, FloatShoes looked worse (half HP: 90% wins, then 60%). **Cause:**
+   shockwaves stop at holes, so the holes had been shielding the bot from waves. Not a bug, and BN works
+   the same way. FloatShoes still cut barrage damage from 109 to 14.
+2. **Symptom:** the perfect bot still takes about 4 wave hits a fight. **Cause:** its own pathing. When it
+   escapes, it steps onto the panel the first wave is still crossing, where a person would wait a beat.
+   The bot is the measuring tool, so it was left as is; read its ZeroDay numbers as an overstatement.
+3. **Symptom:** a reaction-delay bot (actions 250 ms late) as a stand-in for a person scored Tidecaller and
+   Pyreclaw at 0%, bosses the owner had beaten. **Fix:** it is not a usable human proxy; compare before and
+   after on the perfect bot instead.
+4. **Symptom:** the first row tell was nearly invisible. **Cause:** it reused the Void Collapse warning,
+   which blinks slowly over 80 frames. **Fix:** a bold variant (`quick`) that never blinks off.
+
+#### Oracles
+- `tests/bosses_b.test.js`:
+  - V1's Earth Splitter marks its rows first, runs along every row and leaves the floor whole;
+  - V2's never digs holes, even on cracked floor. With the old crack restored, this test fails.
+- `tests/gauntlet.test.js` (4 tests):
+  - full HP at the boss and the checkpoint, while a lost virus battle still resets the area;
+  - every program can be earned;
+  - old saves get AirShoes;
+  - AirShoes let the player stand on holes.
+- **Browser run** on the built file with a save parked at ZeroDay on 57 HP and no AirShoes:
+  - AirShoes appeared on load, and the fight started at 660/660;
+  - the row tell showed on screen;
+  - a loss returned to the boss with "Deleted! Try the boss again.";
+  - PROGRAMS listed AirShoes.
+
 ## 6. Open-world prototype
 
 The owner moved the direction off the grid: "a fighting game that's open world like Palworld", using a

@@ -144,9 +144,12 @@ the server stores nothing.
 ## What's in it
 
 **Modes**
-- **Gauntlet:** eight areas. Each has three designed virus battles, then a boss duel. HP carries between
-  an area's battles; losing resets the area. Each boss's first defeat gives its Navi chip, a stat or
-  program, and +80 max HP.
+- **Gauntlet:** eight areas. Each has three designed virus battles, then a boss duel.
+  - HP carries between an area's three virus battles, and losing one resets the area.
+  - Each boss is fought at full HP. A boss is a checkpoint: losing to it sends you back to the boss, not
+    to the start of the area.
+  - Each boss's first defeat gives its Navi chip, a stat or program (Ironclad gives SuperArmor and
+    AirShoes), and +80 max HP.
 - **Free Battle:** replay any battle you've reached, rematch bosses at V2, V3 and Ω, or roll a random
   mixed battle.
 - **Folder:** edit your 30-chip folder from everything you've won. BN-style limits apply.
@@ -157,7 +160,8 @@ the server stores nothing.
   edited. Three are open from the start; the rest unlock as you reach later Gauntlet areas.
 - **Chip Shop:** spend the Bits that battles drop on chips from the areas you've reached, or on HP Memory.
 - **Programs:** equip passive parts (SuperArmor, UnderShirt, FloatShoes, AirShoes, Custom+1/+2) within a
-  memory budget, a light take on BN3's Navi Customizer.
+  memory budget, a light take on BN3's Navi Customizer. AirShoes let you stand on holes; FloatShoes stop
+  cracked panels breaking under you.
 - **Style Change:** beating bosses unlocks styles, and you can wear one type and one element at a time.
   - Types: Guts (double buster, no flinch), Custom (+1 chip on the Custom Screen), Shield (Back+B
     reflects) and Team (+2 Mega chips).

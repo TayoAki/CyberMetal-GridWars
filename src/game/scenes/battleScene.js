@@ -97,12 +97,12 @@ export class BattleScene {
       if (rw.type === 'chip') {
         const def = chipDef(rw.key);
         drawChipArt(ctx, def, 154, y + 60, this.resultT);
-        const lines = wrapText(rw.label ?? `${def.name} ${rw.code}`, 88);
-        lines.slice(0, 2).forEach((l, i) => drawText(ctx, l, 62, y + 86 + i * 9, UI.gold));
+        const lines = wrapText(rw.label ?? `${def.name} ${rw.code}`, 92);
+        lines.slice(0, 3).forEach((l, i) => drawText(ctx, l, 62, y + 86 + i * 9, UI.gold));
       } else if (rw.type === 'bits') {
         drawText(ctx, `${rw.amount} BITS`, 62, y + 86, UI.gold);
       }
     }
-    if (this.resultT > 40 && this.resultT % 40 < 28) drawText(ctx, 'A: continue', 120, y + 108, UI.sub, { align: 'center' });
+    if (this.resultT > 40 && this.resultT % 40 < 28) drawText(ctx, 'A: continue', 120, y + 112, UI.sub, { align: 'center' });
   }
 }

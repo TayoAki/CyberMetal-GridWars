@@ -226,15 +226,17 @@ test("ZeroDay's Dark Aura shrugs off a 40-damage Cannon and breaks to a 100+ hit
   assert.ok(until(b, () => z.auraPower > 0, z.stats.auraCd + 900) >= 0, 'aura re-raised');
 });
 
-test('ZeroDay V1 has no aura; Earth Splitter cracks the player area along every row', () => {
+test('ZeroDay V1 has no aura; Earth Splitter marks the rows it takes first, runs along every row and leaves the floor whole', () => {
   const b = duel('zeroday', 1, { seed: 9 });
   toFight(b);
   const z = enemy(b, 'zeroday');
   z.data.forceMove = 'split';
   let waves = 0;
+  let toldFirst = false;
   const rows = new Set();
   for (let f = 0; f < 700 && z.data.moves.split === undefined; f++) b.step({});
-  for (let f = 0; f < 160; f++) {
+  for (let f = 0; f < 180; f++) {
+    if (!waves && b.spells.some((s) => s.type === 'voidwarn')) toldFirst = true;
     for (const s of b.spells) if (s.type === 'voidwave' && !s.data.seen) {
       s.data.seen = true;
       waves++;
@@ -243,13 +245,31 @@ test('ZeroDay V1 has no aura; Earth Splitter cracks the player area along every 
     b.step({});
   }
   assert.equal(z.auraPower, 0);
+  assert.ok(toldFirst, 'the first pulse\'s rows light up before any wave');
   assert.equal(waves, 3);
   assert.equal(rows.size, 3);
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 6; c++) assert.equal(b.field.typeAt(c, r), PANEL.NORMAL, `V1 leaves the floor whole (${c},${r})`);
+  assert.ok(b.player.hp < b.player.maxHp);
+});
+
+test('ZeroDay V2 Earth Splitter cracks the player area but never digs holes, even on cracked floor', () => {
+  const b = duel('zeroday', 2, { seed: 9 });
+  toFight(b);
+  const z = enemy(b, 'zeroday');
+  // Two Earth Splitters in a row: the second runs over floor the first already cracked.
+  for (const n of [1, 2]) {
+    z.data.forceMove = 'split';
+    for (let f = 0; f < 1500 && (z.data.moves.split ?? 0) < n; f++) b.step({});
+    for (let f = 0; f < 200; f++) b.step({});
+  }
+  assert.equal(z.data.moves.split, 2);
   let cracked = 0;
-  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) if ([PANEL.CRACKED, PANEL.BROKEN].includes(b.field.typeAt(c, r))) cracked++;
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
+    assert.notEqual(b.field.typeAt(c, r), PANEL.BROKEN, `no hole at (${c},${r})`);
+    if (b.field.typeAt(c, r) === PANEL.CRACKED) cracked++;
+  }
   assert.ok(cracked >= 6, `cracked ${cracked}`);
   for (let r = 0; r < 3; r++) for (let c = 3; c < 6; c++) assert.equal(b.field.typeAt(c, r), PANEL.NORMAL, 'its own area is spared');
-  assert.ok(b.player.hp < b.player.maxHp);
 });
 
 test("ZeroDay V3's Void Collapse scours the player's row for big damage", () => {

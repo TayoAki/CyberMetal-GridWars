@@ -9,7 +9,8 @@ import { PROGRAMS } from '../save.js';
 import { CHIPS } from '../../engine/chips/library.js';
 
 // The campaign map: one area at a time — three virus battles, then the boss. HP carries between the
-// battles of an area and refills after the boss. Losing sends you back to the area's start.
+// three virus battles; the boss is fought at full HP. Losing a virus battle sends you back to the area's
+// start, losing to the boss only back to the boss.
 
 export class GauntletScene {
   constructor(game, note = null) {
@@ -73,7 +74,7 @@ export class GauntletScene {
     const area = this.area;
     const isBoss = p.step >= 3;
     const enc = isBoss ? { ...area.boss, theme: area.theme, boss: true } : { ...area.battles[p.step], theme: area.theme };
-    const hp = p.hp ?? save.maxHp;
+    const hp = isBoss ? save.maxHp : p.hp ?? save.maxHp;
     let pending = null;
     game.setScene(
       new BattleScene(game, {
@@ -113,7 +114,12 @@ export class GauntletScene {
             d.progress.step++;
             d.progress.hp = Math.max(1, scene.battle.player.hp);
             save.persist();
-            game.setScene(new GauntletScene(game));
+            game.setScene(new GauntletScene(game, d.progress.step >= 3 ? { text: 'HP restored for the boss', color: UI.good } : null));
+          } else if (isBoss) {
+            // The boss is a checkpoint: try it again (at full HP) without replaying the area.
+            d.progress.hp = null;
+            save.persist();
+            game.setScene(new GauntletScene(game, { text: result.retreated ? 'Retreated. The boss waits.' : 'Deleted! Try the boss again.', color: UI.bad }));
           } else {
             d.progress.step = 0;
             d.progress.hp = null;
@@ -138,7 +144,7 @@ export class GauntletScene {
     // Header.
     drawText(ctx, `AREA ${AREAS.indexOf(area) + 1}/${AREAS.length}`, 6, 5, UI.dim);
     drawText(ctx, area.name, 120, 4, '#ffffff', { align: 'center', scale: 1, outline: '#0a1a4a' });
-    const hp = p.hp ?? save.maxHp;
+    const hp = p.step >= 3 ? save.maxHp : p.hp ?? save.maxHp;
     drawText(ctx, `HP ${hp}/${save.maxHp}`, 234, 5, hp < save.maxHp * 0.35 ? UI.bad : UI.good, { align: 'right' });
     wrapText(area.blurb, 220).slice(0, 2).forEach((l, i) => drawText(ctx, l, 120, 17 + i * 9, UI.sub, { align: 'center' }));
 
@@ -166,7 +172,7 @@ export class GauntletScene {
     drawWindow(ctx, 64, 92, 112, 54);
     drawMenu(ctx, this.items(), this.cursor, 80, 99, { width: 92, t });
 
-    if (this.note && t < 150) drawText(ctx, this.note.text, 120, 70, this.note.color, { align: 'center', outline: '#05070f' });
+    if (this.note && t < 150) drawText(ctx, this.note.text, 120, 37, this.note.color, { align: 'center', outline: '#05070f' });
     const parts = save.data.programs.equipped.filter((k) => PROGRAMS[k]).length;
     drawHints(ctx, `ATK ${save.data.stats.attack}  RAPID ${save.data.stats.rapid}  CHARGE ${save.data.stats.charge}${parts ? `  +${parts} part${parts > 1 ? 's' : ''}` : ''}`);
   }

@@ -65,7 +65,7 @@ export const AREAS = [
       { id: 'found2', name: 'Watchtower', enemies: [E('watcher', 1, 5, 1), E('bombeetle', 2, 4, 0)], drops: ['gutpunch:B', 'gutpunch:C', 'hicannon:K', 'barr100:E', 'trplbomb:E'], rare: ['gutimpct:G'] },
       { id: 'found3', name: 'Assembly Line', field: ['......', '.c..c.', '......'], enemies: [E('scurrier', 2, 4, 1), E('mortarshell', 1, 5, 0), E('dartfin', 2, 5, 2)], drops: ['dashatk:C', 'ratton2:A', 'gutpunch:D', 'atk10:*'], rare: ['bigwave:E'] },
     ],
-    boss: { id: 'boss_iron', name: 'IRONCLAD', enemies: [E('ironclad', 1, 4, 1)], reward: { chip: 'ironclad1:I', program: 'superArmor' } },
+    boss: { id: 'boss_iron', name: 'IRONCLAD', enemies: [E('ironclad', 1, 4, 1)], reward: { chip: 'ironclad1:I', program: ['superArmor', 'airShoes'] } },
   },
   {
     id: 'overgrowth',

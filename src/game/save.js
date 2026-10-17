@@ -1,6 +1,7 @@
 import { CHIPS } from '../engine/chips/library.js';
 import { PLAYER_BASE_HP } from '../engine/constants.js';
 import { STARTER_FOLDER, PRESET_BY_KEY, expandFolder } from './data/folders.js';
+import { AREAS } from './data/areas.js';
 
 // Player progress, persisted to localStorage (wrapped: storage can be missing or throw, and the game
 // still runs from memory). The player's own folder is 30 chips drawn from the owned library; a
@@ -19,6 +20,11 @@ export const PROGRAMS = {
   custom1: { name: 'Custom+1', cost: 2, desc: 'See 1 more chip on the Custom Screen.' },
   custom2: { name: 'Custom+2', cost: 3, desc: 'See 2 more chips on the Custom Screen.' },
 };
+
+// A boss reward's programs: `program` is one key or a list of them.
+export function rewardPrograms(reward) {
+  return [reward?.program ?? []].flat();
+}
 
 export const FOLDER_RULES = { size: 30, maxStandard: 5, maxMegaEach: 1, maxMega: 5, maxGiga: 1 };
 
@@ -85,6 +91,11 @@ export class SaveData {
     if (d.folder.length !== FOLDER_RULES.size) d.folder = expand(STARTER_FOLDER);
     if (d.activeFolder !== 'mine' && !this.folderUnlocked(d.activeFolder)) d.activeFolder = 'mine';
     this.upgradeStarter();
+    // Programs from bosses already beaten, so a reward added later (Ironclad's AirShoes) reaches old saves.
+    for (const a of AREAS) {
+      if (!d.progress.bosses[a.boss.enemies[0].type]) continue;
+      for (const k of rewardPrograms(a.boss.reward)) if (PROGRAMS[k] && !d.programs.owned.includes(k)) d.programs.owned.push(k);
+    }
   }
 
   // Saves made before the starter folder held a Cannon C began with a SideGun S in its place, and so could

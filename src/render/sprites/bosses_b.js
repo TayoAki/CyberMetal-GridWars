@@ -1628,12 +1628,20 @@ function drawVoidWarn(ctx, s, x, y, t) {
   const L = lv(s.data);
   const core = ZERO_CORE[L - 1];
   const p = s.data?.progress ?? 0;
+  // A quick tell (the rows Earth Splitter takes first) lasts a third of a second: drawn bold, never off.
+  const quick = !!s.data?.quick;
   const blink = p > 0.75 ? 2 : p > 0.45 ? 4 : 7;
-  const on = Math.floor(t / blink) % 2 === 0;
+  const on = quick || Math.floor(t / blink) % 2 === 0;
   const d = s.data?.dir ?? -1;
   for (const [c, r] of cellsOf(s)) {
     const q = cellPoint(s, x, y, c, r);
-    withAlpha(ctx, (on ? 0.32 : 0.16) + 0.2 * p, () => rect(ctx, q.x - 19, q.y - 15, 38, 18, '#3a0830'));
+    withAlpha(ctx, quick ? 0.5 + 0.2 * p : (on ? 0.32 : 0.16) + 0.2 * p, () => rect(ctx, q.x - 19, q.y - 15, 38, 18, '#3a0830'));
+    if (quick && Math.floor(t / 3) % 2 === 0) {
+      withAlpha(ctx, 0.85, () => {
+        rect(ctx, q.x - 19, q.y - 15, 38, 1, core);
+        rect(ctx, q.x - 19, q.y + 2, 38, 1, core);
+      });
+    }
     if (on) {
       // chevrons point the way the beam will travel
       const cx = q.x + ((t * 2) % 20) * d - 10 * d;

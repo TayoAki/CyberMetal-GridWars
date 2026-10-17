@@ -1,14 +1,15 @@
 import { wait, drop, shockwave, zone, teleport } from '../../combat.js';
-import { COLS } from '../../constants.js';
+import { COLS, PANEL } from '../../constants.js';
 import { noteMove, pickMove, settle, windup, markCounter, pose, foeArea, otherSpots, backCol, warning } from './b_util.js';
 
 // ZeroDay: the final boss. A hooded, hovering figure of dark chrome with a cracked mask and a void core
 // burning in its chest. It warps around its area between attacks:
 //   Null Barrage   - its claw charges (counterable), then a stream of void bolts rains on the player's
 //                    area; each bolt marks its panel briefly first, and every third one hunts the player.
-//   Earth Splitter - crouches (counterable), leaps out of sight and smashes down: cracking shockwaves run
-//                    along every row in two pulses (the player's row first, or the other two first), so
-//                    the player must weave between them.
+//   Earth Splitter - crouches (counterable), leaps out of sight and smashes down: the rows the first pulse
+//                    will take light up, then shockwaves run along every row in two pulses (the player's
+//                    row first, or the other two first), so the player must weave between them. V2+ waves
+//                    crack the player's floor (never into holes).
 //   Dark Aura      - (V2+) raised as the fight opens: any hit under 100 damage is shrugged off until a
 //                    single big hit breaks it; it is raised again after a cooldown (the raise is an
 //                    opening: counterable, and nothing protects it until the aura is up).
@@ -73,9 +74,12 @@ function splitWave(b, e, hit, row, speed) {
     col: e.col,
     speed,
     type: 'voidwave',
-    // Crack the floor it crosses in the player's area (its own panels are spared).
+    // Crack the floor it crosses in the player's area (its own panels are spared). Cracked panels are left
+    // alone: the dodge is a step into a row the first pulse has crossed, so a wave that dug holes there
+    // would make the second pulse unavoidable.
     onPanel: (sp, c, r) => {
-      if (b.field.ownerAt(c, r) !== e.team) b.field.crack(c, r, !!b.entityAt(c, r));
+      if (!e.stats.crack || b.field.ownerAt(c, r) === e.team) return;
+      if (b.field.typeAt(c, r) !== PANEL.CRACKED) b.field.crack(c, r, !!b.entityAt(c, r));
     },
   });
   sw.data.level = e.level;
@@ -112,6 +116,13 @@ function* earthSplitter(b, e, s) {
   const pr = b.player.row;
   const others = [0, 1, 2].filter((r) => r !== pr);
   const [first, second] = b.rng.chance(0.5) ? [[pr], others] : [others, [pr]];
+  // The first pulse's rows light up before it starts: when ZeroDay lands at the front of its area, the
+  // waves alone reach the player too quickly to react to.
+  const tell = warning(b, e, 'voidwarn', first.flatMap((r) => [...Array(COLS).keys()].filter((c) => c !== e.col).map((c) => [c, r])), s.waveTell, { dir: e.facing, quick: true });
+  e.data.warn = tell;
+  yield* wait(s.waveTell);
+  tell.kill();
+  e.data.warn = null;
   for (const r of first) splitWave(b, e, hit, r, s.waveSpeed);
   yield* wait(s.pulseGap);
   b.emit('sfx', { name: 'shockwave' });
@@ -199,12 +210,13 @@ export const ZERODAY = {
   flying: true, // hovers: holes and floor effects don't touch it
   levels: [
     // shot: each Null Barrage bolt (shots of them, shotGap apart, each marked shotDelay frames first);
-    // wave: Earth Splitter shockwaves (waveSpeed frames per panel, pulseGap between the pulses);
+    // wave: Earth Splitter shockwaves (waveSpeed frames per panel, pulseGap between the pulses, the first
+    // pulse's rows marked waveTell frames ahead; crack: whether they crack the floor);
     // aura: Dark Aura power (V2+), re-raised auraCd frames after it breaks; beam: Void Collapse (V3+).
-    { attack: 20, shot: 20, shots: 10, shotGap: 8, shotDelay: 20, barrageWind: 20, wave: 50, waveSpeed: 8, splitWind: 26, airTime: 18, pulseGap: 30, aura: 0, auraWind: 0, auraCd: 0, beam: 0, beamWind: 0, relock: false, relockWind: 0, beamFrames: 0, beamCd: 0, beamRecover: 0, idle: [55, 90], warpEvery: 40, recover: 40 },
-    { attack: 40, shot: 40, shots: 14, shotGap: 7, shotDelay: 18, barrageWind: 18, wave: 80, waveSpeed: 7, splitWind: 24, airTime: 16, pulseGap: 28, aura: 100, auraWind: 24, auraCd: 900, beam: 0, beamWind: 0, relock: false, relockWind: 0, beamFrames: 0, beamCd: 0, beamRecover: 0, idle: [45, 80], warpEvery: 34, recover: 34 },
-    { attack: 60, shot: 60, shots: 18, shotGap: 6, shotDelay: 16, barrageWind: 16, wave: 120, waveSpeed: 6, splitWind: 22, airTime: 14, pulseGap: 26, aura: 100, auraWind: 22, auraCd: 780, beam: 150, beamWind: 80, relock: false, relockWind: 0, beamFrames: 30, beamCd: 480, beamRecover: 60, idle: [40, 70], warpEvery: 30, recover: 30 },
-    { attack: 100, shot: 100, shots: 22, shotGap: 5, shotDelay: 14, barrageWind: 14, wave: 160, waveSpeed: 5, splitWind: 20, airTime: 12, pulseGap: 24, aura: 100, auraWind: 20, auraCd: 660, beam: 200, beamWind: 72, relock: true, relockWind: 30, beamFrames: 30, beamCd: 420, beamRecover: 50, idle: [30, 60], warpEvery: 26, recover: 26 },
+    { attack: 20, crack: false, shot: 20, shots: 10, shotGap: 8, shotDelay: 20, barrageWind: 20, wave: 50, waveSpeed: 8, waveTell: 20, splitWind: 26, airTime: 18, pulseGap: 30, aura: 0, auraWind: 0, auraCd: 0, beam: 0, beamWind: 0, relock: false, relockWind: 0, beamFrames: 0, beamCd: 0, beamRecover: 0, idle: [55, 90], warpEvery: 40, recover: 40 },
+    { attack: 40, crack: true, shot: 40, shots: 14, shotGap: 7, shotDelay: 18, barrageWind: 18, wave: 80, waveSpeed: 7, waveTell: 16, splitWind: 24, airTime: 16, pulseGap: 28, aura: 100, auraWind: 24, auraCd: 900, beam: 0, beamWind: 0, relock: false, relockWind: 0, beamFrames: 0, beamCd: 0, beamRecover: 0, idle: [45, 80], warpEvery: 34, recover: 34 },
+    { attack: 60, crack: true, shot: 60, shots: 18, shotGap: 6, shotDelay: 16, barrageWind: 16, wave: 120, waveSpeed: 6, waveTell: 14, splitWind: 22, airTime: 14, pulseGap: 26, aura: 100, auraWind: 22, auraCd: 780, beam: 150, beamWind: 80, relock: false, relockWind: 0, beamFrames: 30, beamCd: 480, beamRecover: 60, idle: [40, 70], warpEvery: 30, recover: 30 },
+    { attack: 100, crack: true, shot: 100, shots: 22, shotGap: 5, shotDelay: 14, barrageWind: 14, wave: 160, waveSpeed: 5, waveTell: 12, splitWind: 20, airTime: 12, pulseGap: 24, aura: 100, auraWind: 20, auraCd: 660, beam: 200, beamWind: 72, relock: true, relockWind: 30, beamFrames: 30, beamCd: 420, beamRecover: 50, idle: [30, 60], warpEvery: 26, recover: 26 },
   ],
   onSpawn(b, e) {
     e.data.moves = {};
