@@ -67,6 +67,7 @@ export class Battle {
     });
     this.entities.push(this.player);
     this.player.data.style = this.style;
+    this.player.data.look = p.look ?? null; // cosmetic: only the renderer reads it
     this.controller = new PlayerController(this, this.player, {
       attack: p.attack ?? 1,
       rapid: p.rapid ?? 1,

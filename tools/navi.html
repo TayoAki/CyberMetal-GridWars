@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Navi parts sheet</title>
+<style>
+  body { margin: 0; background: #05070f; }
+  canvas { image-rendering: pixelated; width: calc(var(--w) * var(--s) * 1px); height: calc(var(--h) * var(--s) * 1px); display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script type="module">
+// Every look option on AXIOM: one row per part slot and colour channel, then a mixed look in the action poses.
+// Serve the repo (node tools/serve.mjs) and open /tools/navi.html; ?look=head.body.arms.legs.back.armor.suit.lights
+// sets the showcase look, ?rows=HEAD,BODY picks rows and ?scale=6 zooms.
+import { PLAYER_SPRITE } from '../src/render/sprites/core_player.js';
+import { LOOK_SLOTS, LOOK_COLORS, COLOR_CHANNELS, DEFAULT_LOOK } from '../src/render/sprites/core_player_looks.js';
+import { drawText } from '../src/render/font.js';
+import { rect } from '../src/render/pixel.js';
+
+const CELL_W = 46;
+const CELL_H = 62;
+const rows = [
+  ...LOOK_SLOTS.map((s) => ({ label: s.name, cells: s.options.map((o) => ({ name: o.name, look: { ...DEFAULT_LOOK, [s.key]: o.id } })) })),
+  ...COLOR_CHANNELS.map((c) => ({ label: c.name, cells: LOOK_COLORS[c.key].map((o) => ({ name: o.name, look: { ...DEFAULT_LOOK, [c.key]: o.id } })) })),
+];
+const params = new URLSearchParams(location.search);
+const q = params.get('look');
+const only = params.get('rows')?.split(',');
+const show = q ? Object.fromEntries(['head', 'body', 'arms', 'legs', 'back', 'armor', 'suit', 'lights'].map((k, i) => [k, q.split('.')[i] ?? DEFAULT_LOOK[k]])) : { head: 'oni', body: 'reactor', arms: 'titan', legs: 'jet', back: 'wings', armor: 'crimson', suit: 'black', lights: 'yellow' };
+const poses = [['idle', 0], ['shoot', 4], ['cannon', 10], ['sword', 7], ['punch', 6], ['guard', 0], ['dash', 4], ['hammer', 13], ['hurt', 0], ['recover', 4]];
+rows.push({ label: 'POSES', cells: poses.map(([anim, animT]) => ({ name: anim, look: show, anim, animT })) });
+if (only) rows.splice(0, rows.length, ...rows.filter((r) => only.includes(r.label)));
+
+const cols = Math.max(...rows.map((r) => r.cells.length));
+const W = 34 + cols * CELL_W;
+const H = rows.length * CELL_H + 4;
+const cv = document.getElementById('c');
+cv.width = W;
+cv.height = H;
+cv.style.setProperty('--w', W);
+cv.style.setProperty('--h', H);
+cv.style.setProperty('--s', Number(params.get('scale') ?? 3));
+const ctx = cv.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+rect(ctx, 0, 0, W, H, '#0c1638');
+rows.forEach((r, ri) => {
+  const y0 = ri * CELL_H;
+  rect(ctx, 0, y0, W, 1, '#24346a');
+  drawText(ctx, r.label, 2, y0 + 4, '#ffe04a');
+  r.cells.forEach((cell, ci) => {
+    const x0 = 34 + ci * CELL_W;
+    rect(ctx, x0, y0 + 2, CELL_W - 2, CELL_H - 4, ci % 2 ? '#101c46' : '#0e1840');
+    const e = { anim: cell.anim ?? 'idle', animT: cell.animT ?? 0, facing: 1, data: { look: cell.look } };
+    PLAYER_SPRITE.draw(ctx, e, x0 + 22, y0 + 50, 0);
+    drawText(ctx, cell.name, x0 + 22, y0 + 52, '#a8b8e8', { align: 'center', mini: false });
+  });
+});
+window.__ready = true;
+</script>
+</body>
+</html>

@@ -159,6 +159,11 @@ the server stores nothing.
   (Cannonade, LifeSaber, MegaRat, PrismSabr...). They're loaned: you don't need the chips, and they can't be
   edited. Three are open from the start; the rest unlock as you reach later Gauntlet areas.
 - **Chip Shop:** spend the Bits that battles drop on chips from the areas you've reached, or on HP Memory.
+- **Customize:** AXIOM's look, with a live preview that runs through battle poses.
+  - Parts: a head, body, arms, legs and back piece, 25 options in all (heads Axiom, Vanguard, Oni, Nova,
+    Ronin and Specter; back pieces include wings, a thruster and a scarf).
+  - Colours: armour, suit and lights, 27 presets, each shaded into a full pixel-art ramp.
+  - Cosmetic only. The look shows in every battle and in the title demo.
 - **Programs:** equip passive parts (SuperArmor, UnderShirt, FloatShoes, AirShoes, Custom+1/+2) within a
   memory budget, a light take on BN3's Navi Customizer. AirShoes let you stand on holes; FloatShoes stop
   cracked panels breaking under you.
@@ -262,7 +267,7 @@ src/game/     scenes (title, Gauntlet, Free Battle, folder, programs, options), 
 src/world/    open-world prototype: simulation, terrain, enemies, three.js view, avatar, HUD, input
 world/        the open-world page; assets/ holds the player model
 tests/        node:test benches (rules, data, enemy packs)
-tools/        dev server, single-file build, screenshot/smoke scripts, sprite sheet page
+tools/        dev server, single-file build, screenshot/smoke scripts, sprite sheet and navi parts pages
 docs/         CONTRACT.md (engine/content contract), field note
 ```
 

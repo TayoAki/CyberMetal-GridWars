@@ -5,9 +5,11 @@
 // coordinates: X is the column relative to the feet centre (the centre line sits between X = -1 and X = 0),
 // Y is the row relative to the floor (Y = -1 is the bottom row of the boots). Every pose is composed once
 // into a single 64x56 sprite (cached) and drawn with the 'feet' anchor, so flipping mirrors cleanly.
+// The player's look (core_player_looks.js) swaps parts and colours; poses are composed once per look.
 
 import { sprite, recolor } from '../pixel.js';
 import { OUTLINE, compose, solidPalette, withAlpha, sparkle, flameTongue, ellipseRing, rect, px, line, disc, ring, poly } from './core_util.js';
+import { HEADS, TORSOS, SHOULDERS, BACKS, LEG_STYLES, ARM_PLATING, platedRows, normalizeLook, partsKey, lookColors, DEFAULT_LOOK } from './core_player_looks.js';
 
 const CW = 64;
 const CH = 56;
@@ -453,31 +455,48 @@ const F_ARM_HURT = part(['...mnq.', '..mnq..', '.mnq...', 'ABC....', '324....', 
 // ---------------------------------------------------------------- poses
 
 const L = (p, dx = 0, dy = 0, contour = true) => (p ? { rows: p.rows, x: p.X + dx + OX, y: p.Y + dy + OY, contour } : null);
+// A part with its rows re-plated (leg and arm styles).
+const plate = (p, style) => (p && style ? { rows: platedRows(p.rows, style), X: p.X, Y: p.Y } : p);
 
-// Assemble a pose. ux/uy shift the upper body (torso, head, arms) relative to the legs.
-function build(key, o) {
-  const ux = o.ux ?? 0;
-  const uy = o.uy ?? 0;
-  const legs = o.legs ?? LEGS_STAND;
-  const layers = [
-    o.back === null ? null : L(o.back ?? B_ARM, ux, uy),
-    L(B_PAULDRON, ux, uy),
-    L(TORSO, ux, uy),
-    L(legs, 0, 0, false),
-    L(o.head ?? HEAD, ux + (o.hx ?? 0), uy + (o.hy ?? 0)),
-    ...(o.behindFront ?? []).map(([p, dx, dy]) => L(p, ux + dx, uy + dy)),
-    L(o.front ?? F_ARM, ux + (o.fx ?? 0), uy + (o.fy ?? 0)),
-    o.pauldron === false ? null : L(F_PAULDRON, ux, uy),
-    ...(o.over ?? []).map(([p, dx, dy]) => L(p, ux + dx, uy + dy)),
-  ];
-  return compose(`axiom:${key}`, CW, CH, layers);
+// The hurt face of a head: its visor lights go dark, with a pale glint where they were brightest.
+const hurtHeads = new Map();
+function hurtHead(id) {
+  let h = hurtHeads.get(id);
+  if (!h) {
+    const { part: p, visor: [a, b] } = HEADS[id];
+    const rows = p.rows.map((r, i) => (i < a || i > b ? r : r.replace(/[12]/g, 'w').replace(/[345]/g, 'v')));
+    hurtHeads.set(id, (h = { rows, X: p.X, Y: p.Y }));
+  }
+  return h;
 }
 
-// Pose table: name -> () => { rows, hand: [X, Y] (where the charge aura sits), ux, uy }.
-const P = {};
+// Assemble a pose for a look. ux/uy shift the upper body (torso, head, arms) relative to the legs.
+function build(look, lookKey, key, o) {
+  const ux = o.ux ?? 0;
+  const uy = o.uy ?? 0;
+  const head = look.head === 'axiom' ? (o.hurt ? HEAD_HURT : HEAD) : o.hurt ? hurtHead(look.head) : HEADS[look.head].part;
+  const shoulders = SHOULDERS[look.arms];
+  const arm = shoulders?.plated ? ARM_PLATING : null;
+  const legStyle = LEG_STYLES[look.legs] ?? null;
+  const layers = [
+    L(BACKS[look.back], ux, uy),
+    o.back === null ? null : L(plate(o.back ?? B_ARM, arm), ux, uy),
+    L(shoulders?.back ?? B_PAULDRON, ux, uy),
+    L(TORSOS[look.body] ?? TORSO, ux, uy),
+    L(plate(o.legs ?? LEGS_STAND, legStyle), 0, 0, false),
+    L(head, ux + (o.hx ?? 0), uy + (o.hy ?? 0)),
+    ...(o.behindFront ?? []).map(([p, dx, dy]) => L(plate(p, arm), ux + dx, uy + dy)),
+    L(plate(o.front ?? F_ARM, arm), ux + (o.fx ?? 0), uy + (o.fy ?? 0)),
+    o.pauldron === false ? null : L(shoulders?.front ?? F_PAULDRON, ux, uy),
+    ...(o.over ?? []).map(([p, dx, dy]) => L(p, ux + dx, uy + dy)),
+  ];
+  return compose(`axiom:${lookKey}:${key}`, CW, CH, layers);
+}
+
+// Pose recipes: name -> the parts and offsets of the pose, and `hand` (where the charge aura sits).
+const POSES = [];
 function def(name, o, hand) {
-  const rows = build(name, o);
-  P[name] = { rows, hand: hand ?? [6 + (o.ux ?? 0), -15 + (o.uy ?? 0)], ux: o.ux ?? 0, uy: o.uy ?? 0 };
+  POSES.push({ name, o, hand: hand ?? [6 + (o.ux ?? 0), -15 + (o.uy ?? 0)] });
 }
 
 def('idle0', {});
@@ -504,45 +523,82 @@ def('point', { front: F_RAISED }, [10, -34]);
 def('recover', { front: F_ARM_OUT, back: B_ARM_OUT }, [9, -22]);
 def('dash', { front: F_TUCK, back: B_ARM_BACK, legs: LEGS_LUNGE, ux: 2, uy: 1, hy: 1 }, [10, -20]);
 def('burner', { front: F_ARM_OUT, back: B_ARM_OUT, legs: LEGS_CROUCH, uy: 3 }, [9, -19]);
-def('hurt', { front: F_ARM_HURT, back: B_ARM_UP, legs: LEGS_HURT, head: HEAD_HURT, ux: -2, hx: -1, hy: 1 }, [3, -19]);
+def('hurt', { front: F_ARM_HURT, back: B_ARM_UP, legs: LEGS_HURT, hurt: true, ux: -2, hx: -1, hy: 1 }, [3, -19]);
 
-function poseFor(e, t) {
+// The pose table for a look: name -> { rows, hand, ux, uy }, composed on first use and kept.
+const poseTables = new Map();
+export function lookPoses(look) {
+  const l = normalizeLook(look);
+  const k = partsKey(l);
+  let P = poseTables.get(k);
+  if (!P) {
+    P = {};
+    for (const { name, o, hand } of POSES) P[name] = { rows: build(l, k, name, o), hand, ux: o.ux ?? 0, uy: o.uy ?? 0 };
+    poseTables.set(k, P);
+  }
+  return P;
+}
+
+const P = lookPoses(DEFAULT_LOOK);
+
+// Poses and palettes per look object (a new look is a new object, never an edited one).
+const resolvedLooks = new WeakMap();
+function resolveLook(look) {
+  if (!look) return null;
+  let r = resolvedLooks.get(look);
+  if (!r) {
+    const colors = lookColors(look);
+    r = { P: lookPoses(look), base: Object.keys(colors).length ? recolor(PAL, colors) : PAL, byElement: {} };
+    resolvedLooks.set(look, r);
+  }
+  return r;
+}
+
+// The palette for a look and a Style Change: the look's colours, then the element's lights on top.
+export function playerPalette(look, style) {
+  const r = resolveLook(look);
+  if (!r) return stylePalette(style);
+  const el = style?.element ?? 'null';
+  return (r.byElement[el] ??= STYLE_ACCENTS[el] ? recolor(r.base, STYLE_ACCENTS[el]) : r.base);
+}
+
+function poseFor(e, t, poses) {
   const k = e.animT ?? 0;
   switch (e.anim) {
     case 'shoot':
-      return k < 3 ? P.shootR : P.shoot;
+      return k < 3 ? poses.shootR : poses.shoot;
     case 'charged':
-      return k < 7 ? P.charged : P.charged2;
+      return k < 7 ? poses.charged : poses.charged2;
     case 'cannon':
-      return k >= 8 && k < 16 ? P.cannonR : P.cannon;
+      return k >= 8 && k < 16 ? poses.cannonR : poses.cannon;
     case 'sword':
-      return k < 5 ? P.sword0 : k < 10 ? P.sword1 : P.sword2;
+      return k < 5 ? poses.sword0 : k < 10 ? poses.sword1 : poses.sword2;
     case 'throw':
-      return k < 9 ? P.throw0 : P.throw1;
+      return k < 9 ? poses.throw0 : poses.throw1;
     case 'punch':
-      return k % 7 < 3 && k < 4 ? P.punch0 : P.punch1;
+      return k % 7 < 3 && k < 4 ? poses.punch0 : poses.punch1;
     case 'hammer':
-      return k < 12 ? P.hammer0 : P.hammer1;
+      return k < 12 ? poses.hammer0 : poses.hammer1;
     case 'swing':
-      return k < 10 ? P.swing0 : P.swing1;
+      return k < 10 ? poses.swing0 : poses.swing1;
     case 'guard':
-      return P.guard;
+      return poses.guard;
     case 'point':
-      return P.point;
+      return poses.point;
     case 'recover':
-      return P.recover;
+      return poses.recover;
     case 'dash':
-      return P.dash;
+      return poses.dash;
     case 'burner':
-      return P.burner;
+      return poses.burner;
     case 'hurt':
     case 'delete':
-      return P.hurt;
+      return poses.hurt;
     case 'move':
     case 'summon':
     case 'idle':
     default:
-      return Math.floor(t / 14) % 4 >= 2 ? P.idle1 : P.idle0;
+      return Math.floor(t / 14) % 4 >= 2 ? poses.idle1 : poses.idle0;
   }
 }
 
@@ -620,8 +676,9 @@ export const PLAYER_SPRITE = {
     const flip = facing < 0;
     const anim = e.anim ?? 'idle';
     const k = e.animT ?? 0;
-    const pose = poseFor(e, t);
-    const pal = stylePalette(e.data?.style);
+    const poses = resolveLook(e.data?.look)?.P ?? P;
+    const pose = poseFor(e, t, poses);
+    const pal = playerPalette(e.data?.look, e.data?.style);
     const sx = sxOf(x, facing);
     const charge = anim === 'hurt' || anim === 'delete' ? 0 : (e.data?.charge ?? 0);
     const [hX, hY] = pose.hand;
@@ -680,7 +737,7 @@ export const PLAYER_SPRITE = {
         if (k >= 5 && k < 10) drawSwordSmear(ctx, sx, y, k - 5);
         break;
       case 'punch':
-        if (pose === P.punch1 && (t >> 1) % 2) px(ctx, sx(14), y - 23, '#fff27a');
+        if (pose === poses.punch1 && (t >> 1) % 2) px(ctx, sx(14), y - 23, '#fff27a');
         break;
       case 'hammer':
         if (k >= 12 && k < 18) drawImpact(ctx, sx(23), y - 2, k - 12);

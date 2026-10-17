@@ -338,6 +338,52 @@ Five causes:
   - a loss returned to the boss with "Deleted! Try the boss again.";
   - PROGRAMS listed AirShoes.
 
+### Customize: AXIOM's look
+The owner wanted the grid game "more modular so users can customize the parts to their character: arms,
+legs, torso", plus a simple colour system, and asked whether to use Tripo models. **Route:** no Tripo here.
+The grid game is 240x160 pixel art, where the navi is about 30x46 px. A 3D model would clash with the style,
+and Tripo exports one fused mesh, not swappable parts (its rig also needed repair for the open world). AXIOM
+was already composed from layered pixel parts (back arm, shoulders, torso, legs, head, front arm), so the
+parts became swappable.
+
+- **Parts** (`src/render/sprites/core_player_looks.js`):
+  - Heads, torsos, shoulder pairs and back pieces are new pixel art in the same body coordinates, so all
+    25 poses still fit.
+  - Leg and arm styles re-plate the existing limb art, swapping which pixels are armour, suit or lights,
+    so the sword, cannon, hammer and other arm poses keep working with every look.
+  - The hurt face is derived: each head lists its visor rows, which go dark with a pale glint.
+- **Colours:** three channels (armour, suit, lights) over the palette keys the art already uses. A preset
+  is one base colour; the ramp copies AXIOM's own lightness steps, less saturated in the highlights and
+  hue-shifted in the shadows. Style Change still tints the lights by element in battle.
+- **CUSTOMIZE** (title menu): left/right changes each row, plus RANDOM, RESET and DONE. A 2x preview on a
+  battle panel cycles idle, shoot, sword, cannon, guard and punch. Every change is saved at once
+  (`look` in the save; bad or missing values fall back to AXIOM's).
+- **Battles:** the look rides on the player as `data.look` for the renderer only. The title demo shows it
+  too.
+
+#### Gotchas
+1. **Symptom:** the first thruster and scarf were nearly invisible, and the wings read as a blade.
+   **Cause:** the back shoulder covers everything from X = -11 rightward. **Fix:** back pieces reach
+   past it, and the wings root at the shoulder.
+2. **Symptom:** Nova and Oni sat on a stalk. **Cause:** an extra neck row. **Fix:** every head ends at
+   Y = -27 with one jaw row, like AXIOM's.
+3. **Rule:** a look is replaced, never edited in place. The renderer keeps composed poses and palettes per
+   look object (a WeakMap), so an edited object would keep showing the old look. The save and the screen
+   freeze looks.
+
+#### Oracles
+- **Pixel check:** the default look composes all 25 poses pixel-identically to the previous AXIOM.
+- `tests/looks.test.js` (6 tests):
+  - every option has art and changes the idle pose; every pose stays inside the 64x56 sprite;
+  - every colour preset ramps light to dark and changes the palette;
+  - every head's hurt face darkens;
+  - looks save, reload and repair;
+  - a battle plays out identically with any look.
+- `tools/navi.html` (served by `tools/serve.mjs`): every part and colour on AXIOM, plus a mixed look in
+  ten poses. `?rows=` and `?scale=` zoom in.
+- **Browser run** on the built file with real keys: change every row, the save persists, DONE returns to
+  the title (whose demo shows the look), and a Free Battle draws it on the field. No page errors.
+
 ## 6. Open-world prototype
 
 The owner moved the direction off the grid: "a fighting game that's open world like Palworld", using a

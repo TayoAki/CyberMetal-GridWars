@@ -2,6 +2,7 @@ import { CHIPS } from '../engine/chips/library.js';
 import { PLAYER_BASE_HP } from '../engine/constants.js';
 import { STARTER_FOLDER, PRESET_BY_KEY, expandFolder } from './data/folders.js';
 import { AREAS } from './data/areas.js';
+import { DEFAULT_LOOK, normalizeLook } from '../render/sprites/core_player_looks.js';
 
 // Player progress, persisted to localStorage (wrapped: storage can be missing or throw, and the game
 // still runs from memory). The player's own folder is 30 chips drawn from the owned library; a
@@ -60,6 +61,7 @@ function freshData() {
     stats: { hpMem: 0, attack: 1, rapid: 1, charge: 1 },
     programs: { owned: ['underShirt'], equipped: [] },
     style: { type: null, element: 'null' },
+    look: DEFAULT_LOOK, // AXIOM's parts and colours (CUSTOMIZE); replaced whole, never edited in place
     progress: { area: 0, step: 0, hp: null, cleared: {}, bosses: {}, encounters: {}, finished: false },
     bits: 0,
     options: { sfx: 0.8, music: 0.55, numbers: true, reduceFlash: false },
@@ -90,6 +92,7 @@ export class SaveData {
     for (const id of Object.keys(d.library)) if (!CHIPS[id.split(':')[0]]) delete d.library[id];
     if (d.folder.length !== FOLDER_RULES.size) d.folder = expand(STARTER_FOLDER);
     if (d.activeFolder !== 'mine' && !this.folderUnlocked(d.activeFolder)) d.activeFolder = 'mine';
+    d.look = Object.freeze(normalizeLook(d.look));
     this.upgradeStarter();
     // Programs from bosses already beaten, so a reward added later (Ironclad's AirShoes) reaches old saves.
     for (const a of AREAS) {
@@ -183,6 +186,7 @@ export class SaveData {
       charge: d.stats.charge,
       programs,
       style: { ...(d.style ?? { type: null, element: 'null' }) },
+      look: d.look,
       folder: this.folderChips(),
     };
   }

@@ -13,6 +13,7 @@ import { OptionsScene } from './optionsScene.js';
 import { CreditsScene } from './creditsScene.js';
 import { HelpScene } from './helpScene.js';
 import { ShopScene } from './shopScene.js';
+import { CustomizeScene } from './customizeScene.js';
 
 // Title + main menu, with an attract-mode demo battle playing behind the logo.
 
@@ -41,7 +42,7 @@ export class TitleScene {
 
   newDemo() {
     const enc = DEMOS[this.demoIndex++ % DEMOS.length];
-    this.demo = new Battle({ seed: 1000 + this.demoIndex, encounter: enc, player: { folder: DEMO_FOLDER, maxHp: 300 }, shuffle: true });
+    this.demo = new Battle({ seed: 1000 + this.demoIndex, encounter: enc, player: { folder: DEMO_FOLDER, maxHp: 300, look: this.game.save.data.look }, shuffle: true });
     this.demoView = new BattleView(this.demo, { theme: 'title', hud: false });
     this.bot = autopilot();
   }
@@ -54,6 +55,7 @@ export class TitleScene {
       { label: 'FREE BATTLE', go: () => new FreeBattleScene(this.game) },
       { label: 'FOLDER', go: () => new FolderSelectScene(this.game) },
       { label: 'PROGRAMS', go: () => new ProgramsScene(this.game) },
+      { label: 'CUSTOMIZE', go: () => new CustomizeScene(this.game) },
       { label: 'CHIP SHOP', go: () => new ShopScene(this.game) },
       { label: 'HOW TO PLAY', go: () => new HelpScene(this.game) },
       { label: 'OPTIONS', go: () => new OptionsScene(this.game) },
@@ -105,7 +107,7 @@ export class TitleScene {
       return;
     }
     drawWindow(ctx, 60, 60, 120, 88);
-    drawMenu(ctx, this.items(), this.cursor, 76, 65, { width: 100, t: this.t, lineHeight: 10 });
+    drawMenu(ctx, this.items(), this.cursor, 76, 65, { width: 100, t: this.t, lineHeight: 9 });
     const d = this.game.save.data;
     const area = AREAS[Math.min(d.progress.area, AREAS.length - 1)];
     drawHints(ctx, d.progress.finished ? 'All areas cleared!  Try Free Battle Ω' : `Next: ${area.name}`);
